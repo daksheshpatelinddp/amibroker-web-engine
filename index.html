@@ -269,7 +269,6 @@ Sell = Cross(EMA(Close, 20), Close);</textarea>
         timeScale: { borderColor: '#485c7b' }
       });
 
-      // Updated for Lightweight Charts v5
       candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, { upColor: '#26a69a', downColor: '#ef5350' });
       indicatorSeries = chart.addSeries(LightweightCharts.LineSeries, { color: '#2196f3', lineWidth: 2 });
       volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
@@ -288,7 +287,6 @@ Sell = Cross(EMA(Close, 20), Close);</textarea>
         timeScale: { borderColor: '#485c7b' }
       });
 
-      // Updated for Lightweight Charts v5
       equitySeries = backtestChart.addSeries(LightweightCharts.LineSeries, { color: '#00e676', lineWidth: 2 });
     }
 
@@ -331,13 +329,35 @@ Sell = Cross(EMA(Close, 20), Close);</textarea>
           registeredFiles.push(`'${fileName}'`);
         }
 
+        // Schema inspection query to prevent Binder Errors
+        const parquetSource = `read_parquet([${registeredFiles.join(',')}])`;
+        const schemaRes = await conn.query(`DESCRIBE SELECT * FROM ${parquetSource};`);
+        const columns = schemaRes.toArray().map(r => r.toJSON().column_name.toLowerCase());
+
+        const hasDelivVol = columns.includes('delivery_volume');
+        const hasDelivPct = columns.includes('delivery_pct');
+
+        const delivVolExpr = hasDelivVol 
+          ? "COALESCE(TRY_CAST(delivery_volume AS BIGINT), 0) AS delivery_volume" 
+          : "0 AS delivery_volume";
+
+        const delivPctExpr = hasDelivPct 
+          ? "COALESCE(TRY_CAST(delivery_pct AS FLOAT), 0.0) AS delivery_pct" 
+          : "0.0 AS delivery_pct";
+
         await conn.query(`
           CREATE VIEW master_data AS 
           SELECT 
-            upper(trim(symbol)) as symbol, date, open, high, low, close, volume,
-            COALESCE(try_cast(delivery_volume as BIGINT), 0) as delivery_volume,
-            COALESCE(try_cast(delivery_pct as FLOAT), 0.0) as delivery_pct
-          FROM read_parquet([${registeredFiles.join(',')}]);
+            UPPER(TRIM(symbol)) AS symbol,
+            date,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            ${delivVolExpr},
+            ${delivPctExpr}
+          FROM ${parquetSource};
         `);
 
         btnLoadSymbol.disabled = false;
