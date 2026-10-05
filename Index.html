@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AmiBroker Web — Production Mobile Engine</title>
+  <title>AmiBroker Web Engine — Mobile Debug & Production</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -23,23 +23,52 @@
 
     .card { background: #1e1e1e; border: 1px solid #333; border-radius: 6px; padding: 10px; margin-bottom: 10px; }
     label { font-weight: bold; color: #00e676; display: block; margin-bottom: 4px; font-size: 0.8rem; }
-    input, button {
+    input, button, textarea {
       width: 100%; background: #2a2a2a; color: #fff; border: 1px solid #444;
       padding: 8px; border-radius: 4px; font-size: 0.85rem; margin-bottom: 6px;
     }
+    textarea { font-family: monospace; height: 60px; resize: vertical; }
     button { background: #00e676; color: #000; font-weight: bold; border: none; cursor: pointer; }
     button:disabled { background: #444; color: #777; cursor: not-allowed; }
     #status { font-weight: bold; color: #4fc3f7; font-size: 0.8rem; }
 
-    #chartContainer { width: 100%; height: 380px; border: 1px solid #333; border-radius: 6px; background: #181818; }
+    /* In-Page Mobile Error Console Styling */
+    #mobileConsole {
+      background: #000;
+      color: #ff5252;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 8px;
+      margin-top: 8px;
+      max-height: 120px;
+      overflow-y: auto;
+      border: 1px solid #444;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    #chartContainer, #backtestChartContainer { width: 100%; height: 350px; border: 1px solid #333; border-radius: 6px; background: #181818; }
     
     .tab-content { display: none; }
     .tab-content.active { display: block; }
-    .table-wrapper { overflow-x: auto; max-height: 400px; border: 1px solid #333; }
+    .table-wrapper { overflow-x: auto; max-height: 350px; border: 1px solid #333; }
     table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 0.75rem; }
     th, td { border: 1px solid #333; padding: 6px 8px; text-align: left; white-space: nowrap; }
     th { background: #2a2a2a; color: #00e676; position: sticky; top: 0; }
     tr:nth-child(even) { background: #181818; }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .metric-card {
+      background: #252525; padding: 8px; border-radius: 4px; border: 1px solid #333; text-align: center;
+    }
+    .metric-title { font-size: 0.7rem; color: #888; }
+    .metric-value { font-size: 0.95rem; font-weight: bold; color: #00e676; margin-top: 2px; }
   </style>
   <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -50,10 +79,13 @@
   <div class="tab-bar">
     <button class="tab-btn active" onclick="switchTab('chartTab', this)">Chart View</button>
     <button class="tab-btn" onclick="switchTab('scanTab', this)">Phase 4 Scanner</button>
+    <button class="tab-btn" onclick="switchTab('backtestTab', this)">Phase 5 Backtester</button>
   </div>
 
   <div class="card">
     <div id="status">Status: Preparing Engine...</div>
+    <!-- IN-PAGE ERROR VISUALIZER BOX -->
+    <div id="mobileConsole">System Logs / Errors:</div>
   </div>
 
   <!-- TAB 1: CHARTING & AFL -->
@@ -65,11 +97,12 @@
         <button id="btnLoadSymbol" style="width: 120px;" disabled>Load Chart</button>
       </div>
 
-      <label for="aflInput" style="margin-top: 6px;">AFL Indicator</label>
+      <label for="aflInput" style="margin-top: 6px;">AFL Indicator Expression</label>
       <div style="display:flex; gap: 6px;">
-        <input type="text" id="aflInput" value="MA(Close, 20)">
+        <input type="text" id="aflInput" value="EMA(Close, 20)">
         <button id="btnRunAFL" style="width: 120px;" disabled>Plot AFL</button>
       </div>
+      <div style="font-size: 0.7rem; color: #888; margin-top: 2px;">Supported: MA(Close, n), EMA(Close, n), RSI(Close, n)</div>
     </div>
     <div id="chartContainer"></div>
   </div>
@@ -77,9 +110,9 @@
   <!-- TAB 2: PHASE 4 SCANNER -->
   <div id="scanTab" class="tab-content">
     <div class="card">
-      <label>Scanner Filter (AFL / SQL)</label>
+      <label>Scanner Expression (SQL / Extended AFL)</label>
       <input type="text" id="scanQuery" value="close > open AND delivery_pct > 50">
-      <button id="btnScan" disabled>Run Scan Across All Symbols</button>
+      <button id="btnScan" disabled>Run Multi-Symbol Market Scan</button>
     </div>
     <div class="card">
       <label>Matched Results</label>
@@ -91,46 +124,77 @@
       </div>
     </div>
   </div>
-  
-  //‐------------
-  
-  <div id="mobileConsole" style="background:#000; color:#ff5252; font-family:monospace; font-size:11px; padding:8px; margin-top:10px; max-height:120px; overflow-y:auto; border:1px solid #444; border-radius:4px;">
-  Console Logs:
-</div>
 
-function logToScreen(msg) {
-  const logEl = document.getElementById('mobileConsole');
-  if (logEl) {
-    logEl.innerHTML += `<div>> ${msg}</div>`;
-  }
-}
+  <!-- TAB 3: PHASE 5 MULTI-YEAR BACKTESTER -->
+  <div id="backtestTab" class="tab-content">
+    <div class="card">
+      <label>Backtest AFL Strategy</label>
+      <textarea id="backtestAfl">Buy = Cross(Close, EMA(Close, 20));
+Sell = Cross(EMA(Close, 20), Close);</textarea>
+      <div style="display:flex; gap: 6px; align-items: center;">
+        <div style="flex:1;">
+          <label for="backtestSymbol">Ticker</label>
+          <input type="text" id="backtestSymbol" value="RELIANCE" style="text-transform:uppercase;">
+        </div>
+        <div style="flex:1;">
+          <label for="initialCapital">Capital ($)</label>
+          <input type="number" id="initialCapital" value="100000">
+        </div>
+      </div>
+      <button id="btnRunBacktest" disabled>Run AFL Strategy Backtest</button>
+    </div>
 
-// Catch unhandled runtime errors
-window.onerror = function(message, source, lineno, colno, error) {
-  logToScreen(`Error: ${message} (Line ${lineno})`);
-};
+    <div class="metrics-grid">
+      <div class="metric-card"><div class="metric-title">Net Profit</div><div class="metric-value" id="mNetProfit">$0</div></div>
+      <div class="metric-card"><div class="metric-title">CAGR / Return</div><div class="metric-value" id="mCAGR">0%</div></div>
+      <div class="metric-card"><div class="metric-title">Max Drawdown</div><div class="metric-value" id="mMaxDD" style="color:#ef5350;">0%</div></div>
+      <div class="metric-card"><div class="metric-title">Win Rate</div><div class="metric-value" id="mWinRate">0%</div></div>
+      <div class="metric-card"><div class="metric-title">Total Trades</div><div class="metric-value" id="mTotalTrades">0</div></div>
+    </div>
 
-// Catch unhandled Promise rejections (e.g., failed DuckDB WASM loads / CORS fetches)
-window.addEventListener('unhandledrejection', function(event) {
-  logToScreen(`Unhandled Rejection: ${event.reason}`);
-});
-  
-  //-------------
+    <div class="card">
+      <label>Portfolio Equity Curve</label>
+      <div id="backtestChartContainer"></div>
+    </div>
+  </div>
 
   <script type="module">
+    // --- Mobile Error Console Redirect Setup ---
+    function logToScreen(msg, isError = true) {
+      const logEl = document.getElementById('mobileConsole');
+      if (logEl) {
+        const color = isError ? '#ff5252' : '#00e676';
+        logEl.innerHTML += `<div style="color:${color}">> ${msg}</div>`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    }
+
+    // Global Error Handlers for Mobile Debugging
+    window.onerror = function(message, source, lineno, colno, error) {
+      logToScreen(`Error: ${message} (Line ${lineno})`, true);
+    };
+
+    window.addEventListener('unhandledrejection', function(event) {
+      logToScreen(`Unhandled Rejection: ${event.reason?.message || event.reason}`, true);
+    });
+
     import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
 
-    const R2_URL = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev/2024.parquet';
+    const BASE_R2_URL = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
+    const AVAILABLE_YEARS = [2024];
+
     const statusEl = document.getElementById('status');
     const symbolInput = document.getElementById('symbolInput');
     const btnLoadSymbol = document.getElementById('btnLoadSymbol');
     const btnRunAFL = document.getElementById('btnRunAFL');
     const btnScan = document.getElementById('btnScan');
+    const btnRunBacktest = document.getElementById('btnRunBacktest');
     const scanTableBody = document.getElementById('scanTableBody');
 
     let db = null;
     let conn = null;
     let chart = null, candleSeries = null, volumeSeries = null, indicatorSeries = null;
+    let backtestChart = null, equitySeries = null;
     let currentData = [];
 
     window.switchTab = function(tabId, btn) {
@@ -138,6 +202,62 @@ window.addEventListener('unhandledrejection', function(event) {
       document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
       document.getElementById(tabId).classList.add('active');
       btn.classList.add('active');
+      if (tabId === 'backtestTab' && !backtestChart) initBacktestChart();
+    };
+
+    // AFL Vector Math Engine
+    const AFLEngine = {
+      MA(arr, period) {
+        const res = new Array(arr.length).fill(NaN);
+        let sum = 0;
+        for (let i = 0; i < arr.length; i++) {
+          sum += arr[i];
+          if (i >= period) sum -= arr[i - period];
+          if (i >= period - 1) res[i] = sum / period;
+        }
+        return res;
+      },
+      EMA(arr, period) {
+        const res = new Array(arr.length).fill(NaN);
+        const k = 2 / (period + 1);
+        let sum = 0;
+        for (let i = 0; i < period; i++) sum += arr[i];
+        let prevEma = sum / period;
+        res[period - 1] = prevEma;
+        for (let i = period; i < arr.length; i++) {
+          prevEma = (arr[i] * k) + (prevEma * (1 - k));
+          res[i] = prevEma;
+        }
+        return res;
+      },
+      RSI(arr, period = 14) {
+        const res = new Array(arr.length).fill(NaN);
+        let gains = 0, losses = 0;
+        for (let i = 1; i <= period; i++) {
+          const diff = arr[i] - arr[i - 1];
+          if (diff >= 0) gains += diff; else losses -= diff;
+        }
+        let avgGain = gains / period;
+        let avgLoss = losses / period;
+        res[period] = 100 - (100 / (1 + (avgGain / (avgLoss || 1))));
+        for (let i = period + 1; i < arr.length; i++) {
+          const diff = arr[i] - arr[i - 1];
+          avgGain = ((avgGain * (period - 1)) + (diff > 0 ? diff : 0)) / period;
+          avgLoss = ((avgLoss * (period - 1)) + (diff < 0 ? -diff : 0)) / period;
+          const rs = avgGain / (avgLoss || 1e-10);
+          res[i] = 100 - (100 / (1 + rs));
+        }
+        return res;
+      },
+      Cross(arr1, arr2) {
+        const res = new Array(arr1.length).fill(false);
+        for (let i = 1; i < arr1.length; i++) {
+          if (!isNaN(arr1[i]) && !isNaN(arr2[i]) && !isNaN(arr1[i - 1]) && !isNaN(arr2[i - 1])) {
+            res[i] = (arr1[i - 1] <= arr2[i - 1]) && (arr1[i] > arr2[i]);
+          }
+        }
+        return res;
+      }
     };
 
     function initChart() {
@@ -156,60 +276,82 @@ window.addEventListener('unhandledrejection', function(event) {
       });
     }
 
-    // Replace the initMobileEngine function in your index.html with this updated version:
-async function initMobileEngine() {
-  initChart();
-  statusEl.innerText = "Status: Booting DuckDB WASM Engine...";
+    function initBacktestChart() {
+      const container = document.getElementById('backtestChartContainer');
+      backtestChart = LightweightCharts.createChart(container, {
+        layout: { backgroundColor: '#181818', textColor: '#d1d4dc' },
+        grid: { vertLines: { color: '#2b2b43' }, horzLines: { color: '#2b2b43' } },
+        priceScale: { borderColor: '#485c7b' },
+        timeScale: { borderColor: '#485c7b' }
+      });
+      equitySeries = backtestChart.addLineSeries({ color: '#00e676', lineWidth: 2 });
+    }
 
-  try {
-    const bundle = await duckdb.selectBundle({
-      mvp: {
-        mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-mvp.wasm',
-        mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-mvp.worker.js',
-      },
-      eh: {
-        mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-eh.wasm',
-        mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-eh.worker.js',
+    async function initMobileEngine() {
+      initChart();
+      statusEl.innerText = "Status: Booting DuckDB WASM Engine...";
+      logToScreen("Initializing DuckDB WASM Bundle...", false);
+
+      try {
+        const bundle = await duckdb.selectBundle({
+          mvp: {
+            mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-mvp.wasm',
+            mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-mvp.worker.js',
+          },
+          eh: {
+            mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-eh.wasm',
+            mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-eh.worker.js',
+          }
+        });
+
+        // Create cross-origin compatible Web Worker blob
+        const response = await fetch(bundle.mainWorker);
+        const workerScript = await response.text();
+        const workerBlob = new Blob([workerScript], { type: 'text/javascript' });
+        const worker = new Worker(URL.createObjectURL(workerBlob));
+
+        db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
+        await db.instantiate(bundle.mainModule);
+        conn = await db.connect();
+
+        logToScreen("DuckDB WASM instantiated successfully.", false);
+        statusEl.innerText = "Status: Connecting Cloudflare R2 Storage...";
+        
+        const registeredFiles = [];
+        for (const yr of AVAILABLE_YEARS) {
+          const fileName = `data_${yr}.parquet`;
+          const fileUrl = `${BASE_R2_URL}/${yr}.parquet`;
+          logToScreen(`Registering ${fileUrl}...`, false);
+          await db.registerFileURL(fileName, fileUrl, duckdb.DuckDBDataProtocol.HTTP, false);
+          registeredFiles.push(`'${fileName}'`);
+        }
+
+        await conn.query(`
+          CREATE VIEW master_data AS 
+          SELECT 
+            upper(trim(symbol)) as symbol, date, open, high, low, close, volume,
+            COALESCE(try_cast(delivery_volume as BIGINT), 0) as delivery_volume,
+            COALESCE(try_cast(delivery_pct as FLOAT), 0.0) as delivery_pct
+          FROM read_parquet([${registeredFiles.join(',')}]);
+        `);
+
+        btnLoadSymbol.disabled = false;
+        btnRunAFL.disabled = false;
+        btnScan.disabled = false;
+        btnRunBacktest.disabled = false;
+
+        statusEl.innerText = "Status: Engine Ready! Enter any symbol to view.";
+        logToScreen("Engine initialization complete. Fetching default ticker RELIANCE...", false);
+        loadSymbolData(symbolInput.value.trim().toUpperCase());
+      } catch (e) {
+        logToScreen(`Init Failed: ${e.message}`, true);
+        statusEl.innerText = `Initialization Error: ${e.message}`;
       }
-    });
+    }
 
-    // Create web worker using blob URL for mobile HTTPS cross-origin compatibility
-    const response = await fetch(bundle.mainWorker);
-    const workerScript = await response.text();
-    const workerBlob = new Blob([workerScript], { type: 'text/javascript' });
-    const worker = new Worker(URL.createObjectURL(workerBlob));
-
-    db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(), worker);
-    await db.instantiate(bundle.mainModule);
-    conn = await db.connect();
-
-    statusEl.innerText = "Status: Connecting Cloudflare R2 Parquet Storage...";
-    await db.registerFileURL('data_2024.parquet', R2_URL, duckdb.DuckDBDataProtocol.HTTP, false);
-
-    await conn.query(`
-      CREATE VIEW master_data AS 
-      SELECT 
-        upper(trim(symbol)) as symbol, date, open, high, low, close, volume,
-        COALESCE(try_cast(delivery_volume as BIGINT), 0) as delivery_volume,
-        COALESCE(try_cast(delivery_pct as FLOAT), 0.0) as delivery_pct
-      FROM 'data_2024.parquet';
-    `);
-
-    btnLoadSymbol.disabled = false;
-    btnRunAFL.disabled = false;
-    btnScan.disabled = false;
-
-    statusEl.innerText = "Status: Engine Ready! Enter any symbol to view.";
-    loadSymbolData(symbolInput.value.trim().toUpperCase());
-  } catch (e) {
-    console.error(e);
-    statusEl.innerText = `Initialization Error: ${e.message}`;
-  }
-}
-    
     async function loadSymbolData(symbol) {
       if (!symbol) return;
-      statusEl.innerText = `Status: Fetching ticker '${symbol}'...`;
+      statusEl.innerText = `Status: Fetching '${symbol}'...`;
       
       try {
         const res = await conn.query(`
@@ -221,7 +363,8 @@ async function initMobileEngine() {
         currentData = res.toArray().map(r => r.toJSON());
 
         if (currentData.length === 0) {
-          statusEl.innerText = `Status: Symbol '${symbol}' not found in file.`;
+          statusEl.innerText = `Status: Symbol '${symbol}' not found.`;
+          logToScreen(`Symbol '${symbol}' returned 0 rows.`, true);
           return;
         }
 
@@ -230,32 +373,44 @@ async function initMobileEngine() {
 
         computeAFL();
         statusEl.innerText = `Status: Loaded ${symbol} (${currentData.length} daily bars loaded)`;
+        logToScreen(`Successfully loaded ${currentData.length} bars for ${symbol}.`, false);
       } catch (err) {
         statusEl.innerText = `Error: ${err.message}`;
+        logToScreen(`Query Error: ${err.message}`, true);
       }
     }
 
     function computeAFL() {
+      if (!currentData.length) return;
       const formula = document.getElementById('aflInput').value.trim();
+      const closes = currentData.map(d => d.close);
+      let values = [];
+
       const maMatch = formula.match(/MA\(\s*Close\s*,\s*(\d+)\s*\)/i);
+      const emaMatch = formula.match(/EMA\(\s*Close\s*,\s*(\d+)\s*\)/i);
+      const rsiMatch = formula.match(/RSI\(\s*Close\s*,\s*(\d+)\s*\)/i);
+
       if (maMatch) {
-        const period = parseInt(maMatch[1]);
-        const sma = [];
+        values = AFLEngine.MA(closes, parseInt(maMatch[1]));
+      } else if (emaMatch) {
+        values = AFLEngine.EMA(closes, parseInt(emaMatch[1]));
+      } else if (rsiMatch) {
+        values = AFLEngine.RSI(closes, parseInt(rsiMatch[1]));
+      }
+
+      if (values.length) {
+        const lineData = [];
         for (let i = 0; i < currentData.length; i++) {
-          if (i >= period - 1) {
-            let sum = 0;
-            for (let j = 0; j < period; j++) sum += currentData[i - j].close;
-            sma.push({ time: currentData[i].date, value: sum / period });
-          }
+          if (!isNaN(values[i])) lineData.push({ time: currentData[i].date, value: values[i] });
         }
-        indicatorSeries.setData(sma);
+        indicatorSeries.setData(lineData);
       }
     }
 
     async function runMarketScan() {
       const filterCond = document.getElementById('scanQuery').value.trim();
       btnScan.disabled = true;
-      statusEl.innerText = "Status: Executing scan over all tickers...";
+      statusEl.innerText = "Status: Executing scan across universe...";
 
       try {
         const startTime = performance.now();
@@ -266,6 +421,7 @@ async function initMobileEngine() {
           ORDER BY date DESC 
           LIMIT 100;
         `;
+
         const result = await conn.query(query);
         const rows = result.toArray().map(r => r.toJSON());
         const duration = ((performance.now() - startTime) / 1000).toFixed(2);
@@ -285,17 +441,93 @@ async function initMobileEngine() {
         }
 
         statusEl.innerText = `Status: Scan finished in ${duration}s!`;
+        logToScreen(`Scan returned ${rows.length} rows in ${duration}s.`, false);
       } catch (err) {
-        alert("Scan Query Error: " + err.message);
-        statusEl.innerText = "Scan Error.";
+        logToScreen(`Scan Error: ${err.message}`, true);
+        statusEl.innerText = "Scan Query Error.";
       } finally {
         btnScan.disabled = false;
+      }
+    }
+
+    async function runAFLBacktest() {
+      const symbol = document.getElementById('backtestSymbol').value.trim().toUpperCase();
+      const capital = parseFloat(document.getElementById('initialCapital').value) || 100000;
+      btnRunBacktest.disabled = true;
+      statusEl.innerText = `Status: Running backtest for ${symbol}...`;
+
+      try {
+        const res = await conn.query(`SELECT * FROM master_data WHERE symbol = '${symbol}' ORDER BY date ASC;`);
+        const data = res.toArray().map(r => r.toJSON());
+
+        if (!data.length) {
+          logToScreen(`Backtest failed: No data found for ${symbol}`, true);
+          return;
+        }
+
+        const closes = data.map(d => d.close);
+        const ema20 = AFLEngine.EMA(closes, 20);
+        const buys = AFLEngine.Cross(closes, ema20);
+        const sells = AFLEngine.Cross(ema20, closes);
+
+        let cash = capital;
+        let position = 0;
+        let trades = 0;
+        let wins = 0;
+        let entryPrice = 0;
+        let peakEquity = capital;
+        let maxDrawdown = 0;
+        const equityCurve = [];
+
+        for (let i = 0; i < data.length; i++) {
+          const price = data[i].close;
+
+          if (buys[i] && position === 0) {
+            position = cash / price;
+            cash = 0;
+            entryPrice = price;
+            trades++;
+          } else if (sells[i] && position > 0) {
+            cash = position * price;
+            if (price > entryPrice) wins++;
+            position = 0;
+          }
+
+          const currentEquity = cash + (position * price);
+          if (currentEquity > peakEquity) peakEquity = currentEquity;
+          const dd = (peakEquity - currentEquity) / peakEquity * 100;
+          if (dd > maxDrawdown) maxDrawdown = dd;
+
+          equityCurve.push({ time: data[i].date, value: currentEquity });
+        }
+
+        const finalEquity = cash + (position * data[data.length - 1].close);
+        const netProfit = finalEquity - capital;
+        const totalReturnPct = (netProfit / capital) * 100;
+        const winRatePct = trades > 0 ? (wins / trades) * 100 : 0;
+
+        document.getElementById('mNetProfit').innerText = `$${netProfit.toFixed(0)}`;
+        document.getElementById('mCAGR').innerText = `${totalReturnPct.toFixed(1)}%`;
+        document.getElementById('mMaxDD').innerText = `${maxDrawdown.toFixed(1)}%`;
+        document.getElementById('mWinRate').innerText = `${winRatePct.toFixed(1)}%`;
+        document.getElementById('mTotalTrades').innerText = trades;
+
+        if (equitySeries) equitySeries.setData(equityCurve);
+
+        statusEl.innerText = `Status: Backtest complete for ${symbol}.`;
+        logToScreen(`Backtest completed for ${symbol}. Return: ${totalReturnPct.toFixed(1)}%`, false);
+      } catch (err) {
+        logToScreen(`Backtest Error: ${err.message}`, true);
+        statusEl.innerText = "Backtest Error.";
+      } finally {
+        btnRunBacktest.disabled = false;
       }
     }
 
     btnLoadSymbol.addEventListener('click', () => loadSymbolData(symbolInput.value.trim().toUpperCase()));
     btnRunAFL.addEventListener('click', computeAFL);
     btnScan.addEventListener('click', runMarketScan);
+    btnRunBacktest.addEventListener('click', runAFLBacktest);
 
     initMobileEngine();
   </script>
