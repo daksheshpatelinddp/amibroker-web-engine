@@ -269,10 +269,13 @@ Sell = Cross(EMA(Close, 20), Close);</textarea>
         timeScale: { borderColor: '#485c7b' }
       });
 
-      candleSeries = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350' });
-      indicatorSeries = chart.addLineSeries({ color: '#2196f3', lineWidth: 2 });
-      volumeSeries = chart.addHistogramSeries({
-        color: '#ffb300', priceFormat: { type: 'volume' }, scaleMargins: { top: 0.8, bottom: 0 }
+      // Updated for Lightweight Charts v5
+      candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, { upColor: '#26a69a', downColor: '#ef5350' });
+      indicatorSeries = chart.addSeries(LightweightCharts.LineSeries, { color: '#2196f3', lineWidth: 2 });
+      volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+        color: '#ffb300',
+        priceFormat: { type: 'volume' },
+        priceScaleId: ''
       });
     }
 
@@ -284,7 +287,9 @@ Sell = Cross(EMA(Close, 20), Close);</textarea>
         priceScale: { borderColor: '#485c7b' },
         timeScale: { borderColor: '#485c7b' }
       });
-      equitySeries = backtestChart.addLineSeries({ color: '#00e676', lineWidth: 2 });
+
+      // Updated for Lightweight Charts v5
+      equitySeries = backtestChart.addSeries(LightweightCharts.LineSeries, { color: '#00e676', lineWidth: 2 });
     }
 
     async function initMobileEngine() {
