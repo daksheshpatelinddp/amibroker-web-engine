@@ -1,0 +1,50 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #d4d4d4; overflow: hidden; height: 100vh; }
+
+/* Navigation Bar */
+.top-bar { display: flex; background: #1e1e1e; border-bottom: 1px solid #333; height: 40px; align-items: center; padding: 0 12px; }
+.brand { font-weight: bold; color: #007acc; font-size: 14px; margin-right: 20px; }
+.sheet-tabs { display: flex; }
+.tab { padding: 10px 16px; background: #252526; border-right: 1px solid #333; cursor: pointer; font-size: 12px; color: #888; user-select: none; }
+.tab.active { background: #121212; color: #007acc; border-top: 2px solid #007acc; font-weight: bold; }
+
+/* View Switching */
+.workspace-view { display: none; height: calc(100vh - 40px); width: 100%; }
+.workspace-view.active { display: block; }
+
+/* Charting Layout */
+.chart-container { display: flex; flex-direction: column; height: 100%; position: relative; background: #121212; }
+.chart-pane { position: relative; width: 100%; border-bottom: 1px solid #222; flex-shrink: 0; }
+canvas { display: block; width: 100%; height: 100%; }
+
+.pane-legend { position: absolute; top: 8px; left: 12px; font-family: monospace; font-size: 11px; z-index: 10; pointer-events: none; background: rgba(18, 18, 18, 0.75); padding: 4px 8px; border-radius: 3px; }
+.symbol-title { font-weight: bold; color: #e1e1e1; margin-right: 8px; }
+.val-up { color: #00c853; }
+.val-down { color: #ff3d00; }
+
+/* Backtest Dashboard Layout */
+#view-backtest { padding: 16px; overflow-y: auto; }
+.dashboard-grid { display: grid; grid-template-columns: 280px 1fr; gap: 16px; margin-bottom: 16px; }
+.panel { background: #1e1e1e; border: 1px solid #333; border-radius: 6px; padding: 14px; margin-bottom: 16px; }
+.panel-title { font-size: 13px; font-weight: bold; color: #007acc; text-transform: uppercase; margin-bottom: 12px; }
+
+.form-group { margin-bottom: 10px; }
+.form-group label { display: block; font-size: 11px; color: #aaa; margin-bottom: 4px; }
+.form-group input, .form-group select { width: 100%; padding: 6px 8px; background: #252526; border: 1px solid #3c3c3c; color: #fff; border-radius: 4px; font-size: 12px; }
+
+.btn-run { width: 100%; padding: 8px; background: #0e639c; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; margin-top: 6px; }
+
+.metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.metric-card { background: #252526; border: 1px solid #333; border-radius: 4px; padding: 8px; text-align: center; }
+.metric-card .val { font-size: 16px; font-weight: bold; margin-top: 2px; }
+.metric-card .lbl { font-size: 10px; color: #888; text-transform: uppercase; }
+
+.chart-box { height: 180px; position: relative; }
+
+.table-container { max-height: 220px; overflow-y: auto; border: 1px solid #333; border-radius: 4px; }
+table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 11px; }
+th { background: #1f1f1f; color: #888; position: sticky; top: 0; text-align: left; padding: 6px 8px; border-bottom: 1px solid #333; }
+td { padding: 6px 8px; border-bottom: 1px solid #222; }
+
+.win { color: #00c853; }
+.loss { color: #ff3d00; }
