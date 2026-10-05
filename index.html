@@ -261,22 +261,46 @@ Sell = Cross(EMA(Close, 20), Close);</textarea>
     };
 
     function initChart() {
-      const container = document.getElementById('chartContainer');
-      chart = LightweightCharts.createChart(container, {
-        layout: { backgroundColor: '#181818', textColor: '#d1d4dc' },
-        grid: { vertLines: { color: '#2b2b43' }, horzLines: { color: '#2b2b43' } },
-        priceScale: { borderColor: '#485c7b' },
-        timeScale: { borderColor: '#485c7b' }
-      });
+  const container = document.getElementById('chartContainer');
+  chart = LightweightCharts.createChart(container, {
+    layout: { backgroundColor: '#181818', textColor: '#d1d4dc' },
+    grid: { vertLines: { color: '#2b2b43' }, horzLines: { color: '#2b2b43' } },
+    rightPriceScale: { borderColor: '#485c7b' },
+    timeScale: { borderColor: '#485c7b' }
+  });
 
-      candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, { upColor: '#26a69a', downColor: '#ef5350' });
-      indicatorSeries = chart.addSeries(LightweightCharts.LineSeries, { color: '#2196f3', lineWidth: 2 });
-      volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
-        color: '#ffb300',
-        priceFormat: { type: 'volume' },
-        priceScaleId: ''
-      });
-    }
+  // Main price scale margins (reserve bottom for volume)
+  chart.priceScale('right').applyOptions({
+    scaleMargins: {
+      top: 0.1,
+      bottom: 0.25,
+    },
+  });
+
+  candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, { 
+    upColor: '#26a69a', 
+    downColor: '#ef5350' 
+  });
+
+  indicatorSeries = chart.addSeries(LightweightCharts.LineSeries, { 
+    color: '#2196f3', 
+    lineWidth: 2 
+  });
+
+  // Volume series in its own bottom sub-pane
+  volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+    color: '#ffb300',
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'volume',
+  });
+
+  chart.priceScale('volume').applyOptions({
+    scaleMargins: {
+      top: 0.75,
+      bottom: 0,
+    },
+  });
+}
 
     function initBacktestChart() {
       const container = document.getElementById('backtestChartContainer');
