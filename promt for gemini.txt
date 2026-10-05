@@ -1,0 +1,3 @@
+Paste it in the prompt and say:
+
+"I am continuing my AmiBroker Clone project. Here is my ROADMAP.md. We are currently working on Phase 1: Cloudflare R2 CORS and DuckDB-Wasm Data Loader."
