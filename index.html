@@ -2,213 +2,99 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AmiBroker Web Workstation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AmiBroker Workstation</title>
+    
+    <!-- Link to style.css inside css folder -->
     <link rel="stylesheet" href="css/style.css">
-    <!-- TradingView Lightweight Charts -->
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
-<body class="dark-theme">
-    <!-- Top Workstation Header / Toolbar -->
-    <header class="top-bar">
-        <div class="top-bar-left">
-            <button class="icon-btn-toggle" id="btnToggleSidebar" title="Toggle Categories & Watchlists">📋 Categories</button>
-            <div class="brand">
-                <span class="logo-icon">📈</span>
-                <span class="brand-title">AmiBroker</span>
+<body>
+
+    <div class="app-container">
+        <!-- Header & Navigation Bar -->
+        <header class="app-header">
+            <div class="header-left">
+                <button id="btnToggleSidebar" class="btn-header">
+                    📋 Categories
+                </button>
+                <span style="font-weight: 600; margin-left: 4px;">📈 AmiBroker</span>
+                <label style="margin-left: 8px;">Database:
+                    <select id="selectDatabase" class="dropdown-select">
+                        <option value="NSE">NSE India</option>
+                    </select>
+                </label>
+                <label>Symbol:
+                    <select id="selectSymbol" class="dropdown-select">
+                        <option value="HDFCBANK.NS">HDFCBANK.NS</option>
+                    </select>
+                </label>
             </div>
-        </div>
-
-        <!-- Market Database Selector -->
-        <div class="market-picker">
-            <label for="dbSelect">Database:</label>
-            <select id="dbSelect">
-                <option value="NSE">NSE India</option>
-                <option value="BSE">BSE India</option>
-                <option value="US">US Markets</option>
-            </select>
-        </div>
-        
-        <div class="symbol-picker">
-            <label for="tickerSelect">Symbol:</label>
-
-            <select id="tickerSelect">
-                <option value="HDFCBANK">HDFCBANK.NS</option>
-                <option value="RELIANCE">RELIANCE.NS</option>
-                <option value="TCS">TCS.NS</option>
-                <option value="INFY">INFY.NS</option>
-            </select>
-        </div>
-
-        <!-- Main Workspace Tabs -->
-        <nav class="workspace-tabs">
-            <button class="tab-btn active" data-tab="tab-chart">Chart Sheet 1</button>
-            <button class="tab-btn" data-tab="tab-scanner">Exploration / Scanner</button>
-            <button class="tab-btn" data-tab="tab-backtest">Portfolio Backtester</button>
-            <button class="tab-btn" data-tab="tab-settings">Database Settings</button>
-        </nav>
-
-        <div class="status-indicator">
-            <span id="engineStatus" class="badge idle">DuckDB: Standby</span>
-        </div>
-    </header>
-
-    <!-- Main Workspace Container -->
-    <main class="workspace-body">
-        
-        <!-- Sidebar / Category Hierarchy Drawer -->
-        <aside class="sidebar collapsed" id="sidebarPanel">
-            <div class="panel-header">
-                <h3>Categories & Watchlists</h3>
-                <button class="icon-btn" id="btnCloseSidebar">✕</button>
+            <div class="header-right">
+                <button class="btn-header tab-btn active" data-tab="tab-chart">Chart Sheet 1</button>
+                <button class="btn-header tab-btn" data-tab="tab-exploration">Exploration / Scanner</button>
+                <button class="btn-header tab-btn" data-tab="tab-backtest">Portfolio Backtester</button>
             </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <div class="main-workspace">
             
-            <div class="panel-content">
-                <!-- Category View Selector -->
-                <div class="category-tabs">
+            <!-- Backdrop Overlay for Mobile Drawer -->
+            <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+
+            <!-- Categories Sidebar Drawer -->
+            <aside id="sidebarPanel" class="sidebar collapsed">
+                <div class="sidebar-header">
+                    <span class="sidebar-title">Categories & Watchlists</span>
+                    <button id="btnCloseSidebar" class="btn-close">&times;</button>
+                </div>
+                
+                <div class="cat-tabs">
                     <button class="cat-tab-btn active" data-cat="all">All</button>
                     <button class="cat-tab-btn" data-cat="groups">Groups</button>
                     <button class="cat-tab-btn" data-cat="sectors">Sectors</button>
                     <button class="cat-tab-btn" data-cat="watchlists">Watchlists</button>
                 </div>
 
-                <!-- Category Filter Sub-Selector -->
-                <div class="category-filter-bar" id="categoryFilterContainer">
-                    <select id="categorySubFilter" class="sub-filter-select">
-                        <option value="ALL">All Symbols (3000+)</option>
+                <div class="category-controls">
+                    <select id="categorySubFilter" class="dropdown-select">
+                        <option value="ALL">All Symbols</option>
                     </select>
                 </div>
 
-                <!-- Watchlist Creation Control (Hidden unless Watchlists tab active) -->
-                <div class="create-watchlist-bar hidden" id="createWatchlistBar">
-                    <input type="text" id="txtNewWatchlist" placeholder="New Watchlist Name...">
-                    <button class="btn-sm-accent" id="btnCreateWatchlist">+</button>
-                </div>
+                <ul id="symbolList" class="symbol-list"></ul>
+            </aside>
 
-                <!-- Symbol List Container -->
-                <ul class="symbol-list" id="symbolList">
-                    <!-- Dynamic Symbols Populated Here -->
-                </ul>
-            </div>
-        </aside>
-
-        <!-- Sidebar Overlay Backstop for Mobile -->
-        <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
-
-        <!-- Dynamic Content Tabs -->
-        <section class="content-area">
-            
-            <!-- TAB 1: CHART WORKSPACE -->
-            <div id="tab-chart" class="tab-content active">
-                <div class="chart-toolbar">
-                    <span class="active-symbol-label" id="lblActiveSymbol">HDFCBANK.NS</span>
-                    <button class="icon-btn-star" id="btnToggleFavorite" title="Add to Favorites">☆</button>
-                    <span class="toolbar-divider"></span>
-                    <button class="btn-sm" id="btnRescale">Reset View</button>
-                    <button class="btn-sm" id="btnMA">Toggle MA(20)</button>
-                </div>
-                <div id="chartContainer" class="chart-container"></div>
-            </div>
-
-            <!-- TAB 2: EXPLORATION / SCANNER GRID -->
-            <div id="tab-scanner" class="tab-content">
-                <div class="action-bar">
-                    <button class="btn-primary" id="btnRunScan">Run Exploration</button>
-                    <span class="info-text">Scans entire universe via DuckDB</span>
-                </div>
-                <div class="table-container">
-                    <table class="data-table" id="scanResultsTable">
-                        <thead>
-                            <tr>
-                                <th>Ticker</th>
-                                <th>Date</th>
-                                <th>Close</th>
-                                <th>Volume</th>
-                                <th>Change %</th>
-                                <th>Signal</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td colspan="6" class="empty-msg">No scan executed yet. Click "Run Exploration".</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- TAB 3: BACKTESTER & ANALYTICS -->
-            <div id="tab-backtest" class="tab-content">
-                <div class="action-bar">
-                    <button class="btn-primary" id="btnRunBacktest">Execute Backtest</button>
-                </div>
-                <div class="backtest-grid">
-                    <div class="metrics-panel">
-                        <h4>Performance Summary</h4>
-                        <div class="metric-row"><span>Initial Equity:</span> <strong>₹1,00,000</strong></div>
-                        <div class="metric-row"><span>Ending Equity:</span> <strong id="mEndingEquity">-</strong></div>
-                        <div class="metric-row"><span>CAGR:</span> <strong id="mCAGR">-</strong></div>
-                        <div class="metric-row"><span>Max Drawdown:</span> <strong id="mMaxDD">-</strong></div>
-                        <div class="metric-row"><span>Win Ratio:</span> <strong id="mWinRatio">-</strong></div>
+            <!-- Main Canvas View Area -->
+            <main class="view-container">
+                <div id="tab-chart" class="tab-content active" style="height: 100%; display: flex; flex-direction: column;">
+                    <div class="chart-toolbar">
+                        <span id="lblActiveSymbol" class="symbol-label">HDFCBANK.NS</span>
+                        <button class="btn-header">Reset View</button>
+                        <button class="btn-header">Toggle MA(20)</button>
                     </div>
-                    <div class="trades-panel">
-                        <h4>Trade Log</h4>
-                        <div class="table-container">
-                            <table class="data-table" id="tradeLogTable">
-                                <thead>
-                                    <tr>
-                                        <th>Symbol</th>
-                                        <th>Type</th>
-                                        <th>Entry Date</th>
-                                        <th>Entry Price</th>
-                                        <th>Exit Date</th>
-                                        <th>Exit Price</th>
-                                        <th>Profit %</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr>
-                                        <td colspan="7" class="empty-msg">Run backtest to view trade list.</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
+                    <div id="chartContainer" class="chart-viewport"></div>
                 </div>
-            </div>
 
-            <!-- TAB 4: DATABASE & R2 SETTINGS -->
-            <div id="tab-settings" class="tab-content">
-                <div class="settings-card">
-                    <h3>Data Source Configuration</h3>
-                    <div class="form-group">
-                        <label for="r2BucketUrl">Cloudflare R2 Bucket Base URL:</label>
-                        <input type="text" id="r2BucketUrl" value="https://pub-your-r2-bucket.r2.dev/parquet">
-                    </div>
-                    <div class="form-group">
-                        <label for="dateRange">Historical Year Range:</label>
-                        <input type="text" id="dateRange" value="2000 - 2026">
-                    </div>
-                    <button class="btn-primary" id="btnSaveSettings">Save Settings</button>
+                <div id="tab-exploration" class="tab-content hidden" style="padding: 16px;">
+                    <button id="btnRunExploration" class="btn-header active">Run Exploration</button>
+                    <p style="margin-top: 8px; color: var(--text-secondary);">Scans entire universe via DuckDB</p>
                 </div>
-            </div>
 
-        </section>
-    </main>
+                <div id="tab-backtest" class="tab-content hidden" style="padding: 16px;">
+                    <button id="btnRunBacktest" class="btn-header active">Execute Backtest</button>
+                </div>
 
-    <!-- Bottom Dock Console -->
-    <footer class="bottom-dock collapsed">
-        <div class="dock-header" id="toggleConsole">
-            <span>AFL Output Log / Console</span>
-            <span class="dock-icon">▲</span>
+                <!-- Console Output Panel -->
+                <div class="console-panel">
+                    <div class="console-header">AFL Output Log / Console</div>
+                    <div class="console-logs">[System] AmiBroker Workstation Engine Initialized</div>
+                </div>
+            </main>
         </div>
-        <div class="dock-content" id="consoleLog">
-            <div class="log-line info">[System] AmiBroker Workstation Engine Initialized.</div>
-        </div>
-    </footer>
+    </div>
 
-    <!-- App Initialization Scripts -->
-    <script src="js/chart-renderer.js"></script>
+    <!-- Scripts loaded from js folder -->
     <script src="js/category-manager.js"></script>
     <script src="js/app.js"></script>
 </body>
