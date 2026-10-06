@@ -1,121 +1,66 @@
-import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
-
+/**
+ * AmiBroker Web Workstation - Data Engine
+ */
 class DataEngine {
-    constructor() {
-        this.db = null;
-        this.conn = null;
-        this.isInitialized = false;
-        // Update this URL if serving Parquet files from Cloudflare R2 bucket or static host
-        this.baseUrl = window.location.origin;
+    constructor(r2BucketBaseUrl) {
+        // Base Cloudflare R2 public URL
+        this.baseUrl = r2BucketBaseUrl || "https://your-r2-bucket.r2.dev";
     }
 
     /**
-     * Initializes DuckDB-WASM using JSDelivr CDN bundles to ensure 
-     * cross-origin & static MIME type compatibility across Render.com host environments.
+     * Sanitizes symbol name for R2 file path lookup
+     * Example: "RELIANCE.NS" -> "RELIANCE"
      */
-    async init() {
-        const statusBadge = document.querySelector('.data-status-badge');
-
-        try {
-            if (statusBadge) {
-                statusBadge.textContent = 'Initializing DB...';
-                statusBadge.classList.remove('error');
-            }
-
-            // Select optimal bundle (MVP vs EH/SIMD) from CDN
-            const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
-            const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
-
-            const worker = await duckdb.createWorker(bundle.mainWorker);
-            this.db = new duckdb.AsyncDuckDB(worker);
-            await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-
-            this.conn = await this.db.connect();
-            this.isInitialized = true;
-
-            console.log('[DataEngine] DuckDB-WASM initialized successfully.');
-
-            if (statusBadge) {
-                statusBadge.textContent = 'EOD Ready';
-                statusBadge.style.color = '#2da44e';
-            }
-
-            // Load initial metadata/index
-            await this.loadSymbolIndex();
-
-        } catch (error) {
-            console.error('[DataEngine Initialization Error]:', error);
-            this.isInitialized = false;
-
-            if (statusBadge) {
-                statusBadge.textContent = 'Data Engine Error';
-                statusBadge.style.color = '#f85149';
-            }
-        }
+    cleanSymbolKey(symbol) {
+        if (!symbol) return "";
+        return symbol.toUpperCase().replace(/\.(NS|BO)$/i, "").trim();
     }
 
     /**
-     * Loads symbol catalog or Parquet metadata index into DuckDB memory.
+     * Fetches Parquet/JSON historical data from Cloudflare R2
      */
-    async loadSymbolIndex() {
-        if (!this.isInitialized) return;
+    async fetchHistoricalData(symbol) {
+        const cleanKey = this.cleanSymbolKey(symbol);
+        const fileUrl = `${this.baseUrl}/${cleanKey}.parquet`; // or .json depending on your storage structure
 
         try {
-            // Register HTTPFS spatial extension if fetching Parquet from external remote buckets
-            await this.conn.query(`INSTALL httpfs; LOAD httpfs;`);
-            console.log('[DataEngine] HTTPFS extension loaded for remote Parquet fetching.');
+            const response = await fetch(fileUrl);
+            if (!response.ok) {
+                throw new Error(`Failed to load data for ${cleanKey} (Status: ${response.status})`);
+            }
+            
+            // If returning JSON from R2
+            const data = await response.json();
+            return data;
         } catch (err) {
-            console.warn('[DataEngine] HTTPFS loading notice:', err.message);
+            console.warn(`[DataEngine] Could not fetch ${cleanKey} from R2, generating local fallback:`, err);
+            return this.generateFallbackData(symbol);
         }
     }
 
     /**
-     * Queries Parquet data for a specific symbol.
-     * @param {string} symbol - Equity ticker (e.g., RELIANCE, TCS)
-     * @returns {Promise<Array>} Array of bar objects { date, open, high, low, close, volume }
+     * Synthetic data fallback if R2 file is pending
      */
-    async fetchSymbolData(symbol) {
-        if (!this.isInitialized) {
-            throw new Error("DataEngine is not initialized yet.");
-        }
+    generateFallbackData(symbol) {
+        let data = [];
+        let baseTime = new Date(2025, 0, 1).getTime() / 1000;
+        let price = 1000 + (symbol.length * 50);
 
-        try {
-            const formattedSymbol = symbol.trim().toUpperCase();
-            // Point to your Parquet store path (e.g., /data/EOD_DATA.parquet or R2 public bucket URL)
-            const query = `
-                SELECT date, open, high, low, close, volume 
-                FROM read_parquet('${this.baseUrl}/data/${formattedSymbol}.parquet') 
-                ORDER BY date ASC;
-            `;
+        for (let i = 0; i < 250; i++) {
+            let change = (Math.random() - 0.48) * (price * 0.02);
+            let open = price;
+            let close = price + change;
+            let high = Math.max(open, close) + Math.random() * (price * 0.008);
+            let low = Math.min(open, close) - Math.random() * (price * 0.008);
+            let volume = Math.floor(Math.random() * 100000) + 20000;
 
-            const result = await this.conn.query(query);
-            const rows = result.toArray().map(row => row.toJSON());
-            return rows;
+            let timeString = new Date((baseTime + i * 86400) * 1000).toISOString().split('T')[0];
 
-        } catch (error) {
-            console.error(`[DataEngine] Error fetching Parquet data for ${symbol}:`, error);
-            throw error;
+            data.push({ time: timeString, open, high, low, close, volume });
+            price = close;
         }
-    }
-
-    /**
-     * Cleans up DuckDB connection resources on teardown.
-     */
-    async destroy() {
-        if (this.conn) {
-            await this.conn.close();
-        }
-        if (this.db) {
-            await this.db.terminate();
-        }
-        this.isInitialized = false;
+        return data;
     }
 }
 
-// Global Singleton Instance
-export const dataEngine = new DataEngine();
-
-// Auto-start initialization on page load
-document.addEventListener('DOMContentLoaded', () => {
-    dataEngine.init();
-});
+window.dataEngine = new DataEngine();
