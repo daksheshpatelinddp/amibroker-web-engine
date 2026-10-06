@@ -1,76 +1,85 @@
-import { dataEngine } from './data-engine.js';
+/**
+ * AmiBroker Web Workstation - Main Application Controller
+ */
 
-document.addEventListener('DOMContentLoaded', () => {
-    // 1. Sidebar / Category Drawer Toggle
-    const menuBtn = document.getElementById('menuBtn') || document.querySelector('.icon-btn');
-    const categoryDrawer = document.querySelector('.category-drawer');
-    const closeDrawerBtn = document.getElementById('closeDrawer');
+document.addEventListener("DOMContentLoaded", () => {
+    // 1. Initialize CodeMirror Editor
+    const textArea = document.getElementById("afl-code-input");
+    const defaultAFL = `// Default AmiBroker Formula\nPlot( Close, "Price", "#26a69a", "line", true );\nPlot( MA(Close, 20), "20 SMA", "#2962FF", "line", true );\nPlot( EMA(Close, 50), "50 EMA", "#FF6D00", "line", true );\nPlot( Volume, "Volume", "#26a69a", "histogram", false );`;
+    
+    textArea.value = defaultAFL;
 
-    if (menuBtn && categoryDrawer) {
-        menuBtn.addEventListener('click', () => {
-            categoryDrawer.classList.toggle('open');
-        });
-    }
-
-    if (closeDrawerBtn && categoryDrawer) {
-        closeDrawerBtn.addEventListener('click', () => {
-            categoryDrawer.classList.remove('open');
-        });
-    }
-
-    // 2. Layout Grid Switcher (Rectangle Icons)
-    const layoutBtns = document.querySelectorAll('.layout-btn');
-    const chartGrid = document.querySelector('.chart-grid');
-
-    layoutBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            layoutBtns.forEach(b => b.classList.remove('active'));
-            
-            const selectedBtn = e.currentTarget;
-            selectedBtn.classList.add('active');
-
-            const layoutMode = selectedBtn.getAttribute('data-layout') || '1x1';
-            
-            if (chartGrid) {
-                chartGrid.className = 'chart-grid';
-                chartGrid.classList.add(`grid-${layoutMode}`);
-            }
-        });
+    const editor = CodeMirror.fromTextArea(textArea, {
+        mode: "javascript",
+        theme: "dracula",
+        lineNumbers: true,
+        tabSize: 2
     });
 
-    // 3. Global Quick Search Trigger
-    const searchInput = document.getElementById('globalSearchInput');
-    if (searchInput) {
-        searchInput.addEventListener('keydown', async (e) => {
-            if (e.key === 'Enter') {
-                const symbol = searchInput.value.trim();
-                if (symbol) {
-                    await loadSymbolToWorkspace(symbol);
-                }
-            }
-        });
-    }
-});
+    // 2. Generate Initial Synthetic OHLCV Sample Data
+    const generateSampleData = () => {
+        let data = [];
+        let baseTime = new Date(2026, 0, 1).getTime() / 1000;
+        let price = 100;
 
-// Function to handle symbol selection and trigger DuckDB query
-export async function loadSymbolToWorkspace(symbol) {
-    const symbolTitle = document.querySelector('.cell-symbol-title');
-    const placeholder = document.querySelector('.empty-chart-placeholder');
-    
-    if (symbolTitle) symbolTitle.textContent = symbol.toUpperCase();
-    
-    try {
-        if (placeholder) placeholder.textContent = `Fetching data for ${symbol}...`;
-        
-        // Fetch Parquet data using DataEngine
-        const data = await dataEngine.fetchSymbolData(symbol);
-        
-        if (placeholder) {
-            placeholder.textContent = `Loaded ${data.length} records for ${symbol}.`;
+        for (let i = 0; i < 150; i++) {
+            let change = (Math.random() - 0.48) * 3;
+            let open = price;
+            let close = price + change;
+            let high = Math.max(open, close) + Math.random() * 1.5;
+            let low = Math.min(open, close) - Math.random() * 1.5;
+            let volume = Math.floor(Math.random() * 50000) + 10000;
+
+            let timeString = new Date((baseTime + i * 86400) * 1000).toISOString().split('T')[0];
+
+            data.push({ time: timeString, open, high, low, close, volume });
+            price = close;
         }
-    } catch (err) {
-        if (placeholder) {
-            placeholder.textContent = `Failed to load data for ${symbol}. Check console.`;
+        return data;
+    };
+
+    const currentData = generateSampleData();
+
+    // 3. Render Execution Function
+    const executeAndRender = () => {
+        const code = editor.getValue();
+        const aflResult = window.aflEngine.execute(code, currentData);
+
+        if (aflResult.success) {
+            window.chartEngine.renderAFLOutput(aflResult);
+        } else {
+            alert("AFL Syntax Error: " + aflResult.error);
         }
-    }
-}
+    };
+
+    // 4. Initial Render
+    executeAndRender();
+
+    // 5. Button Event Listeners
+    document.getElementById("btn-apply-afl").addEventListener("click", executeAndRender);
+
+    document.getElementById("btn-reset-afl").addEventListener("click", () => {
+        editor.setValue(defaultAFL);
+        executeAndRender();
+    });
+
+    // AI Drawer Toggle
+    const aiPromptBar = document.getElementById("ai-prompt-bar");
+    document.getElementById("btn-toggle-ai").addEventListener("click", () => {
+        aiPromptBar.classList.toggle("hidden");
+    });
+
+    // Simple AI Generator Simulator
+    document.getElementById("btn-generate-ai").addEventListener("click", () => {
+        const prompt = document.getElementById("ai-prompt-input").value;
+        if (!prompt) return;
+
+        let generatedCode = defaultAFL;
+        if (prompt.toLowerCase().includes("rsi")) {
+            generatedCode += `\nPlot( RSI(Close, 14), "RSI 14", "#ab47bc", "line", false );`;
+        }
+        
+        editor.setValue(generatedCode);
+        executeAndRender();
+    });
+});
