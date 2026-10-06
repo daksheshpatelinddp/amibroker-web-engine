@@ -1,6 +1,18 @@
 document.addEventListener('DOMContentLoaded', () => {
     console.log("Initializing Workstation Application Controller...");
 
+    // Safe Category Manager Reference
+    const catManager = window.categoryManager || {
+        currentDatabase: "NSE",
+        activeCategoryType: "all",
+        activeSubFilter: "ALL",
+        categories: { groups: [], sectors: [], industries: [], watchlists: ["Favorites"] },
+        getSymbolsForCurrentFilter: () => [],
+        addWatchlist: () => false,
+        toggleFavorite: () => false,
+        isFavorite: () => false
+    };
+
     // 1. Tab Switching Controller
     const tabButtons = document.querySelectorAll('.tab-btn');
     const tabContents = document.querySelectorAll('.tab-content');
@@ -21,8 +33,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (targetTabId === 'tab-chart' && window.chartEngine) {
                 setTimeout(() => window.chartEngine.resize(), 50);
             }
-
-            logConsole(`Switched tab to: ${button.textContent.trim()}`);
         });
     });
 
@@ -38,21 +48,33 @@ document.addEventListener('DOMContentLoaded', () => {
     const sidebarBackdrop = document.getElementById('sidebarBackdrop');
 
     function openSidebar() {
+        if (!sidebarPanel) return;
         sidebarPanel.classList.remove('collapsed');
-        if (window.innerWidth <= 768) {
-            sidebarBackdrop.classList.add('active');
-        }
+        sidebarPanel.style.transform = 'translateX(0)';
+        if (sidebarBackdrop) sidebarBackdrop.classList.add('active');
     }
 
     function closeSidebar() {
+        if (!sidebarPanel) return;
         sidebarPanel.classList.add('collapsed');
-        sidebarBackdrop.classList.remove('active');
+        sidebarPanel.style.transform = 'translateX(-100%)';
+        if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
         setTimeout(() => {
             if (window.chartEngine) window.chartEngine.resize();
         }, 250);
     }
 
-    if (btnToggleSidebar) btnToggleSidebar.addEventListener('click', openSidebar);
+    if (btnToggleSidebar) {
+        btnToggleSidebar.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (sidebarPanel && sidebarPanel.classList.contains('collapsed')) {
+                openSidebar();
+            } else {
+                closeSidebar();
+            }
+        });
+    }
+
     if (btnCloseSidebar) btnCloseSidebar.addEventListener('click', closeSidebar);
     if (sidebarBackdrop) sidebarBackdrop.addEventListener('click', closeSidebar);
 
@@ -63,16 +85,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const symbolListUI = document.getElementById('symbolList');
 
     function renderCategoryUI() {
-        const catManager = window.categoryManager;
-        const currentCat = catManager.activeCategoryType;
+        if (!subFilterSelect || !symbolListUI) return;
+        const mgr = window.categoryManager || catManager;
+        const currentCat = mgr.activeCategoryType;
 
-        // Render sub-filter choices
         subFilterSelect.innerHTML = '';
         if (currentCat === 'all') {
             subFilterSelect.innerHTML = '<option value="ALL">All Symbols</option>';
-            createWatchlistBar.classList.add('hidden');
+            if (createWatchlistBar) createWatchlistBar.classList.add('hidden');
         } else {
-            const options = catManager.categories[currentCat] || [];
+            const options = mgr.categories[currentCat] || [];
             if (currentCat !== 'watchlists') {
                 const optAll = document.createElement('option');
                 optAll.value = "ALL";
@@ -86,10 +108,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 subFilterSelect.appendChild(opt);
             });
 
-            if (currentCat === 'watchlists') {
-                createWatchlistBar.classList.remove('hidden');
-            } else {
-                createWatchlistBar.classList.add('hidden');
+            if (createWatchlistBar) {
+                if (currentCat === 'watchlists') createWatchlistBar.classList.remove('hidden');
+                else createWatchlistBar.classList.add('hidden');
             }
         }
 
@@ -97,11 +118,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderSymbolList() {
-        const catManager = window.categoryManager;
-        const symbols = catManager.getSymbolsForCurrentFilter();
+        if (!symbolListUI) return;
+        const mgr = window.categoryManager || catManager;
+        const symbols = mgr.getSymbolsForCurrentFilter();
         symbolListUI.innerHTML = '';
 
-        if (symbols.length === 0) {
+        if (!symbols || symbols.length === 0) {
             symbolListUI.innerHTML = '<li class="symbol-item"><span class="symbol-sub">No symbols in this category.</span></li>';
             return;
         }
@@ -109,128 +131,42 @@ document.addEventListener('DOMContentLoaded', () => {
         symbols.forEach(item => {
             const li = document.createElement('li');
             li.className = 'symbol-item';
-            
             li.innerHTML = `
                 <div class="symbol-row-main">
                     <span class="symbol-ticker">${item.symbol}</span>
                     <span class="symbol-sub">${item.market}</span>
                 </div>
                 <div class="symbol-sub">${item.name}</div>
-                <div class="symbol-tags">
-                    <span class="tag-badge">${item.sector}</span>
-                    <span class="tag-badge">${item.industry}</span>
-                </div>
             `;
 
             li.addEventListener('click', () => {
-                document.querySelectorAll('.symbol-item').forEach(el => el.classList.remove('active'));
-                li.classList.add('active');
-                
-                // Update chart header symbol
                 const lblActiveSymbol = document.getElementById('lblActiveSymbol');
                 if (lblActiveSymbol) lblActiveSymbol.textContent = item.symbol;
-
-                // Update Star Button state
-                updateStarButton(item.symbol.split('.')[0]);
-
-                logConsole(`Selected Symbol: ${item.symbol}`);
-                if (window.innerWidth <= 768) closeSidebar();
+                closeSidebar();
             });
 
             symbolListUI.appendChild(li);
         });
     }
 
-    // Category Sub-Tab Click Handler
     catTabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             catTabBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            window.categoryManager.activeCategoryType = btn.getAttribute('data-cat');
-            window.categoryManager.activeSubFilter = "ALL";
+            const mgr = window.categoryManager || catManager;
+            mgr.activeCategoryType = btn.getAttribute('data-cat');
+            mgr.activeSubFilter = "ALL";
             renderCategoryUI();
         });
     });
 
-    subFilterSelect.addEventListener('change', (e) => {
-        window.categoryManager.activeSubFilter = e.target.value;
-        renderSymbolList();
-    });
-
-    // Create New Watchlist
-    const btnCreateWatchlist = document.getElementById('btnCreateWatchlist');
-    const txtNewWatchlist = document.getElementById('txtNewWatchlist');
-    if (btnCreateWatchlist && txtNewWatchlist) {
-        btnCreateWatchlist.addEventListener('click', () => {
-            const name = txtNewWatchlist.value.trim();
-            if (name && window.categoryManager.addWatchlist(name)) {
-                txtNewWatchlist.value = '';
-                logConsole(`Created Watchlist: "${name}"`);
-                renderCategoryUI();
-            }
-        });
-    }
-
-    // Favorite Toggle Star
-    const btnToggleFavorite = document.getElementById('btnToggleFavorite');
-    function updateStarButton(tickerKey) {
-        if (!btnToggleFavorite) return;
-        const isFav = window.categoryManager.isFavorite(tickerKey);
-        if (isFav) {
-            btnToggleFavorite.classList.add('active');
-            btnToggleFavorite.textContent = '★';
-        } else {
-            btnToggleFavorite.classList.remove('active');
-            btnToggleFavorite.textContent = '☆';
-        }
-    }
-
-    if (btnToggleFavorite) {
-        btnToggleFavorite.addEventListener('click', () => {
-            const currentSymbolText = document.getElementById('lblActiveSymbol').textContent;
-            const tickerKey = currentSymbolText.split('.')[0];
-            const nowFav = window.categoryManager.toggleFavorite(tickerKey);
-            updateStarButton(tickerKey);
-            logConsole(`${nowFav ? 'Added' : 'Removed'} ${currentSymbolText} ${nowFav ? 'to' : 'from'} Favorites`);
-        });
-    }
-
-    // Database Switcher
-    const dbSelect = document.getElementById('dbSelect');
-    if (dbSelect) {
-        dbSelect.addEventListener('change', (e) => {
-            window.categoryManager.currentDatabase = e.target.value;
-            logConsole(`Switched Market Database to: ${e.target.value}`);
+    if (subFilterSelect) {
+        subFilterSelect.addEventListener('change', (e) => {
+            const mgr = window.categoryManager || catManager;
+            mgr.activeSubFilter = e.target.value;
             renderSymbolList();
         });
     }
 
-    // Initialize Category Drawer State
     renderCategoryUI();
-
-    // 5. Console Dock Toggle
-    const toggleConsoleBtn = document.getElementById('toggleConsole');
-    const bottomDock = document.querySelector('.bottom-dock');
-    if (toggleConsoleBtn && bottomDock) {
-        toggleConsoleBtn.addEventListener('click', () => {
-            bottomDock.classList.toggle('collapsed');
-            const icon = toggleConsoleBtn.querySelector('.dock-icon');
-            if (icon) icon.textContent = bottomDock.classList.contains('collapsed') ? '▲' : '▼';
-            setTimeout(() => {
-                if (window.chartEngine) window.chartEngine.resize();
-            }, 250);
-        });
-    }
-
-    function logConsole(message, type = 'info') {
-        const consoleLog = document.getElementById('consoleLog');
-        if (!consoleLog) return;
-        const line = document.createElement('div');
-        line.className = `log-line ${type}`;
-        line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-        consoleLog.appendChild(line);
-        consoleLog.scrollTop = consoleLog.scrollHeight;
-    }
-
-    window.logConsole = logConsole;
 });
