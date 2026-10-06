@@ -8,7 +8,7 @@
     --text-secondary: #8b949e;
     --accent-blue: #2f81f7;
     --accent-green: #238636;
-    --topbar-height: 50px;
+    --topbar-height: auto;
 }
 
 * {
@@ -35,35 +35,37 @@ body.dark-theme {
 
 /* Top Navigation Bar */
 .top-bar {
-    height: var(--topbar-height);
     background-color: var(--bg-panel);
     border-bottom: 1px solid var(--border-color);
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    padding: 0 12px;
-    gap: 12px;
+    padding: 8px 12px;
+    gap: 8px;
     z-index: 100;
 }
 
 .bar-left, .bar-right {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .brand-title {
     font-weight: 600;
-    font-size: 14px;
+    font-size: 13px;
     display: flex;
     align-items: center;
     gap: 6px;
     color: var(--text-primary);
+    white-space: nowrap;
 }
 
 .brand-title small {
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 10px;
 }
 
 .brand-icon {
@@ -81,6 +83,7 @@ body.dark-theme {
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
 }
 
 .icon-btn:hover {
@@ -91,7 +94,8 @@ body.dark-theme {
 .quick-search-wrapper {
     position: relative;
     flex: 1;
-    max-width: 400px;
+    min-width: 140px;
+    max-width: 300px;
 }
 
 .search-input-box {
@@ -100,7 +104,7 @@ body.dark-theme {
     background: var(--bg-dark);
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    padding: 0 10px;
+    padding: 0 8px;
     height: 32px;
 }
 
@@ -110,12 +114,13 @@ body.dark-theme {
     outline: none;
     color: var(--text-primary);
     width: 100%;
-    margin-left: 8px;
-    font-size: 12px;
+    margin-left: 6px;
+    font-size: 11px;
 }
 
 .search-icon {
     color: var(--text-secondary);
+    font-size: 12px;
 }
 
 .clear-btn {
@@ -125,14 +130,21 @@ body.dark-theme {
     cursor: pointer;
 }
 
+.category-dropdown-group {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
 .nav-select {
     background: var(--bg-dark);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
-    padding: 4px 8px;
+    padding: 4px 6px;
     border-radius: 6px;
-    font-size: 12px;
+    font-size: 11px;
     outline: none;
+    max-width: 110px;
 }
 
 .layout-toggle-group {
@@ -144,9 +156,10 @@ body.dark-theme {
     background: transparent;
     border: 1px solid var(--border-color);
     color: var(--text-secondary);
-    padding: 6px 10px;
+    padding: 5px 8px;
     border-radius: 4px;
     cursor: pointer;
+    font-size: 11px;
 }
 
 .layout-btn.active {
@@ -165,7 +178,7 @@ body.dark-theme {
 
 /* Category Drawer Sidebar */
 .category-drawer {
-    width: 300px;
+    width: 280px;
     background-color: var(--bg-panel);
     border-right: 1px solid var(--border-color);
     display: flex;
@@ -238,8 +251,8 @@ body.dark-theme {
 .chart-grid {
     flex: 1;
     display: grid;
-    padding: 8px;
-    gap: 8px;
+    padding: 6px;
+    gap: 6px;
 }
 
 .grid-1x1 {
@@ -259,17 +272,24 @@ body.dark-theme {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 12px;
+    padding: 6px 10px;
     border-bottom: 1px solid var(--border-color);
 }
 
 .cell-symbol-title {
     font-weight: 600;
     color: var(--text-primary);
+    font-size: 12px;
+}
+
+.cell-tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .data-status-badge {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-secondary);
 }
 
@@ -291,10 +311,11 @@ body.dark-theme {
 .empty-chart-placeholder {
     text-align: center;
     color: var(--text-secondary);
+    padding: 16px;
 }
 
 .empty-chart-placeholder i {
-    font-size: 32px;
+    font-size: 28px;
     margin-bottom: 8px;
 }
 
@@ -302,20 +323,28 @@ body.dark-theme {
     display: none !important;
 }
 
-.btn {
-    padding: 6px 12px;
-    border-radius: 6px;
-    border: none;
-    cursor: pointer;
-    font-size: 12px;
-}
+/* Mobile Adjustments */
+@media (max-width: 600px) {
+    .top-bar {
+        padding: 6px 8px;
+    }
+    
+    .brand-title small {
+        display: none;
+    }
 
-.primary-btn {
-    background: var(--accent-blue);
-    color: white;
-}
+    .nav-select {
+        max-width: 90px;
+        font-size: 10px;
+        padding: 3px 4px;
+    }
 
-.success-btn {
-    background: var(--accent-green);
-    color: white;
+    .category-dropdown-group {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .quick-search-wrapper {
+        max-width: 160px;
+    }
 }
