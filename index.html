@@ -1,220 +1,178 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AmiBroker Web Workstation</title>
-  <link rel="stylesheet" href="css/style.css">
-  <style>
-    /* CSS Layout for Views */
-    .workspace-view { display: none; width: 100%; height: calc(100vh - 45px); }
-    .workspace-view.active { display: block; }
-    
-    .scan-controls { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
-    .btn-scan { padding: 8px 16px; background: #007acc; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
-    .btn-scan:hover { background: #005999; }
-    .status-tag { font-size: 11px; padding: 2px 6px; border-radius: 3px; font-weight: bold; display: inline-block; }
-    .tag-bull { background: rgba(0, 200, 83, 0.2); color: #00c853; border: 1px solid #00c853; }
-    .tag-oversold { background: rgba(255, 171, 0, 0.2); color: #ffab00; border: 1px solid #ffab00; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AmiBroker Web Workstation</title>
+    <link rel="stylesheet" href="css/style.css">
+    <!-- TradingView Lightweight Charts -->
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
-<body>
-
-  <!-- Top Navigation & Workspace Tabs -->
-  <div class="top-bar">
-    <div class="brand">AmiBroker Web</div>
-    <div class="sheet-tabs">
-      <div class="tab active" id="tab-charting" onclick="switchTab('charting')">Charting Workspace</div>
-      <div class="tab" id="tab-backtest" onclick="switchTab('backtest')">Backtester & Analytics</div>
-      <div class="tab" id="tab-scanner" onclick="switchTab('scanner')">Scanner & Exploration</div>
-    </div>
-  </div>
-
-  <!-- View 1: Multi-Pane Charting Workspace -->
-  <div id="view-charting" class="workspace-view active">
-    <div class="chart-container" id="chart-workspace">
-      <!-- Price Pane -->
-      <div class="chart-pane" style="height: 60%;">
-        <div class="pane-legend">
-          <span class="symbol-title">NSE / BSE Equities</span>
-          <span id="price-ohlc">O: -- H: -- L: -- C: --</span>
+<body class="dark-theme">
+    <!-- Top Workstation Header / Toolbar -->
+    <header class="top-bar">
+        <div class="brand">
+            <span class="logo-icon">📈</span>
+            <span class="brand-title">AmiBroker Web Engine</span>
         </div>
-        <canvas id="canvas-price"></canvas>
-      </div>
-
-      <!-- Volume Pane -->
-      <div class="chart-pane" style="height: 20%;">
-        <div class="pane-legend">Volume: <span id="vol-val">--</span></div>
-        <canvas id="canvas-volume"></canvas>
-      </div>
-
-      <!-- Indicator Pane -->
-      <div class="chart-pane" style="height: 20%;">
-        <div class="pane-legend">RSI (14): <span id="rsi-val">--</span></div>
-        <canvas id="canvas-indicator"></canvas>
-      </div>
-    </div>
-  </div>
-
-  <!-- View 2: Portfolio Backtester & Analytics -->
-  <div id="view-backtest" class="workspace-view" style="padding: 16px; overflow-y: auto;">
-    <div class="dashboard-grid">
-      <!-- Strategy Settings -->
-      <div class="panel">
-        <div class="panel-title">Strategy Controls</div>
-        <div class="form-group">
-          <label>Initial Capital (₹/$)</label>
-          <input type="number" id="init-cap" value="100000">
+        
+        <div class="symbol-picker">
+            <label for="tickerSelect">Symbol:</label>
+            <select id="tickerSelect">
+                <option value="RELIANCE">RELIANCE</option>
+                <option value="TCS">TCS</option>
+                <option value="INFY">INFY</option>
+                <option value="HDFCBANK">HDFCBANK</option>
+            </select>
         </div>
-        <div class="form-group">
-          <label>Position Sizing</label>
-          <select id="pos-size-type">
-            <option value="pct">10% Portfolio Capital</option>
-            <option value="all">100% Portfolio Capital</option>
-          </select>
+
+        <!-- Main Workspace Tabs -->
+        <nav class="workspace-tabs">
+            <button class="tab-btn active" data-tab="tab-chart">Chart Sheet 1</button>
+            <button class="tab-btn" data-tab="tab-scanner">Exploration / Scanner</button>
+            <button class="tab-btn" data-tab="tab-backtest">Portfolio Backtester</button>
+            <button class="tab-btn" data-tab="tab-settings">Database Settings</button>
+        </nav>
+
+        <div class="status-indicator">
+            <span id="engineStatus" class="badge idle">DuckDB: Standby</span>
         </div>
-        <div class="form-group">
-          <label>Strategy Rule</label>
-          <select id="strat-type">
-            <option value="ma_cross">EMA Cross (10 / 30)</option>
-          </select>
+    </header>
+
+    <!-- Main Workspace Container -->
+    <main class="workspace-body">
+        
+        <!-- Sidebar / Watchlist Panel -->
+        <aside class="sidebar" id="sidebarPanel">
+            <div class="panel-header">
+                <h3>Watchlist / Categories</h3>
+                <button class="icon-btn" id="toggleSidebar">◀</button>
+            </div>
+            <div class="panel-content">
+                <ul class="symbol-list" id="symbolList">
+                    <li class="active">RELIANCE.NS</li>
+                    <li>TCS.NS</li>
+                    <li>INFY.NS</li>
+                    <li>HDFCBANK.NS</li>
+                    <li>ICICIBANK.NS</li>
+                    <li>SBIN.NS</li>
+                    <li>BHARTIARTL.NS</li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- Dynamic Content Tabs -->
+        <section class="content-area">
+            
+            <!-- TAB 1: CHART WORKSPACE -->
+            <div id="tab-chart" class="tab-content active">
+                <div class="chart-toolbar">
+                    <button class="btn-sm" id="btnRescale">Reset View</button>
+                    <span class="toolbar-divider"></span>
+                    <button class="btn-sm" id="btnMA">Toggle MA(20)</button>
+                </div>
+                <div id="chartContainer" class="chart-container"></div>
+            </div>
+
+            <!-- TAB 2: EXPLORATION / SCANNER GRID -->
+            <div id="tab-scanner" class="tab-content">
+                <div class="action-bar">
+                    <button class="btn-primary" id="btnRunScan">Run Exploration</button>
+                    <span class="info-text">Scans entire universe via DuckDB-WASM</span>
+                </div>
+                <div class="table-container">
+                    <table class="data-table" id="scanResultsTable">
+                        <thead>
+                            <tr>
+                                <th>Ticker</th>
+                                <th>Date</th>
+                                <th>Close</th>
+                                <th>Volume</th>
+                                <th>Change %</th>
+                                <th>Signal</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td colspan="6" class="empty-msg">No scan executed yet. Click "Run Exploration".</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 3: BACKTESTER & ANALYTICS -->
+            <div id="tab-backtest" class="tab-content">
+                <div class="action-bar">
+                    <button class="btn-primary" id="btnRunBacktest">Execute Backtest</button>
+                </div>
+                <div class="backtest-grid">
+                    <div class="metrics-panel">
+                        <h4>Performance Summary</h4>
+                        <div class="metric-row"><span>Initial Equity:</span> <strong>₹1,00,000</strong></div>
+                        <div class="metric-row"><span>Ending Equity:</span> <strong id="mEndingEquity">-</strong></div>
+                        <div class="metric-row"><span>CAGR:</span> <strong id="mCAGR">-</strong></div>
+                        <div class="metric-row"><span>Max Drawdown:</span> <strong id="mMaxDD">-</strong></div>
+                        <div class="metric-row"><span>Win Ratio:</span> <strong id="mWinRatio">-</strong></div>
+                    </div>
+                    <div class="trades-panel">
+                        <h4>Trade Log</h4>
+                        <div class="table-container">
+                            <table class="data-table" id="tradeLogTable">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Type</th>
+                                        <th>Entry Date</th>
+                                        <th>Entry Price</th>
+                                        <th>Exit Date</th>
+                                        <th>Exit Price</th>
+                                        <th>Profit %</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td colspan="7" class="empty-msg">Run backtest to view trade list.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 4: DATABASE & R2 SETTINGS -->
+            <div id="tab-settings" class="tab-content">
+                <div class="settings-card">
+                    <h3>Data Source Configuration</h3>
+                    <div class="form-group">
+                        <label for="r2BucketUrl">Cloudflare R2 Bucket Base URL:</label>
+                        <input type="text" id="r2BucketUrl" value="https://pub-your-r2-bucket.r2.dev/parquet">
+                    </div>
+                    <div class="form-group">
+                        <label for="dateRange">Historical Year Range:</label>
+                        <input type="text" id="dateRange" value="2000 - 2026">
+                    </div>
+                    <button class="btn-primary" id="btnSaveSettings">Save Settings</button>
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- Bottom Dock Console -->
+    <footer class="bottom-dock">
+        <div class="dock-header">
+            <span>AFL Output Log / Console</span>
+            <button class="icon-btn" id="toggleConsole">▼</button>
         </div>
-        <div class="form-group">
-          <label>Slippage & Commission (%)</label>
-          <input type="number" id="slippage" value="0.1" step="0.05">
+        <div class="dock-content" id="consoleLog">
+            <div class="log-line info">[System] AmiBroker Workstation Engine Initialized.</div>
         </div>
-        <button class="btn-run" onclick="runBacktest()">Run Backtest Engine</button>
-      </div>
+    </footer>
 
-      <!-- Performance Metrics & Equity Curve -->
-      <div class="panel">
-        <div class="panel-title">Performance Analytics</div>
-        <div class="metrics-grid">
-          <div class="metric-card"><div class="lbl">Net Return</div><div class="val" id="m-return">--</div></div>
-          <div class="metric-card"><div class="lbl">Win Rate</div><div class="val" id="m-winrate">--</div></div>
-          <div class="metric-card"><div class="lbl">Max Drawdown</div><div class="val loss" id="m-drawdown">--</div></div>
-          <div class="metric-card"><div class="lbl">Profit Factor</div><div class="val" id="m-pf">--</div></div>
-          <div class="metric-card"><div class="lbl">Total Trades</div><div class="val" id="m-trades">--</div></div>
-        </div>
-        <div class="chart-box">
-          <canvas id="canvas-equity"></canvas>
-        </div>
-      </div>
-    </div>
-
-    <!-- Trade History Log -->
-    <div class="panel" style="margin-top: 16px;">
-      <div class="panel-title">Trade History Log</div>
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Type</th>
-              <th>Entry Date</th>
-              <th>Entry Price</th>
-              <th>Exit Date</th>
-              <th>Exit Price</th>
-              <th>Bars</th>
-              <th>P&L</th>
-              <th>Return (%)</th>
-            </tr>
-          </thead>
-          <tbody id="trade-rows">
-            <tr><td colspan="9" style="text-align: center; color: #666; padding: 20px;">Click 'Run Backtest Engine' to simulate strategy.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- View 3: Multi-Symbol Scanner & Exploration Grid -->
-  <div id="view-scanner" class="workspace-view" style="padding: 16px; overflow-y: auto;">
-    <div class="panel">
-      <div class="panel-title">AFL Exploration Scanner</div>
-      <div class="scan-controls">
-        <button class="btn-scan" onclick="executeScan()">Run Watchlist Exploration</button>
-        <span id="scan-status" style="font-size: 12px; color: #888;">Ready to scan market universe...</span>
-      </div>
-
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th>Date</th>
-              <th>Close Price</th>
-              <th>Daily Change (%)</th>
-              <th>RSI (14)</th>
-              <th>AFL Trigger Signal</th>
-            </tr>
-          </thead>
-          <tbody id="scan-rows">
-            <tr><td colspan="6" style="text-align: center; color: #666; padding: 20px;">Click 'Run Watchlist Exploration' to scan tickers.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- Core Engine Scripts -->
-  <script src="js/db-engine.js"></script>
-  <script src="js/afl-engine.js"></script>
-  <script src="js/chart-renderer.js"></script>
-  <script src="js/backtester.js"></script>
-  <script src="js/scanner.js"></script>
-
-  <!-- Tab Switcher and Scanner Logic -->
-  <script>
-    function switchTab(tabName) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.workspace-view').forEach(v => v.classList.remove('active'));
-      
-      const targetTab = document.getElementById('tab-' + tabName);
-      const targetView = document.getElementById('view-' + tabName);
-
-      if (targetTab && targetView) {
-        targetTab.classList.add('active');
-        targetView.classList.add('active');
-      }
-    }
-
-    async function executeScan() {
-      const statusEl = document.getElementById('scan-status');
-      const tbody = document.getElementById('scan-rows');
-      
-      if (!window.scannerEngine) {
-        statusEl.innerText = "Error: scanner.js not loaded.";
-        return;
-      }
-
-      statusEl.innerText = "Scanning watchlist vectors via AFL Engine...";
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #007acc; padding: 20px;">Evaluating formulas across symbols...</td></tr>';
-
-      try {
-        const results = await window.scannerEngine.runExploration();
-        statusEl.innerText = `Scan complete. Found ${results.length} matches.`;
-
-        if (results.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #888; padding: 20px;">No symbols matched AFL filter conditions today.</td></tr>';
-          return;
-        }
-
-        tbody.innerHTML = results.map(r => `
-          <tr>
-            <td style="font-weight: bold; color: #fff;">${r.symbol}</td>
-            <td>${r.date}</td>
-            <td>₹${r.close}</td>
-            <td class="${parseFloat(r.change) >= 0 ? 'win' : 'loss'}">${parseFloat(r.change) >= 0 ? '+' : ''}${r.change}%</td>
-            <td>${r.rsi}</td>
-            <td><span class="status-tag ${r.signal === 'BULLISH CROSS' ? 'tag-bull' : 'tag-oversold'}">${r.signal}</span></td>
-          </tr>
-        `).join('');
-      } catch (err) {
-        statusEl.innerText = "Error running scan.";
-        console.error(err);
-      }
-    }
-  </script>
+    <!-- App Initialization Scripts -->
+    <script src="js/chart-renderer.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>
