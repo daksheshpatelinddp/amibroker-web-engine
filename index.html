@@ -4,10 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AmiBroker Web Workstation</title>
-    <!-- Google Fonts & Font Awesome icons -->
+    <!-- Font Awesome & Google Fonts -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
+    
+    <!-- CSS Stylesheet Path -->
+    <link rel="stylesheet" href="./css/style.css">
 </head>
 <body class="dark-theme">
     <div class="app-container">
@@ -58,7 +60,6 @@
                     <button id="btn-close-drawer" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
                 </div>
 
-                <!-- Navigation Tabs inside Drawer -->
                 <div class="drawer-tabs">
                     <button class="drawer-tab active" data-tab="tab-symbols">Symbols</button>
                     <button class="drawer-tab" data-tab="tab-watchlists">Watchlists</button>
@@ -67,14 +68,10 @@
                 </div>
 
                 <div class="drawer-content">
-                    <!-- Tab 1: Category Tree & Symbols -->
                     <div id="tab-symbols" class="tab-pane active">
-                        <div class="category-tree" id="category-tree-container">
-                            <!-- Populated dynamically via js/category-manager.js -->
-                        </div>
+                        <div class="category-tree" id="category-tree-container"></div>
                     </div>
 
-                    <!-- Tab 2: Watchlists -->
                     <div id="tab-watchlists" class="tab-pane">
                         <div class="pane-action-bar">
                             <input type="text" id="new-watchlist-name" placeholder="New Watchlist Name...">
@@ -83,12 +80,10 @@
                         <div id="watchlists-list-container" class="lists-wrapper"></div>
                     </div>
 
-                    <!-- Tab 3: Favorites -->
                     <div id="tab-favorites" class="tab-pane">
                         <div id="favorites-list-container" class="lists-wrapper"></div>
                     </div>
 
-                    <!-- Tab 4: TXT Batch Import -->
                     <div id="tab-import" class="tab-pane">
                         <div class="import-box">
                             <label for="file-import-txt" class="file-label">
@@ -106,12 +101,8 @@
 
             <!-- Chart Workstation Workspace -->
             <main class="chart-workspace">
-                <!-- Dynamic Symbol Tabs Bar -->
-                <div class="workspace-tabs-bar" id="workspace-tabs-bar">
-                    <!-- Dynamic symbol tab pills added here via app.js -->
-                </div>
+                <div class="workspace-tabs-bar" id="workspace-tabs-bar"></div>
 
-                <!-- Active Grid Layout Container -->
                 <div id="chart-grid-container" class="chart-grid grid-1x1">
                     <div class="chart-cell active" id="chart-cell-1">
                         <div class="chart-cell-header">
@@ -133,12 +124,12 @@
         </div>
     </div>
 
-    <!-- DuckDB-WASM Bundle from jsDelivr CDN -->
+    <!-- DuckDB-WASM CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-wasm.js"></script>
     
     <!-- Application Scripts -->
-    <script src="js/category-manager.js"></script>
-    <script src="js/data-engine.js"></script>
-    <script src="js/app.js"></script>
+    <script src="./js/category-manager.js"></script>
+    <script src="./js/data-engine.js"></script>
+    <script src="./js/app.js"></script>
 </body>
 </html>
