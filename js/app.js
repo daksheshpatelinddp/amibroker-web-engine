@@ -1,238 +1,187 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const mgr = window.categoryManager;
-    let activeSymbol = "HDFCBANK.NS";
+/**
+ * js/app.js
+ * App Orchestrator linking Layout, CategoryManager, and DataEngine.
+ */
 
-    // UI Elements
-    const btnToggleSidebar = document.getElementById('btnToggleSidebar');
-    const btnCloseSidebar = document.getElementById('btnCloseSidebar');
-    const sidebarPanel = document.getElementById('sidebarPanel');
-    const sidebarBackdrop = document.getElementById('sidebarBackdrop');
-    const catTabBtns = document.querySelectorAll('.cat-tab-btn');
-    const subFilterSelect = document.getElementById('categorySubFilter');
-    const symbolListUI = document.getElementById('symbolList');
+document.addEventListener('DOMContentLoaded', async () => {
+    // 1. Initialize Category Manager
+    const categoryMgr = new CategoryManager();
     
-    const txtNewCategoryName = document.getElementById('txtNewCategoryName');
-    const btnCreateCategory = document.getElementById('btnCreateCategory');
-    const txtAddSymbol = document.getElementById('txtAddSymbol');
-    const btnAddSingleSymbol = document.getElementById('btnAddSingleSymbol');
-    const fileImportTxt = document.getElementById('fileImportTxt');
-    const btnClearCurrentCategory = document.getElementById('btnClearCurrentCategory');
-    
-    const symbolSearchInput = document.getElementById('symbolSearchInput');
-    const searchResults = document.getElementById('searchResults');
-    const lblActiveSymbol = document.getElementById('lblActiveSymbol');
-    const btnToggleFavorite = document.getElementById('btnToggleFavorite');
+    // 2. DOM Element Handles
+    const drawer = document.getElementById('category-drawer');
+    const btnToggleDrawer = document.getElementById('btn-toggle-drawer');
+    const btnCloseDrawer = document.getElementById('btn-close-drawer');
+    const quickSearchInput = document.getElementById('quick-search-input');
+    const searchResultsDropdown = document.getElementById('search-results-dropdown');
+    const btnClearSearch = document.getElementById('btn-clear-search');
+    const statusBadge = document.getElementById('data-status-badge');
+    const activeSymbolTitle = document.getElementById('active-symbol-title');
+    const workspaceTabsBar = document.getElementById('workspace-tabs-bar');
 
-    // Drawer Logic
-    function openSidebar() {
-        if (sidebarPanel) {
-            sidebarPanel.classList.remove('collapsed');
-            if (sidebarBackdrop) sidebarBackdrop.classList.add('active');
-        }
-    }
+    let openSymbolTabs = [];
+    let activeSymbol = null;
 
-    function closeSidebar() {
-        if (sidebarPanel) {
-            sidebarPanel.classList.add('collapsed');
-            if (sidebarBackdrop) sidebarBackdrop.classList.remove('active');
-        }
-    }
-
-    if (btnToggleSidebar) btnToggleSidebar.addEventListener('click', openSidebar);
-    if (btnCloseSidebar) btnCloseSidebar.addEventListener('click', closeSidebar);
-    if (sidebarBackdrop) sidebarBackdrop.addEventListener('click', closeSidebar);
-
-    // Chart Symbol Loader
-    function loadSymbolToChart(symbol) {
-        activeSymbol = symbol;
-        if (lblActiveSymbol) lblActiveSymbol.textContent = symbol;
-        
-        // Sync Favorite Button State
-        if (btnToggleFavorite) {
-            btnToggleFavorite.textContent = mgr.isFavorite(symbol) ? "★ Favorited" : "⭐ Favorite";
+    // 3. Initialize DataEngine & populate symbols
+    try {
+        if (statusBadge) {
+            statusBadge.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Connecting R2 Parquet...`;
         }
         
-        closeSidebar();
-        if (searchResults) searchResults.classList.add('hidden');
-    }
+        await window.dataEngine.init();
+        const availableSymbols = await window.dataEngine.getAvailableSymbols();
 
-    // Toggle Favorite Action
-    if (btnToggleFavorite) {
-        btnToggleFavorite.addEventListener('click', () => {
-            mgr.toggleFavorite(activeSymbol);
-            loadSymbolToChart(activeSymbol);
-            if (mgr.activeCategoryType === 'favorites') renderCategoryUI();
-        });
-    }
-
-    // Category & Sub-Filter UI Rendering
-    function renderCategoryUI() {
-        const currentType = mgr.activeCategoryType;
-        const folders = mgr.getFolderNames(currentType);
-
-        // Render Folder Dropdown
-        subFilterSelect.innerHTML = '';
-        if (currentType === 'favorites') {
-            subFilterSelect.innerHTML = '<option value="ALL">All Favorites</option>';
-            subFilterSelect.disabled = true;
-            if (txtNewCategoryName) txtNewCategoryName.disabled = true;
-        } else {
-            subFilterSelect.disabled = false;
-            if (txtNewCategoryName) txtNewCategoryName.disabled = false;
-
-            const optAll = document.createElement('option');
-            optAll.value = "ALL";
-            optAll.textContent = `All ${currentType.toUpperCase()}`;
-            subFilterSelect.appendChild(optAll);
-
-            folders.forEach(folder => {
-                const opt = document.createElement('option');
-                opt.value = folder;
-                opt.textContent = folder;
-                if (folder === mgr.activeSubFilter) opt.selected = true;
-                subFilterSelect.appendChild(opt);
+        // Populate Category Manager with discovered symbols if local storage is empty
+        if (categoryMgr.getAllSymbols().length === 0 && availableSymbols.length > 0) {
+            availableSymbols.forEach(sym => {
+                categoryMgr.addSymbol(sym, "NSE", "General", "Equities");
             });
         }
 
-        renderSymbolList();
-    }
-
-    function renderSymbolList() {
-        const symbols = mgr.getSymbolsForCurrentFilter();
-        symbolListUI.innerHTML = '';
-
-        if (!symbols || symbols.length === 0) {
-            symbolListUI.innerHTML = '<li class="symbol-item"><span class="symbol-sub">No symbols found.</span></li>';
-            return;
+        if (statusBadge) {
+            statusBadge.classList.add('ready');
+            statusBadge.innerHTML = `<i class="fa-solid fa-database"></i> DuckDB R2 Ready (${window.dataEngine.availableYears.length} Yrs)`;
         }
-
-        symbols.forEach(item => {
-            const li = document.createElement('li');
-            li.className = 'symbol-item';
-            li.innerHTML = `
-                <div class="symbol-row-main">
-                    <span class="symbol-ticker">${item.symbol}</span>
-                    <button class="btn-erase" style="background:none; border:none; color:#ff5252; cursor:pointer;">&times;</button>
-                </div>
-                <div class="symbol-sub">${item.name}</div>
-            `;
-
-            // Open Chart on Click
-            li.addEventListener('click', (e) => {
-                if (!e.target.classList.contains('btn-erase')) {
-                    loadSymbolToChart(item.symbol);
-                }
-            });
-
-            // Erase Single Symbol
-            li.querySelector('.btn-erase').addEventListener('click', (e) => {
-                e.stopPropagation();
-                mgr.removeSymbolFromFolder(mgr.activeCategoryType, mgr.activeSubFilter, item.symbol);
-                renderSymbolList();
-            });
-
-            symbolListUI.appendChild(li);
-        });
+    } catch (err) {
+        console.error("Failed to initialize DataEngine:", err);
+        if (statusBadge) {
+            statusBadge.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Data Engine Error`;
+        }
     }
 
-    // Category Tab Handler
-    catTabBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            catTabBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            mgr.activeCategoryType = btn.getAttribute('data-cat');
-            mgr.activeSubFilter = "ALL";
-            renderCategoryUI();
+    // 4. Drawer Toggle Logic
+    btnToggleDrawer?.addEventListener('click', () => drawer.classList.toggle('open'));
+    btnCloseDrawer?.addEventListener('click', () => drawer.classList.remove('open'));
+
+    // 5. Drawer Tab Switcher
+    document.querySelectorAll('.drawer-tab').forEach(tabBtn => {
+        tabBtn.addEventListener('click', (e) => {
+            document.querySelectorAll('.drawer-tab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+            e.target.classList.add('active');
+            const paneId = e.target.getAttribute('data-tab');
+            document.getElementById(paneId)?.classList.add('active');
         });
     });
 
-    if (subFilterSelect) {
-        subFilterSelect.addEventListener('change', (e) => {
-            mgr.activeSubFilter = e.target.value;
-            renderSymbolList();
-        });
-    }
+    // 6. Global Symbol Load Function
+    window.loadSymbol = async function(symbol) {
+        if (!symbol) return;
+        const cleanSym = symbol.trim().toUpperCase();
+        activeSymbol = cleanSym;
 
-    // Create New Folder Action
-    if (btnCreateCategory) {
-        btnCreateCategory.addEventListener('click', () => {
-            const name = txtNewCategoryName.value.trim();
-            if (name && mgr.createFolder(mgr.activeCategoryType, name)) {
-                txtNewCategoryName.value = '';
-                mgr.activeSubFilter = name;
-                renderCategoryUI();
-            }
-        });
-    }
+        // Add to workspace tab pills if not present
+        if (!openSymbolTabs.includes(cleanSym)) {
+            openSymbolTabs.push(cleanSym);
+            renderSymbolTabs();
+        } else {
+            renderSymbolTabs();
+        }
 
-    // Add Single Symbol
-    if (btnAddSingleSymbol) {
-        btnAddSingleSymbol.addEventListener('click', () => {
-            const sym = txtAddSymbol.value.trim();
-            if (sym) {
-                mgr.addSymbolToFolder(mgr.activeCategoryType, mgr.activeSubFilter, sym);
-                txtAddSymbol.value = '';
-                renderSymbolList();
-            }
-        });
-    }
+        if (activeSymbolTitle) {
+            activeSymbolTitle.textContent = cleanSym;
+        }
 
-    // Import TXT File (One Symbol Per Line)
-    if (fileImportTxt) {
-        fileImportTxt.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+        if (statusBadge) {
+            statusBadge.className = 'data-status-badge loading';
+            statusBadge.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Fetching ${cleanSym}...`;
+        }
 
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                mgr.importTxtToFolder(mgr.activeCategoryType, mgr.activeSubFilter, event.target.result);
-                renderSymbolList();
-                fileImportTxt.value = '';
-            };
-            reader.readAsText(file);
-        });
-    }
+        try {
+            // Queries across 2000 -> currentYear parquet range
+            const data = await window.dataEngine.getSymbolData(cleanSym);
+            console.log(`[App] Successfully fetched ${data.length} EOD records for ${cleanSym}`, data);
 
-    // Clear Current Category
-    if (btnClearCurrentCategory) {
-        btnClearCurrentCategory.addEventListener('click', () => {
-            if (confirm("Are you sure you want to erase all symbols in this selection?")) {
-                mgr.clearFolder(mgr.activeCategoryType, mgr.activeSubFilter);
-                renderSymbolList();
-            }
-        });
-    }
-
-    // Top Header Search Box Logic
-    if (symbolSearchInput) {
-        symbolSearchInput.addEventListener('input', (e) => {
-            const q = e.target.value.trim().toUpperCase();
-            if (!q) {
-                searchResults.classList.add('hidden');
-                return;
+            if (statusBadge) {
+                statusBadge.className = 'data-status-badge ready';
+                statusBadge.innerHTML = `<i class="fa-solid fa-check"></i> ${data.length} Bars Loaded`;
             }
 
-            const matches = mgr.masterSymbols.filter(s => s.symbol.includes(q) || s.name.toUpperCase().includes(q));
-            searchResults.innerHTML = '';
+            // Phase 3 Chart Rendering call:
+            // if (window.chartEngine) window.chartEngine.render('chart-render-1', data);
 
-            if (matches.length > 0) {
-                searchResults.classList.remove('hidden');
-                matches.forEach(m => {
-                    const li = document.createElement('li');
-                    li.className = 'symbol-item';
-                    li.innerHTML = `<span class="symbol-ticker">${m.symbol}</span> <span class="symbol-sub">${m.name}</span>`;
-                    li.addEventListener('click', () => {
-                        loadSymbolToChart(m.symbol);
-                        symbolSearchInput.value = '';
-                    });
-                    searchResults.appendChild(li);
-                });
+        } catch (err) {
+            console.error(`[App] Error loading symbol ${cleanSym}:`, err);
+            if (statusBadge) {
+                statusBadge.className = 'data-status-badge error';
+                statusBadge.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> Fetch Error`;
+            }
+        }
+    };
+
+    // Render workspace tabs
+    function renderSymbolTabs() {
+        if (!workspaceTabsBar) return;
+        workspaceTabsBar.innerHTML = '';
+
+        openSymbolTabs.forEach(sym => {
+            const tabPill = document.createElement('div');
+            tabPill.className = `symbol-tab-pill ${sym === activeSymbol ? 'active' : ''}`;
+            
+            tabPill.innerHTML = `
+                <span>${sym}</span>
+                <i class="fa-solid fa-xmark close-pill" data-sym="${sym}"></i>
+            `;
+
+            tabPill.addEventListener('click', (e) => {
+                if (e.target.classList.contains('close-pill')) {
+                    e.stopPropagation();
+                    const targetSym = e.target.getAttribute('data-sym');
+                    openSymbolTabs = openSymbolTabs.filter(s => s !== targetSym);
+                    if (activeSymbol === targetSym) {
+                        activeSymbol = openSymbolTabs.length > 0 ? openSymbolTabs[openSymbolTabs.length - 1] : null;
+                        if (activeSymbol) window.loadSymbol(activeSymbol);
+                        else if (activeSymbolTitle) activeSymbolTitle.textContent = 'Select a Symbol';
+                    }
+                    renderSymbolTabs();
+                } else {
+                    window.loadSymbol(sym);
+                }
+            });
+
+            workspaceTabsBar.appendChild(tabPill);
+        });
+    }
+
+    // 7. Quick Search Interactions
+    quickSearchInput?.addEventListener('input', (e) => {
+        const query = e.target.value.trim().toUpperCase();
+        if (query.length > 0) {
+            btnClearSearch?.classList.remove('hidden');
+            const allSymbols = categoryMgr.getAllSymbols();
+            const filtered = allSymbols.filter(s => s.symbol.includes(query)).slice(0, 10);
+
+            if (filtered.length > 0) {
+                searchResultsDropdown.innerHTML = filtered.map(item => `
+                    <div class="search-result-item" data-symbol="${item.symbol}">
+                        <strong>${item.symbol}</strong>
+                        <small>${item.group} / ${item.sector}</small>
+                    </div>
+                `).join('');
+                searchResultsDropdown.classList.remove('hidden');
             } else {
-                searchResults.classList.add('hidden');
+                searchResultsDropdown.innerHTML = `<div class="search-result-item empty">No symbol found for "${query}"</div>`;
+                searchResultsDropdown.classList.remove('hidden');
             }
-        });
-    }
+        } else {
+            btnClearSearch?.classList.add('hidden');
+            searchResultsDropdown.classList.add('hidden');
+        }
+    });
 
-    // Initial Setup
-    renderCategoryUI();
+    searchResultsDropdown?.addEventListener('click', (e) => {
+        const item = e.target.closest('.search-result-item');
+        if (item && item.dataset.symbol) {
+            window.loadSymbol(item.dataset.symbol);
+            searchResultsDropdown.classList.add('hidden');
+            if (quickSearchInput) quickSearchInput.value = '';
+            btnClearSearch?.classList.add('hidden');
+        }
+    });
+
+    btnClearSearch?.addEventListener('click', () => {
+        if (quickSearchInput) quickSearchInput.value = '';
+        btnClearSearch.classList.add('hidden');
+        searchResultsDropdown?.classList.add('hidden');
+    });
 });
