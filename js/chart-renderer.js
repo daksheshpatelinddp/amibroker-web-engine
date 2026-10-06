@@ -1,158 +1,72 @@
-class AmiCanvasRenderer {
-  constructor() {
-    this.visibleBars = 80;
-    this.endIdx = 0;
-    this.crosshairX = -1;
-
-    this.initCanvases();
-    this.bindEvents();
-    this.generateMockData(200);
-  }
-
-  initCanvases() {
-    this.canvases = {
-      price: document.getElementById('canvas-price'),
-      volume: document.getElementById('canvas-volume'),
-      indicator: document.getElementById('canvas-indicator')
-    };
-    this.ctxs = {
-      price: this.canvases.price.getContext('2d'),
-      volume: this.canvases.volume.getContext('2d'),
-      indicator: this.canvases.indicator.getContext('2d')
-    };
-    this.resize();
-  }
-
-  resize() {
-    Object.keys(this.canvases).forEach(key => {
-      const canvas = this.canvases[key];
-      if (!canvas) return;
-      const rect = canvas.parentElement.getBoundingClientRect();
-      canvas.width = rect.width * window.devicePixelRatio;
-      canvas.height = rect.height * window.devicePixelRatio;
-      this.ctxs[key].scale(window.devicePixelRatio, window.devicePixelRatio);
-    });
-    this.render();
-  }
-
-  generateMockData(count) {
-    const dates = [], open = [], high = [], low = [], close = [], volume = [], rsi = [];
-    let p = 2400;
-    const now = new Date();
-
-    for (let i = 0; i < count; i++) {
-      const d = new Date(now.getTime() - (count - i) * 86400000);
-      const o = p + (Math.random() - 0.48) * 20;
-      const h = o + Math.random() * 15;
-      const l = o - Math.random() * 15;
-      const c = l + Math.random() * (h - l);
-      const v = Math.floor(Math.random() * 500000) + 100000;
-
-      dates.push(d.toISOString().split('T')[0]);
-      open.push(o); high.push(h); low.push(l); close.push(c); volume.push(v);
-      rsi.push(30 + Math.random() * 40);
-      p = c;
+class ChartEngine {
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.chart = null;
+        this.candleSeries = null;
+        this.volumeSeries = null;
+        this.isInitialized = false;
     }
 
-    this.data = { dates, open, high, low, close, volume, rsi };
-    this.endIdx = count - 1;
-    this.render();
-  }
+    init() {
+        if (!this.container || this.isInitialized) return;
 
-  bindEvents() {
-    window.addEventListener('resize', () => this.resize());
-    const container = document.getElementById('chart-workspace');
-    if (!container) return;
+        // Create Lightweight Chart instance
+        this.chart = LightweightCharts.createChart(this.container, {
+            width: this.container.clientWidth || 800,
+            height: this.container.clientHeight || 500,
+            layout: {
+                background: { color: '#12151e' },
+                textColor: '#d1d4dc',
+            },
+            grid: {
+                vertLines: { color: '#1f2434' },
+                horzLines: { color: '#1f2434' },
+            },
+            timeScale: {
+                borderColor: '#2e354f',
+                timeVisible: true,
+            },
+        });
 
-    container.addEventListener('mousemove', (e) => {
-      const rect = container.getBoundingClientRect();
-      this.crosshairX = e.clientX - rect.left;
-      this.render();
-    });
+        // Candlestick Series
+        this.candleSeries = this.chart.addCandlestickSeries({
+            upColor: '#089981',
+            downColor: '#f23645',
+            borderVisible: false,
+            wickUpColor: '#089981',
+            wickDownColor: '#f23645',
+        });
 
-    container.addEventListener('mouseleave', () => {
-      this.crosshairX = -1;
-      this.render();
-    });
-  }
+        // Load dummy historical dataset to establish baseline view
+        this.loadSampleData();
 
-  render() {
-    if (!this.data || !this.canvases.price) return;
-
-    const startIdx = Math.max(0, this.endIdx - this.visibleBars + 1);
-    const count = this.endIdx - startIdx + 1;
-    const width = this.canvases.price.parentElement.clientWidth;
-    const barWidth = width / count;
-
-    Object.values(this.ctxs).forEach(ctx => ctx.clearRect(0, 0, width, 1000));
-
-    // Render Price Candlesticks
-    const pHeight = this.canvases.price.parentElement.clientHeight;
-    const pCtx = this.ctxs.price;
-    let minP = Infinity, maxP = -Infinity;
-    for (let i = startIdx; i <= this.endIdx; i++) {
-      if (this.data.low[i] < minP) minP = this.data.low[i];
-      if (this.data.high[i] > maxP) maxP = this.data.high[i];
-    }
-    const pRange = maxP - minP || 1;
-
-    for (let i = startIdx; i <= this.endIdx; i++) {
-      const idx = i - startIdx;
-      const x = idx * barWidth + barWidth / 2;
-      const isUp = this.data.close[i] >= this.data.open[i];
-
-      const yHigh = pHeight - ((this.data.high[i] - minP) / pRange) * (pHeight - 20) - 10;
-      const yLow = pHeight - ((this.data.low[i] - minP) / pRange) * (pHeight - 20) - 10;
-      const yOpen = pHeight - ((this.data.open[i] - minP) / pRange) * (pHeight - 20) - 10;
-      const yClose = pHeight - ((this.data.close[i] - minP) / pRange) * (pHeight - 20) - 10;
-
-      pCtx.strokeStyle = isUp ? '#00c853' : '#ff3d00';
-      pCtx.beginPath();
-      pCtx.moveTo(x, yHigh);
-      pCtx.lineTo(x, yLow);
-      pCtx.stroke();
-
-      pCtx.fillStyle = isUp ? '#00c853' : '#ff3d00';
-      const bodyY = Math.min(yOpen, yClose);
-      const bodyH = Math.max(1, Math.abs(yClose - yOpen));
-      pCtx.fillRect(x - barWidth * 0.35, bodyY, barWidth * 0.7, bodyH);
+        // Handle Window Resize
+        window.addEventListener('resize', () => this.resize());
+        this.isInitialized = true;
     }
 
-    // Render Volume
-    const vHeight = this.canvases.volume.parentElement.clientHeight;
-    const vCtx = this.ctxs.volume;
-    let maxV = 0;
-    for (let i = startIdx; i <= this.endIdx; i++) {
-      if (this.data.volume[i] > maxV) maxV = this.data.volume[i];
+    resize() {
+        if (this.chart && this.container) {
+            const width = this.container.clientWidth;
+            const height = this.container.clientHeight;
+            if (width > 0 && height > 0) {
+                this.chart.applyOptions({ width, height });
+            }
+        }
     }
 
-    for (let i = startIdx; i <= this.endIdx; i++) {
-      const idx = i - startIdx;
-      const x = idx * barWidth + barWidth / 2;
-      const vH = (this.data.volume[i] / maxV) * (vHeight - 10);
-      const isUp = this.data.close[i] >= this.data.open[i];
-      vCtx.fillStyle = isUp ? 'rgba(0, 200, 83, 0.4)' : 'rgba(255, 61, 0, 0.4)';
-      vCtx.fillRect(x - barWidth * 0.35, vHeight - vH, barWidth * 0.7, vH);
+    loadSampleData() {
+        const sampleData = [
+            { time: '2026-01-02', open: 2400.0, high: 2425.0, low: 2390.0, close: 2415.5 },
+            { time: '2026-01-05', open: 2415.5, high: 2440.0, low: 2410.0, close: 2435.0 },
+            { time: '2026-01-06', open: 2435.0, high: 2450.0, low: 2420.0, close: 2428.0 },
+            { time: '2026-01-07', open: 2428.0, high: 2465.0, low: 2425.0, close: 2460.0 },
+            { time: '2026-01-08', open: 2460.0, high: 2480.0, low: 2450.0, close: 2472.5 },
+        ];
+        this.candleSeries.setData(sampleData);
+        this.chart.timeScale().fitContent();
     }
-
-    // Render RSI Indicator Line
-    const rHeight = this.canvases.indicator.parentElement.clientHeight;
-    const rCtx = this.ctxs.indicator;
-    rCtx.strokeStyle = '#007acc';
-    rCtx.lineWidth = 1.5;
-    rCtx.beginPath();
-
-    for (let i = startIdx; i <= this.endIdx; i++) {
-      const idx = i - startIdx;
-      const x = idx * barWidth + barWidth / 2;
-      const yRsi = rHeight - (this.data.rsi[i] / 100) * (rHeight - 10) - 5;
-      if (i === startIdx) rCtx.moveTo(x, yRsi);
-      else rCtx.lineTo(x, yRsi);
-    }
-    rCtx.stroke();
-  }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  window.chartRenderer = new AmiCanvasRenderer();
-});
+// Global Instance
+window.chartEngine = new ChartEngine('chartContainer');
