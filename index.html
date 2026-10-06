@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>AmiBroker Web Workstation</title>
     <link rel="stylesheet" href="css/style.css">
     <!-- TradingView Lightweight Charts -->
@@ -11,18 +11,32 @@
 <body class="dark-theme">
     <!-- Top Workstation Header / Toolbar -->
     <header class="top-bar">
-        <div class="brand">
-            <span class="logo-icon">📈</span>
-            <span class="brand-title">AmiBroker Web Engine</span>
+        <div class="top-bar-left">
+            <button class="icon-btn-toggle" id="btnToggleSidebar" title="Toggle Categories & Watchlists">📋 Categories</button>
+            <div class="brand">
+                <span class="logo-icon">📈</span>
+                <span class="brand-title">AmiBroker</span>
+            </div>
+        </div>
+
+        <!-- Market Database Selector -->
+        <div class="market-picker">
+            <label for="dbSelect">Database:</label>
+            <select id="dbSelect">
+                <option value="NSE">NSE India</option>
+                <option value="BSE">BSE India</option>
+                <option value="US">US Markets</option>
+            </select>
         </div>
         
         <div class="symbol-picker">
             <label for="tickerSelect">Symbol:</label>
+
             <select id="tickerSelect">
-                <option value="RELIANCE">RELIANCE</option>
-                <option value="TCS">TCS</option>
-                <option value="INFY">INFY</option>
-                <option value="HDFCBANK">HDFCBANK</option>
+                <option value="HDFCBANK">HDFCBANK.NS</option>
+                <option value="RELIANCE">RELIANCE.NS</option>
+                <option value="TCS">TCS.NS</option>
+                <option value="INFY">INFY.NS</option>
             </select>
         </div>
 
@@ -42,24 +56,44 @@
     <!-- Main Workspace Container -->
     <main class="workspace-body">
         
-        <!-- Sidebar / Watchlist Panel -->
-        <aside class="sidebar" id="sidebarPanel">
+        <!-- Sidebar / Category Hierarchy Drawer -->
+        <aside class="sidebar collapsed" id="sidebarPanel">
             <div class="panel-header">
-                <h3>Watchlist / Categories</h3>
-                <button class="icon-btn" id="toggleSidebar">◀</button>
+                <h3>Categories & Watchlists</h3>
+                <button class="icon-btn" id="btnCloseSidebar">✕</button>
             </div>
+            
             <div class="panel-content">
+                <!-- Category View Selector -->
+                <div class="category-tabs">
+                    <button class="cat-tab-btn active" data-cat="all">All</button>
+                    <button class="cat-tab-btn" data-cat="groups">Groups</button>
+                    <button class="cat-tab-btn" data-cat="sectors">Sectors</button>
+                    <button class="cat-tab-btn" data-cat="watchlists">Watchlists</button>
+                </div>
+
+                <!-- Category Filter Sub-Selector -->
+                <div class="category-filter-bar" id="categoryFilterContainer">
+                    <select id="categorySubFilter" class="sub-filter-select">
+                        <option value="ALL">All Symbols (3000+)</option>
+                    </select>
+                </div>
+
+                <!-- Watchlist Creation Control (Hidden unless Watchlists tab active) -->
+                <div class="create-watchlist-bar hidden" id="createWatchlistBar">
+                    <input type="text" id="txtNewWatchlist" placeholder="New Watchlist Name...">
+                    <button class="btn-sm-accent" id="btnCreateWatchlist">+</button>
+                </div>
+
+                <!-- Symbol List Container -->
                 <ul class="symbol-list" id="symbolList">
-                    <li class="active">RELIANCE.NS</li>
-                    <li>TCS.NS</li>
-                    <li>INFY.NS</li>
-                    <li>HDFCBANK.NS</li>
-                    <li>ICICIBANK.NS</li>
-                    <li>SBIN.NS</li>
-                    <li>BHARTIARTL.NS</li>
+                    <!-- Dynamic Symbols Populated Here -->
                 </ul>
             </div>
         </aside>
+
+        <!-- Sidebar Overlay Backstop for Mobile -->
+        <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
         <!-- Dynamic Content Tabs -->
         <section class="content-area">
@@ -67,8 +101,10 @@
             <!-- TAB 1: CHART WORKSPACE -->
             <div id="tab-chart" class="tab-content active">
                 <div class="chart-toolbar">
-                    <button class="btn-sm" id="btnRescale">Reset View</button>
+                    <span class="active-symbol-label" id="lblActiveSymbol">HDFCBANK.NS</span>
+                    <button class="icon-btn-star" id="btnToggleFavorite" title="Add to Favorites">☆</button>
                     <span class="toolbar-divider"></span>
+                    <button class="btn-sm" id="btnRescale">Reset View</button>
                     <button class="btn-sm" id="btnMA">Toggle MA(20)</button>
                 </div>
                 <div id="chartContainer" class="chart-container"></div>
@@ -78,7 +114,7 @@
             <div id="tab-scanner" class="tab-content">
                 <div class="action-bar">
                     <button class="btn-primary" id="btnRunScan">Run Exploration</button>
-                    <span class="info-text">Scans entire universe via DuckDB-WASM</span>
+                    <span class="info-text">Scans entire universe via DuckDB</span>
                 </div>
                 <div class="table-container">
                     <table class="data-table" id="scanResultsTable">
@@ -161,10 +197,10 @@
     </main>
 
     <!-- Bottom Dock Console -->
-    <footer class="bottom-dock">
-        <div class="dock-header">
+    <footer class="bottom-dock collapsed">
+        <div class="dock-header" id="toggleConsole">
             <span>AFL Output Log / Console</span>
-            <button class="icon-btn" id="toggleConsole">▼</button>
+            <span class="dock-icon">▲</span>
         </div>
         <div class="dock-content" id="consoleLog">
             <div class="log-line info">[System] AmiBroker Workstation Engine Initialized.</div>
@@ -173,6 +209,7 @@
 
     <!-- App Initialization Scripts -->
     <script src="js/chart-renderer.js"></script>
+    <script src="js/category-manager.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
