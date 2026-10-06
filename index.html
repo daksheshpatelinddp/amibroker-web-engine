@@ -3,117 +3,142 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AmiBroker Workstation</title>
+    <title>AmiBroker Web Workstation</title>
+    <!-- Google Fonts & Font Awesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
-
+<body class="dark-theme">
     <div class="app-container">
-        <!-- Header -->
-        <header class="app-header">
-            <div class="header-left">
-                <button id="btnToggleSidebar" class="btn-header">
-                    📋 Categories
+        <!-- Top Navigation / Header Bar -->
+        <header class="top-bar">
+            <div class="bar-left">
+                <button id="btn-toggle-drawer" class="icon-btn" title="Toggle Categories Drawer">
+                    <i class="fa-solid fa-bars"></i>
                 </button>
-                <span style="font-weight: 600; margin-left: 4px;">📈 AmiBroker</span>
-                
-                <!-- Quick Search Box -->
-                <div style="position: relative; margin-left: 10px;">
-                    <input type="text" id="symbolSearchInput" placeholder="Search Symbol..." class="dropdown-select" style="width: 140px; text-transform: uppercase;">
-                    <ul id="searchResults" class="symbol-list hidden" style="position: absolute; top: 100%; left: 0; width: 220px; max-height: 200px; background: var(--bg-panel); border: 1px solid var(--border-color); z-index: 1000;"></ul>
+                <div class="brand-title">
+                    <i class="fa-solid fa-chart-line brand-icon"></i>
+                    <span>AmiBroker <small>Web Workstation</small></span>
                 </div>
             </div>
 
-            <div class="header-right">
-                <button class="btn-header tab-btn active" data-tab="tab-chart">Chart Sheet 1</button>
-                <button class="btn-header tab-btn" data-tab="tab-exploration">Exploration / Scanner</button>
-                <button class="btn-header tab-btn" data-tab="tab-backtest">Portfolio Backtester</button>
+            <!-- Global Quick Search Bar -->
+            <div class="quick-search-wrapper">
+                <div class="search-input-box">
+                    <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                    <input type="text" id="quick-search-input" placeholder="Search symbol or category (e.g. RELIANCE)..." autocomplete="off">
+                    <button id="btn-clear-search" class="clear-btn hidden"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div id="search-results-dropdown" class="search-results-dropdown hidden"></div>
+            </div>
+
+            <!-- Top Controls Right -->
+            <div class="bar-right">
+                <div class="category-dropdown-group">
+                    <select id="select-group-filter" class="nav-select"><option value="">Group: All</option></select>
+                    <select id="select-sector-filter" class="nav-select"><option value="">Sector: All</option></select>
+                    <select id="select-industry-filter" class="nav-select"><option value="">Industry: All</option></select>
+                </div>
+
+                <div class="layout-toggle-group">
+                    <button class="layout-btn active" data-layout="1x1" title="Single Chart"><i class="fa-solid fa-square"></i></button>
+                    <button class="layout-btn" data-layout="2x1" title="Dual Horizontal"><i class="fa-solid fa-table-columns"></i></button>
+                    <button class="layout-btn" data-layout="2x2" title="2x2 Grid"><i class="fa-solid fa-table-cells"></i></button>
+                </div>
             </div>
         </header>
 
-        <!-- Main Workspace -->
-        <div class="main-workspace">
-            <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
-
-            <!-- Categories Sidebar Drawer -->
-            <aside id="sidebarPanel" class="sidebar collapsed">
-                <div class="sidebar-header">
-                    <span class="sidebar-title">Categories & Watchlists</span>
-                    <button id="btnCloseSidebar" class="btn-close">&times;</button>
-                </div>
-                
-                <!-- Top Nav Tabs -->
-                <div class="cat-tabs">
-                    <button class="cat-tab-btn active" data-cat="groups">Groups</button>
-                    <button class="cat-tab-btn" data-cat="sectors">Sectors</button>
-                    <button class="cat-tab-btn" data-cat="industries">Industries</button>
-                    <button class="cat-tab-btn" data-cat="watchlists">Watchlists</button>
-                    <button class="cat-tab-btn" data-cat="favorites">⭐ Favorites</button>
+        <!-- Main Workspace Body -->
+        <div class="workspace-body">
+            <!-- Sidebar Category Manager Drawer -->
+            <aside id="category-drawer" class="category-drawer">
+                <div class="drawer-header">
+                    <h3><i class="fa-solid fa-folder-tree"></i> Categories</h3>
+                    <button id="btn-close-drawer" class="icon-btn"><i class="fa-solid fa-xmark"></i></button>
                 </div>
 
-                <!-- Sub-Category Selection & Add New Group/Sector/Industry -->
-                <div class="category-controls">
-                    <div id="subFilterContainer" style="display: flex; gap: 4px; margin-bottom: 6px;">
-                        <select id="categorySubFilter" class="dropdown-select" style="flex: 1;">
-                            <option value="ALL">All Symbols</option>
-                        </select>
-                    </div>
+                <!-- Navigation Tabs inside Drawer -->
+                <div class="drawer-tabs">
+                    <button class="drawer-tab active" data-tab="tab-symbols">Symbols</button>
+                    <button class="drawer-tab" data-tab="tab-watchlists">Watchlists</button>
+                    <button class="drawer-tab" data-tab="tab-favorites">Favorites</button>
+                    <button class="drawer-tab" data-tab="tab-import">Batch Import</button>
+                </div>
 
-                    <!-- Action Bar to Add New Group/Sector/Industry/Watchlist -->
-                    <div id="createCategoryBar" style="display: flex; gap: 4px; margin-bottom: 6px;">
-                        <input type="text" id="txtNewCategoryName" placeholder="New Folder Name..." class="dropdown-select" style="flex: 1;">
-                        <button id="btnCreateCategory" class="btn-header" style="padding: 4px 8px;">+ Add</button>
-                    </div>
-
-                    <!-- Manage Symbols Bar (Add Single / TXT Import) -->
-                    <div id="manageSymbolsBar" style="display: flex; flex-direction: column; gap: 4px;">
-                        <div style="display: flex; gap: 4px;">
-                            <input type="text" id="txtAddSymbol" placeholder="Add Symbol (e.g. RELIANCE.NS)" class="dropdown-select" style="flex: 1; text-transform: uppercase;">
-                            <button id="btnAddSingleSymbol" class="btn-header" style="padding: 4px 8px;">Add</button>
+                <div class="drawer-content">
+                    <!-- Tab 1: Category Tree & Symbols -->
+                    <div id="tab-symbols" class="tab-pane active">
+                        <div class="category-tree" id="category-tree-container">
+                            <!-- Populated dynamically via js/category-manager.js -->
                         </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
-                            <label class="btn-header" style="cursor: pointer; font-size: 11px;">
-                                📁 Import TXT File
-                                <input type="file" id="fileImportTxt" accept=".txt" style="display: none;">
+                    </div>
+
+                    <!-- Tab 2: Watchlists -->
+                    <div id="tab-watchlists" class="tab-pane">
+                        <div class="pane-action-bar">
+                            <input type="text" id="new-watchlist-name" placeholder="New Watchlist Name...">
+                            <button id="btn-create-watchlist" class="btn primary-btn"><i class="fa-solid fa-plus"></i> Create</button>
+                        </div>
+                        <div id="watchlists-list-container" class="lists-wrapper"></div>
+                    </div>
+
+                    <!-- Tab 3: Favorites -->
+                    <div id="tab-favorites" class="tab-pane">
+                        <div id="favorites-list-container" class="lists-wrapper"></div>
+                    </div>
+
+                    <!-- Tab 4: TXT Batch Import -->
+                    <div id="tab-import" class="tab-pane">
+                        <div class="import-box">
+                            <label for="file-import-txt" class="file-label">
+                                <i class="fa-solid fa-file-arrow-up"></i>
+                                <span>Select TXT File</span>
+                                <small>Format: Symbol, Group, Sector, Industry</small>
                             </label>
-                            <button id="btnClearCurrentCategory" class="btn-header" style="color: #ff5252; font-size: 11px;">Clear All</button>
+                            <input type="file" id="file-import-txt" accept=".txt,.csv" class="hidden-file-input">
+                            <div id="import-preview" class="import-preview hidden"></div>
+                            <button id="btn-execute-import" class="btn success-btn hidden"><i class="fa-solid fa-file-import"></i> Execute Import</button>
                         </div>
                     </div>
                 </div>
-
-                <!-- Symbol Display List -->
-                <ul id="symbolList" class="symbol-list"></ul>
             </aside>
 
-            <!-- Main Canvas View Area -->
-            <main class="view-container">
-                <div id="tab-chart" class="tab-content active" style="height: 100%; display: flex; flex-direction: column;">
-                    <div class="chart-toolbar">
-                        <span id="lblActiveSymbol" class="symbol-label">HDFCBANK.NS</span>
-                        <button id="btnToggleFavorite" class="btn-header">⭐ Favorite</button>
-                        <button class="btn-header">Reset View</button>
+            <!-- Chart Workstation Workspace -->
+            <main class="chart-workspace">
+                <!-- Dynamic Symbol Tabs Bar -->
+                <div class="workspace-tabs-bar" id="workspace-tabs-bar">
+                    <!-- Dynamic symbol tab pills added here via app.js -->
+                </div>
+
+                <!-- Active Grid Layout Container -->
+                <div id="chart-grid-container" class="chart-grid grid-1x1">
+                    <div class="chart-cell active" id="chart-cell-1">
+                        <div class="chart-cell-header">
+                            <span class="cell-symbol-title" id="active-symbol-title">Select a Symbol</span>
+                            <div class="cell-tools">
+                                <span class="data-status-badge" id="data-status-badge"><i class="fa-solid fa-circle-notch fa-spin"></i> Initializing DuckDB</span>
+                                <span class="timeframe-pill active">EOD</span>
+                            </div>
+                        </div>
+                        <div class="chart-render-target" id="chart-render-1">
+                            <div class="empty-chart-placeholder">
+                                <i class="fa-solid fa-chart-candlestick"></i>
+                                <p>Select any symbol from the drawer or quick search to fetch Parquet EOD data.</p>
+                            </div>
+                        </div>
                     </div>
-                    <div id="chartContainer" class="chart-viewport"></div>
-                </div>
-
-                <div id="tab-exploration" class="tab-content hidden" style="padding: 16px;">
-                    <button id="btnRunExploration" class="btn-header active">Run Exploration</button>
-                </div>
-
-                <div id="tab-backtest" class="tab-content hidden" style="padding: 16px;">
-                    <button id="btnRunBacktest" class="btn-header active">Execute Backtest</button>
-                </div>
-
-                <div class="console-panel">
-                    <div class="console-header">AFL Output Log / Console</div>
-                    <div class="console-logs" id="consoleLogs">[System] Workstation Initialized</div>
                 </div>
             </main>
         </div>
     </div>
 
-    <!-- Script Order -->
+    <!-- DuckDB-WASM Bundle from jsDelivr CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-wasm.js"></script>
+    
+    <!-- Application Scripts -->
     <script src="js/category-manager.js"></script>
+    <script src="js/data-engine.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
