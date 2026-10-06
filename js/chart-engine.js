@@ -1,6 +1,5 @@
 /**
  * AmiBroker Web Workstation - Chart Renderer
- * Bridges AFL Engine execution outputs to TradingView Lightweight Charts.
  */
 
 class ChartEngine {
@@ -14,52 +13,71 @@ class ChartEngine {
     initChart() {
         if (!this.container) return;
 
+        // Force explicit dark background
+        this.container.style.backgroundColor = '#131722';
+
         this.chart = LightweightCharts.createChart(this.container, {
-            width: this.container.clientWidth,
-            height: this.container.clientHeight || 450,
+            width: this.container.clientWidth || window.innerWidth,
+            height: Math.max(this.container.clientHeight, 350),
             layout: {
-                backgroundColor: '#131722',
+                background: { type: 'solid', color: '#131722' },
                 textColor: '#d1d4dc',
             },
             grid: {
-                vertLines: { color: '#2B2B43' },
-                horzLines: { color: '#2B2B43' },
+                vertLines: { color: '#1f2937' },
+                horzLines: { color: '#1f2937' },
             },
             timeScale: {
-                borderColor: '#485c7b',
+                borderColor: '#374151',
                 timeVisible: true,
             },
         });
 
-        window.addEventListener('resize', () => {
-            this.chart.applyOptions({
-                width: this.container.clientWidth,
-                height: this.container.clientHeight || 450,
+        const resizeObserver = new ResizeObserver(entries => {
+            if (!entries || entries.length === 0) return;
+            const { width, height } = entries[0].contentRect;
+            this.chart.applyOptions({ 
+                width: width || window.innerWidth, 
+                height: height > 0 ? height : 350 
             });
         });
+        resizeObserver.observe(this.container);
     }
 
     renderAFLOutput(aflResult) {
         if (!aflResult || !aflResult.success) return;
 
-        // Clear existing series
-        this.seriesMap.forEach(s => this.chart.removeSeries(s));
+        // Clear previous series cleanly
+        this.seriesMap.forEach(s => {
+            try { this.chart.removeSeries(s); } catch (e) {}
+        });
         this.seriesMap.clear();
 
         const { plots, time, rawData } = aflResult;
 
-        // Default OHLC Candlestick Rendering
-        const candleSeries = this.chart.addCandlestickSeries({
-            upColor: '#26a69a',
-            downColor: '#ef5350',
-            borderVisible: false,
-            wickUpColor: '#26a69a',
-            wickDownColor: '#ef5350',
-        });
-        candleSeries.setData(rawData);
-        this.seriesMap.set('main_candles', candleSeries);
+        // Render Base Candlestick Series
+        if (rawData && rawData.length > 0) {
+            const candleSeries = this.chart.addCandlestickSeries({
+                upColor: '#26a69a',
+                downColor: '#ef5350',
+                borderVisible: false,
+                wickUpColor: '#26a69a',
+                wickDownColor: '#ef5350',
+            });
+            
+            const formattedCandles = rawData.map(d => ({
+                time: d.time,
+                open: Number(d.open),
+                high: Number(d.high),
+                low: Number(d.low),
+                close: Number(d.close)
+            }));
 
-        // Render AFL Plot Outputs
+            candleSeries.setData(formattedCandles);
+            this.seriesMap.set('main_candles', candleSeries);
+        }
+
+        // Render AFL Plot Series
         plots.forEach((p, idx) => {
             if (p.style === 'line') {
                 const lineSeries = this.chart.addLineSeries({
@@ -68,29 +86,40 @@ class ChartEngine {
                     title: p.name,
                 });
 
-                const formattedData = time.map((t, i) => ({
-                    time: t,
-                    value: p.series[i]
-                })).filter(d => d.value !== null && !isNaN(d.value));
+                const lineData = [];
+                for (let i = 0; i < time.length; i++) {
+                    const val = p.series[i];
+                    if (val !== null && val !== undefined && !isNaN(val)) {
+                        lineData.push({ time: time[i], value: Number(val) });
+                    }
+                }
 
-                lineSeries.setData(formattedData);
-                this.seriesMap.set(`plot_${idx}`, lineSeries);
+                if (lineData.length > 0) {
+                    lineSeries.setData(lineData);
+                    this.seriesMap.set(`plot_${idx}`, lineSeries);
+                }
             } else if (p.style === 'histogram') {
                 const histSeries = this.chart.addHistogramSeries({
                     color: p.color || '#26a69a',
-                    priceFormat: { type: 'volume' },
                     priceScaleId: p.overlay ? '' : 'volume_pane',
                 });
 
-                const formattedData = time.map((t, i) => ({
-                    time: t,
-                    value: p.series[i]
-                })).filter(d => d.value !== null && !isNaN(d.value));
+                const histData = [];
+                for (let i = 0; i < time.length; i++) {
+                    const val = p.series[i];
+                    if (val !== null && val !== undefined && !isNaN(val)) {
+                        histData.push({ time: time[i], value: Number(val) });
+                    }
+                }
 
-                histSeries.setData(formattedData);
-                this.seriesMap.set(`plot_${idx}`, histSeries);
+                if (histData.length > 0) {
+                    histSeries.setData(histData);
+                    this.seriesMap.set(`plot_${idx}`, histSeries);
+                }
             }
         });
+
+        this.chart.timeScale().fitContent();
     }
 }
 
