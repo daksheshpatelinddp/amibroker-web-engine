@@ -4,140 +4,81 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AmiBroker Web Workstation</title>
-    <!-- FontAwesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Main Stylesheet -->
+    
+    <!-- CSS Dependencies -->
     <link rel="stylesheet" href="css/style.css">
+    
+    <!-- Third-Party Libraries -->
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
 </head>
-<body class="dark-theme">
-    <div class="app-container">
+<body class="bg-dark text-light">
+
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+        <div class="logo-title">
+            <span class="logo-icon">📈</span>
+            <h1>AmiBroker <span class="badge">Web Workstation</span></h1>
+        </div>
+        <div class="header-status">
+            <span id="data-status" class="status-indicator ready">EOD Ready</span>
+        </div>
+    </header>
+
+    <!-- Main Workspace Split -->
+    <main class="app-container">
         
-        <!-- Top Navigation Bar -->
-        <header class="top-bar">
-            <div class="bar-left">
-                <button class="icon-btn" id="menuBtn" title="Toggle Categories Drawer">
-                    <i class="fa-solid fa-bars"></i>
-                </button>
-                <div class="brand-title">
-                    <i class="fa-solid fa-chart-line brand-icon"></i>
-                    <span>AmiBroker</span>
-                    <small>Web Workstation</small>
-                </div>
-                
-                <!-- Global Quick Search -->
-                <div class="quick-search-wrapper">
-                    <div class="search-input-box">
-                        <i class="fa-solid fa-magnifying-glass search-icon"></i>
-                        <input type="text" id="globalSearchInput" placeholder="Search symbol or category (e.g. RELIANCE)" autocomplete="off">
-                        <button class="clear-btn" id="clearSearchBtn"><i class="fa-solid fa-xmark"></i></button>
-                    </div>
-                </div>
+        <!-- Sidebar: Symbol & Category Manager -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3>Symbols & Categories</h3>
             </div>
-
-            <div class="bar-right">
-                <!-- Group / Sector / Industry Dropdowns -->
-                <div class="category-dropdown-group">
-                    <select id="groupSelect" class="nav-select">
-                        <option value="">Group: All</option>
-                    </select>
-                    <select id="sectorSelect" class="nav-select">
-                        <option value="">Sector: All</option>
-                    </select>
-                    <select id="industrySelect" class="nav-select">
-                        <option value="">Industry: All</option>
-                    </select>
-                </div>
-
-                <!-- Grid Layout Switcher Buttons -->
-                <div class="layout-toggle-group">
-                    <button class="layout-btn active" data-layout="1x1" title="1x1 Grid">
-                        <i class="fa-solid fa-square"></i>
-                    </button>
-                    <button class="layout-btn" data-layout="2x1" title="2x1 Grid">
-                        <i class="fa-solid fa-table-columns"></i>
-                    </button>
-                    <button class="layout-btn" data-layout="2x2" title="2x2 Grid">
-                        <i class="fa-solid fa-table-cells"></i>
-                    </button>
-                </div>
+            <div class="category-tree" id="category-tree">
+                <!-- Dynamically populated by category-manager.js -->
             </div>
-        </header>
+        </aside>
 
-        <!-- Main Workspace Body -->
-        <main class="workspace-body">
+        <!-- Main Content Area: Charts & AFL Editor -->
+        <section class="workspace-area">
             
-            <!-- Category Drawer (Sidebar) -->
-            <aside class="category-drawer" id="categoryDrawer">
-                <div class="drawer-header">
-                    <h3>Categories</h3>
-                    <button class="icon-btn" id="closeDrawer">
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
-                </div>
+            <!-- Chart Workspace Grid -->
+            <div class="chart-container" id="chart-workspace">
+                <div id="main-chart" class="chart-cell"></div>
+            </div>
 
-                <div class="drawer-tabs">
-                    <button class="drawer-tab active" data-tab="symbols">Symbols</button>
-                    <button class="drawer-tab" data-tab="watchlists">Watchlists</button>
-                    <button class="drawer-tab" data-tab="favorites">Favorites</button>
-                    <button class="drawer-tab" data-tab="import">Batch Import</button>
-                </div>
-
-                <div class="drawer-content">
-                    <div class="tab-pane active" id="pane-symbols">
-                        <div id="symbolsList" class="symbol-tree-container">
-                            <!-- Dynamic symbols auto-rendered by category-manager.js -->
-                        </div>
-                    </div>
-
-                    <div class="tab-pane" id="pane-watchlists">
-                        <div class="watchlist-controls">
-                            <input type="text" id="newWatchlistName" placeholder="New Watchlist Name..." class="nav-select">
-                            <button id="createWatchlistBtn" class="btn primary-btn">+ Create</button>
-                        </div>
-                        <ul id="watchlistsContainer"></ul>
-                    </div>
-
-                    <div class="tab-pane" id="pane-favorites">
-                        <ul id="favoritesContainer"></ul>
-                    </div>
-
-                    <div class="tab-pane" id="pane-import">
-                        <p><i class="fa-solid fa-upload"></i> Select TXT File Format: Symbol, Group, Sector, Industry</p>
-                        <input type="file" id="batchFileInput" accept=".txt,.csv">
+            <!-- AFL Formula Editor Drawer -->
+            <div class="afl-editor-drawer" id="afl-drawer">
+                <div class="afl-toolbar">
+                    <span class="editor-title">⚡ AFL Formula Editor</span>
+                    <div class="afl-actions">
+                        <button id="btn-apply-afl" class="btn btn-primary">Apply Formula</button>
+                        <button id="btn-reset-afl" class="btn btn-secondary">Reset Default</button>
+                        <button id="btn-toggle-ai" class="btn btn-accent">✨ AI Assistant</button>
                     </div>
                 </div>
-            </aside>
 
-            <!-- Charting Workspace Area -->
-            <section class="chart-workspace">
-                <div class="chart-grid grid-1x1" id="chartGrid">
-                    
-                    <!-- Chart Cell Container -->
-                    <div class="chart-cell" data-cell-id="cell-1">
-                        <div class="chart-cell-header">
-                            <span class="cell-symbol-title">Select a Symbol</span>
-                            <div class="cell-tools">
-                                <span class="data-status-badge">Initializing DB...</span>
-                                <span class="timeframe-pill">EOD</span>
-                            </div>
-                        </div>
-                        <div class="chart-render-target">
-                            <div class="empty-chart-placeholder">
-                                <i class="fa-solid fa-chart-candlestick"></i>
-                                <p>Select any symbol from the drawer or quick search to fetch Parquet EOD data.</p>
-                            </div>
-                        </div>
-                    </div>
-
+                <!-- Inline AI Prompt Input (Collapsible) -->
+                <div id="ai-prompt-bar" class="ai-prompt-bar hidden">
+                    <input type="text" id="ai-prompt-input" placeholder="e.g., Add 50 EMA and 200 SMA with an RSI pane below..." />
+                    <button id="btn-generate-ai" class="btn btn-small">Generate</button>
                 </div>
-            </section>
 
-        </main>
-    </div>
+                <!-- Code Mirror AFL Code Box -->
+                <div class="editor-container">
+                    <textarea id="afl-code-input"></textarea>
+                </div>
+            </div>
 
-    <!-- ES Module Script Declarations -->
-    <script type="module" src="js/data-engine.js"></script>
-    <script type="module" src="js/category-manager.js"></script>
-    <script type="module" src="js/app.js"></script>
+        </section>
+    </main>
+
+    <!-- Application JavaScript Modules -->
+    <script src="js/data-engine.js"></script>
+    <script src="js/afl-engine.js"></script>
+    <script src="js/chart-engine.js"></script>
+    <script src="js/category-manager.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>
