@@ -1,57 +1,55 @@
-/**
- * AmiBroker Web Workstation - Data Engine
- */
+// js/app.js
 
-class DataEngine {
-    constructor() {
-        this.r2BaseUrl = "https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev";
-    }
+document.addEventListener('DOMContentLoaded', async () => {
+    const currentSymbolLabel = document.getElementById('current-symbol-label');
+    const symbolSearchInput = document.getElementById('symbol-search-input');
+    const applyFormulaBtn = document.getElementById('apply-formula-btn');
+    
+    let activeSymbol = "RELIANCE";
 
-    cleanSymbolKey(symbol) {
-        if (!symbol) return "RELIANCE";
-        return symbol.toUpperCase().replace(/\.(NS|BO)$/i, "").trim();
-    }
-
-    async fetchHistoricalData(symbol) {
-        const cleanKey = this.cleanSymbolKey(symbol);
-        
-        // Attempt R2 Fetch if valid URL configured
-        if (this.r2BaseUrl && !this.r2BaseUrl.includes("your-r2-bucket")) {
-            try {
-                const response = await fetch(`${this.r2BaseUrl}/${cleanKey}.json`);
-                if (response.ok) {
-                    const json = await response.json();
-                    if (Array.isArray(json) && json.length > 0) return json;
-                }
-            } catch (err) {
-                console.warn("[DataEngine] R2 fetch unreachable, utilizing instant generator:", err);
+    async function loadAndRenderSymbol(symbol) {
+        try {
+            if (currentSymbolLabel) {
+                currentSymbolLabel.textContent = `Symbol: ${symbol} (NSE)`;
             }
-        }
 
-        // Guaranteed Synchronous Local Dataset Output
-        return this.generateFallbackData(cleanKey);
+            // Load Parquet data via DuckDB
+            const data = await window.dataEngine.loadSymbolData(symbol);
+            
+            if (data && data.length > 0) {
+                window.chartEngine.render(data);
+                console.log(`Successfully plotted ${data.length} candles for ${symbol}`);
+            } else {
+                console.warn(`No valid data returned for symbol: ${symbol}`);
+            }
+        } catch (error) {
+            console.error(`Failed to load and render symbol ${symbol}:`, error);
+        }
     }
 
-    generateFallbackData(symbol) {
-        let data = [];
-        let baseTime = new Date(2025, 0, 1).getTime() / 1000;
-        let price = 1000 + (symbol.length * 45);
+    // Initialize DuckDB & render RELIANCE on startup
+    await window.dataEngine.init();
+    await loadAndRenderSymbol(activeSymbol);
 
-        for (let i = 0; i < 220; i++) {
-            let change = (Math.random() - 0.48) * (price * 0.025);
-            let open = price;
-            let close = price + change;
-            let high = Math.max(open, close) + Math.random() * (price * 0.008);
-            let low = Math.min(open, close) - Math.random() * (price * 0.008);
-            let volume = Math.floor(Math.random() * 120000) + 25000;
-
-            let timeString = new Date((baseTime + i * 86400) * 1000).toISOString().split('T')[0];
-
-            data.push({ time: timeString, open, high, low, close, volume });
-            price = close;
-        }
-        return data;
+    // Handle Symbol Search Input / Change
+    if (symbolSearchInput) {
+        symbolSearchInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                const newSymbol = symbolSearchInput.value.trim().toUpperCase();
+                if (newSymbol) {
+                    activeSymbol = newSymbol;
+                    await loadAndRenderSymbol(activeSymbol);
+                    symbolSearchInput.value = '';
+                }
+            }
+        });
     }
-}
 
-window.dataEngine = new DataEngine();
+    // Apply AFL Formula Handler
+    if (applyFormulaBtn) {
+        applyFormulaBtn.addEventListener('click', async () => {
+            console.log("Applying AFL Formula...");
+            await loadAndRenderSymbol(activeSymbol);
+        });
+    }
+});

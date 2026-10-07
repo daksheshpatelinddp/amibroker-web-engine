@@ -1,138 +1,163 @@
-/**
- * AmiBroker Web Workstation - Chart Renderer
- */
+// js/chart-engine.js
 
 class ChartEngine {
     constructor(containerId) {
-        this.containerId = containerId;
         this.container = document.getElementById(containerId);
         this.chart = null;
-        this.seriesMap = new Map();
+        this.candlestickSeries = null;
+        this.volumeSeries = null;
+        this.smaSeries = null;
+        this.emaSeries = null;
+        
         this.initChart();
+        this.handleResize();
     }
 
     initChart() {
         if (!this.container) return;
 
-        this.container.style.backgroundColor = '#131722';
-
-        const width = this.container.clientWidth || window.innerWidth;
-        const height = this.container.clientHeight || 350;
-
         this.chart = LightweightCharts.createChart(this.container, {
-            width: width,
-            height: height,
+            width: this.container.clientWidth || 800,
+            height: this.container.clientHeight || 400,
             layout: {
-                background: { type: 'solid', color: '#131722' },
+                backgroundColor: '#131722',
                 textColor: '#d1d4dc',
             },
             grid: {
-                vertLines: { color: '#1f2937' },
-                horzLines: { color: '#1f2937' },
+                vertLines: { color: '#1f293d' },
+                horzLines: { color: '#1f293d' },
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+            rightPriceScale: {
+                borderColor: '#2B2B43',
             },
             timeScale: {
-                borderColor: '#374151',
+                borderColor: '#2B2B43',
                 timeVisible: true,
+                secondsVisible: false,
             },
         });
 
-        window.addEventListener('resize', () => {
-            if (this.container && this.chart) {
-                this.chart.applyOptions({
-                    width: this.container.clientWidth || window.innerWidth,
-                    height: this.container.clientHeight || 350
-                });
-            }
+        // 1. Candlestick Main Series
+        this.candlestickSeries = this.chart.addCandlestickSeries({
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderVisible: false,
+            wickUpColor: '#26a69a',
+            wickDownColor: '#ef5350',
         });
+
+        // 2. Volume Series (Overlay at bottom 20% of chart)
+        this.volumeSeries = this.chart.addHistogramSeries({
+            color: '#26a69a',
+            priceFormat: { type: 'volume' },
+            priceScaleId: '',
+            scaleMargins: {
+                top: 0.8,
+                bottom: 0,
+            },
+        });
+
+        // 3. Technical Overlay Indicators (20 SMA, 50 EMA)
+        this.smaSeries = this.chart.addLineSeries({
+            color: '#2962FF',
+            lineWidth: 2,
+            title: 'SMA 20',
+        });
+
+        this.emaSeries = this.chart.addLineSeries({
+            color: '#FF6D00',
+            lineWidth: 2,
+            title: 'EMA 50',
+        });
+
+        window.addEventListener('resize', () => this.handleResize());
     }
 
-    renderAFLOutput(aflResult) {
-        if (!aflResult || !aflResult.success) return;
-
-        // Force container reflow
-        if (this.container) {
+    handleResize() {
+        if (this.chart && this.container) {
             this.chart.applyOptions({
-                width: this.container.clientWidth || window.innerWidth,
-                height: this.container.clientHeight || 350
+                width: this.container.clientWidth,
+                height: this.container.clientHeight,
             });
         }
+    }
 
-        // Clear existing series
-        this.seriesMap.forEach(s => {
-            try { this.chart.removeSeries(s); } catch(e){}
-        });
-        this.seriesMap.clear();
-
-        const { plots, time, rawData } = aflResult;
-
-        // 1. Candlestick Base Series
-        if (rawData && rawData.length > 0) {
-            const candleSeries = this.chart.addCandlestickSeries({
-                upColor: '#26a69a',
-                downColor: '#ef5350',
-                borderVisible: false,
-                wickUpColor: '#26a69a',
-                wickDownColor: '#ef5350',
-            });
-
-            const formattedCandles = rawData.map(d => ({
-                time: d.time,
-                open: Number(d.open),
-                high: Number(d.high),
-                low: Number(d.low),
-                close: Number(d.close)
-            }));
-
-            candleSeries.setData(formattedCandles);
-            this.seriesMap.set('main_candles', candleSeries);
-        }
-
-        // 2. AFL Line & Histogram Series
-        plots.forEach((p, idx) => {
-            const style = (p.style || 'line').toLowerCase();
-
-            if (style === 'line' || style === 'dashed') {
-                const lineSeries = this.chart.addLineSeries({
-                    color: p.color || '#2962FF',
-                    lineWidth: 2,
-                    title: p.name,
-                });
-
-                const lineData = [];
-                for (let i = 0; i < time.length; i++) {
-                    const val = p.series[i];
-                    if (val !== null && val !== undefined && !isNaN(val)) {
-                        lineData.push({ time: time[i], value: Number(val) });
-                    }
-                }
-
-                if (lineData.length > 0) {
-                    lineSeries.setData(lineData);
-                    this.seriesMap.set(`plot_${idx}`, lineSeries);
-                }
-            } else if (style === 'histogram') {
-                const histSeries = this.chart.addHistogramSeries({
-                    color: p.color || '#26a69a',
-                    priceScaleId: p.overlay ? '' : 'volume_pane',
-                });
-
-                const histData = [];
-                for (let i = 0; i < time.length; i++) {
-                    const val = p.series[i];
-                    if (val !== null && val !== undefined && !isNaN(val)) {
-                        histData.push({ time: time[i], value: Number(val) });
-                    }
-                }
-
-                if (histData.length > 0) {
-                    histSeries.setData(histData);
-                    this.seriesMap.set(`plot_${idx}`, histSeries);
-                }
+    calculateSMA(data, period) {
+        const smaData = [];
+        for (let i = 0; i < data.length; i++) {
+            if (i < period - 1) continue;
+            let sum = 0;
+            for (let j = 0; j < period; j++) {
+                sum += data[i - j].close;
             }
-        });
+            smaData.push({
+                time: data[i].time,
+                value: sum / period,
+            });
+        }
+        return smaData;
+    }
 
+    calculateEMA(data, period) {
+        const emaData = [];
+        const k = 2 / (period + 1);
+        let prevEma = 0;
+
+        for (let i = 0; i < data.length; i++) {
+            if (i < period - 1) continue;
+            
+            if (emaData.length === 0) {
+                let sum = 0;
+                for (let j = 0; j < period; j++) {
+                    sum += data[i - j].close;
+                }
+                prevEma = sum / period;
+                emaData.push({ time: data[i].time, value: prevEma });
+            } else {
+                const currentEma = (data[i].close * k) + (prevEma * (1 - k));
+                emaData.push({ time: data[i].time, value: currentEma });
+                prevEma = currentEma;
+            }
+        }
+        return emaData;
+    }
+
+    render(data) {
+        if (!data || data.length === 0) return;
+
+        // Prepare Candlesticks
+        const candleData = data.map(d => ({
+            time: d.time,
+            open: d.open,
+            high: d.high,
+            low: d.low,
+            close: d.close,
+        }));
+
+        // Prepare Volume
+        const volumeData = data.map(d => ({
+            time: d.time,
+            value: d.volume,
+            color: d.close >= d.open ? '#26a69a80' : '#ef535080',
+        }));
+
+        // Compute Indicators
+        const sma20 = this.calculateSMA(data, 20);
+        const ema50 = this.calculateEMA(data, 50);
+
+        // Update Series
+        this.candlestickSeries.setData(candleData);
+        this.volumeSeries.setData(volumeData);
+        this.smaSeries.setData(sma20);
+        this.emaSeries.setData(ema50);
+
+        // Auto-fit contents and trigger dimension recalculation
+        this.handleResize();
         this.chart.timeScale().fitContent();
     }
 }
 
-window.chartEngine = new ChartEngine('main-chart');
+window.chartEngine = new ChartEngine('chart-container');
