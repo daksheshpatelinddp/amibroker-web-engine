@@ -22,7 +22,10 @@ class App {
     this.currentData = await dataEngine.getSymbolData(symbol);
 
     if (this.currentData && this.currentData.length > 0) {
+      // 1. Render Candlestick & Volume primary price data
       chartEngine.updateData(this.currentData);
+      
+      // 2. Render AFL Overlay lines
       this.applyAFLFormula();
     }
   }
@@ -35,7 +38,7 @@ class App {
       aflCode = editorElement.value || editorElement.innerText || editorElement.textContent;
     }
 
-    if (!aflCode || this.currentData.length === 0) return;
+    if (!aflCode || !this.currentData || this.currentData.length === 0) return;
 
     const result = aflEngine.execute(aflCode, this.currentData);
 
@@ -47,7 +50,7 @@ class App {
   }
 
   setupEventListeners() {
-    // Symbol Search
+    // Search Symbol
     const symbolSearchInput = document.getElementById('symbol-search');
     if (symbolSearchInput) {
       symbolSearchInput.addEventListener('change', (e) => {
@@ -69,17 +72,17 @@ class App {
       closeBtn.onclick = () => aflModal.classList.add('hidden');
     }
 
-    // Apply Formula Button
+    // Apply Formula
     const applyBtn = document.getElementById('btn-apply-afl');
     if (applyBtn) {
       applyBtn.onclick = (e) => {
         e.preventDefault();
         this.applyAFLFormula();
-        if (aflModal) aflModal.classList.add('hidden'); // Close modal on apply
+        if (aflModal) aflModal.classList.add('hidden');
       };
     }
 
-    // Reset Formula Button
+    // Reset Formula
     const resetBtn = document.getElementById('btn-reset-afl');
     if (resetBtn) {
       resetBtn.onclick = (e) => {
