@@ -1,73 +1,103 @@
 // js/data-engine.js
+import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
+
 class DataEngine {
-    constructor() {
-        this.db = null;
-        this.conn = null;
-        this.baseUrl = "https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev";
-        this.isInitialized = false;
+  constructor() {
+    this.db = null;
+    this.conn = null;
+    this.isInitialized = false;
+    this.r2BaseUrl = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
+    this.cacheName = 'amibroker-parquet-cache-v1';
+    // Available yearly datasets (2023 to 2026, extensible down to 2000)
+    this.availableYears = Array.from({ length: 2026 - 2023 + 1 }, (_, i) => 2023 + i);
+  }
+
+  async init() {
+    if (this.isInitialized) return;
+
+    try {
+      const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+      const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+      const worker = await duckdb.createWorker(bundle.mainWorker);
+      const logger = new duckdb.ConsoleLogger();
+      
+      this.db = new duckdb.AsyncDuckDB(logger, worker);
+      await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+      this.conn = await this.db.connect();
+
+      // Register and load all yearly Parquet files with browser caching
+      await this.loadYearlyParquetFiles();
+
+      this.isInitialized = true;
+      console.log('DuckDB-WASM Initialized and Parquet files loaded/cached successfully.');
+    } catch (err) {
+      console.error('Failed to initialize DuckDB-WASM DataEngine:', err);
+      throw err;
     }
+  }
 
-    async init() {
-        if (this.isInitialized) return;
-        try {
-            const JSDELIVR_BUNDLES = window.duckdb.getJsDelivrBundles();
-            const bundle = await window.duckdb.selectBundle(JSDELIVR_BUNDLES);
-            
-            const worker_url = URL.createObjectURL(
-                new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
-            );
+  // Load Parquet files using Cache API to prevent duplicate R2 Class B requests
+  async loadYearlyParquetFiles() {
+    const cache = await caches.open(this.cacheName);
 
-            const worker = new Worker(worker_url);
-            const logger = new window.duckdb.ConsoleLogger();
-            this.db = new window.duckdb.AsyncDuckDB(logger, worker);
-            await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-            this.conn = await this.db.connect();
-            
-            this.isInitialized = true;
-            console.log("DuckDB-WASM initialized successfully.");
-        } catch (error) {
-            console.error("Failed to initialize DuckDB-WASM:", error);
-            throw error;
+    for (const year of this.availableYears) {
+      const fileName = `${year}.parquet`;
+      const fileUrl = `${this.r2BaseUrl}/${fileName}`;
+
+      let response = await cache.match(fileUrl);
+      if (!response) {
+        console.log(`[R2 Fetch] Cache miss for ${fileName}. Fetching from R2...`);
+        response = await fetch(fileUrl);
+        if (response.ok) {
+          // Store historical files in browser CacheStorage
+          await cache.put(fileUrl, response.clone());
+        } else {
+          console.warn(`Could not load ${fileName} from R2.`);
+          continue;
         }
+      } else {
+        console.log(`[Cache Hit] Serving ${fileName} from browser CacheStorage.`);
+      }
+
+      const buffer = new Uint8Array(await response.arrayBuffer());
+      // Register in-memory DuckDB file virtual filesystem
+      await this.db.registerFileBuffer(fileName, buffer);
     }
+  }
 
-    async loadSymbolData(symbol) {
-        if (!this.isInitialized) await this.init();
+  async getSymbolData(symbol) {
+    if (!this.isInitialized) await this.init();
 
-        const cleanSymbol = symbol.toUpperCase().replace('.PARQUET', '');
-        const parquetUrl = `${this.baseUrl}/${cleanSymbol}.parquet`;
+    // Query across all registered yearly parquet files
+    const query = `
+      SELECT 
+        Date as date,
+        Open as open,
+        High as high,
+        Low as low,
+        Close as close,
+        Volume as volume
+      FROM read_parquet(['*.parquet'])
+      WHERE UPPER(Symbol) = UPPER('${symbol}')
+      ORDER BY Date ASC;
+    `;
 
-        try {
-            // Fetch ArrayBuffer directly to avoid DuckDB HTTPFS Range CORS issue
-            const response = await fetch(parquetUrl);
-            if (!response.ok) throw new Error(`HTTP ${response.status} loading ${parquetUrl}`);
-            const buffer = await response.arrayBuffer();
-
-            const fileName = `${cleanSymbol}.parquet`;
-            await this.db.registerFileBuffer(fileName, new Uint8Array(buffer));
-
-            // Format Date explicitly to YYYY-MM-DD
-            const query = `
-                SELECT 
-                    strftime(CAST(Date AS DATE), '%Y-%m-%d') AS time,
-                    CAST(Open AS DOUBLE) AS open,
-                    CAST(High AS DOUBLE) AS high,
-                    CAST(Low AS DOUBLE) AS low,
-                    CAST(Close AS DOUBLE) AS close,
-                    CAST(Volume AS DOUBLE) AS volume
-                FROM '${fileName}'
-                ORDER BY Date ASC
-            `;
-
-            const result = await this.conn.query(query);
-            const rows = result.toArray().map(r => r.toJSON());
-
-            return rows.filter(r => r.time && !isNaN(r.close));
-        } catch (error) {
-            console.error(`Error loading data for ${symbol}:`, error);
-            return [];
-        }
+    try {
+      const result = await this.conn.query(query);
+      const rows = result.toArray().map(row => ({
+        time: typeof row.date === 'string' ? row.date.split('T')[0] : new Date(row.date).toISOString().split('T')[0],
+        open: Number(row.open),
+        high: Number(row.high),
+        low: Number(row.low),
+        close: Number(row.close),
+        volume: Number(row.volume)
+      }));
+      return rows;
+    } catch (error) {
+      console.error(`Error querying data for symbol ${symbol}:`, error);
+      return [];
     }
+  }
 }
 
-window.dataEngine = new DataEngine();
+export const dataEngine = new DataEngine();
