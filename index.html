@@ -2,34 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>AmiBroker Web Workstation</title>
   <link rel="stylesheet" href="css/style.css">
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Ensure full viewport height calculation on mobile browsers */
+    html, body {
+      height: 100%;
+      height: 100vh;
+      height: -webkit-fill-available;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    .main-layout {
+      height: calc(100vh - 48px - 192px);
+    }
+  </style>
 </head>
-<body class="bg-slate-900 text-slate-100 h-screen flex flex-col overflow-hidden">
+<body class="bg-slate-900 text-slate-100 flex flex-col">
 
-  <!-- Top Navbar -->
-  <header class="h-12 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-4 shrink-0">
-    <div class="flex items-center space-x-3">
-      <span class="font-bold text-red-500 text-lg">AmiBroker</span>
-      <div class="relative">
-        <input id="symbol-search" type="text" value="RELIANCE" placeholder="Search symbol..." class="bg-slate-900 text-slate-200 text-sm px-2 py-1 rounded border border-slate-700 focus:outline-none focus:border-blue-500 uppercase">
-      </div>
-      <span id="current-symbol-badge" class="bg-slate-700 text-xs px-2 py-1 rounded text-blue-400 font-mono">Symbol: RELIANCE (NSE)</span>
+  <!-- Top Navbar with R2 Cache & Download Indicator -->
+  <header class="h-12 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-3 shrink-0 z-10">
+    <div class="flex items-center space-x-2">
+      <span class="font-bold text-red-500 text-base">AmiBroker</span>
+      <input id="symbol-search" type="text" value="RELIANCE" placeholder="Symbol..." class="bg-slate-900 text-slate-200 text-xs px-2 py-1 rounded border border-slate-700 w-24 focus:outline-none focus:border-blue-500 uppercase">
     </div>
 
-    <!-- Data Loading / Cache Status Indicator -->
-    <div id="data-status-badge" class="text-xs px-2 py-1 rounded bg-slate-700 text-slate-300 font-mono flex items-center gap-2">
-      <span id="status-dot" class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></span>
-      <span id="status-text">Initializing Engine...</span>
+    <!-- VISUAL DOWNLOAD / CACHE PROGRESS BADGE -->
+    <div id="data-status-badge" class="flex items-center gap-2 bg-slate-900 border border-slate-700 px-2 py-1 rounded text-xs font-mono">
+      <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+      <span id="status-text" class="text-amber-300 font-semibold text-[11px]">Initializing Engine...</span>
     </div>
   </header>
 
-  <!-- Main Grid Layout -->
-  <main class="flex-1 flex overflow-hidden">
-    <!-- Chart Container -->
-    <div id="chart-container" class="flex-1 bg-slate-950 relative"></div>
+  <!-- Main Chart Container -->
+  <main class="main-layout w-full bg-slate-950 relative flex-1">
+    <div id="chart-container" class="absolute inset-0 w-full h-full"></div>
   </main>
 
   <!-- AFL Formula Editor Bar (Bottom) -->
@@ -38,7 +48,7 @@
       <span class="text-xs font-semibold text-slate-400">⚡ AFL Formula Editor</span>
       <div class="flex space-x-2">
         <button id="btn-apply-afl" class="bg-blue-600 hover:bg-blue-500 text-xs px-3 py-1 rounded text-white font-medium">Apply Formula</button>
-        <button id="btn-reset-afl" class="bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1 rounded text-slate-300">Reset Default</button>
+        <button id="btn-reset-afl" class="bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1 rounded text-slate-300">Reset</button>
       </div>
     </div>
     <div id="afl-editor-container" class="flex-1 p-2 bg-slate-900 font-mono text-xs text-slate-200 overflow-auto">
