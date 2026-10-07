@@ -1,9 +1,10 @@
 /**
- * AmiBroker Web Workstation - Chart Engine
+ * AmiBroker Web Workstation - Chart Renderer
  */
 
 class ChartEngine {
     constructor(containerId) {
+        this.containerId = containerId;
         this.container = document.getElementById(containerId);
         this.chart = null;
         this.seriesMap = new Map();
@@ -15,9 +16,12 @@ class ChartEngine {
 
         this.container.style.backgroundColor = '#131722';
 
+        const width = this.container.clientWidth || window.innerWidth;
+        const height = this.container.clientHeight || 350;
+
         this.chart = LightweightCharts.createChart(this.container, {
-            width: this.container.clientWidth || window.innerWidth,
-            height: Math.max(this.container.clientHeight, 350),
+            width: width,
+            height: height,
             layout: {
                 background: { type: 'solid', color: '#131722' },
                 textColor: '#d1d4dc',
@@ -32,20 +36,28 @@ class ChartEngine {
             },
         });
 
-        const resizeObserver = new ResizeObserver(entries => {
-            if (!entries || entries.length === 0) return;
-            const { width, height } = entries[0].contentRect;
-            if (width > 0 && height > 0) {
-                this.chart.applyOptions({ width, height });
+        window.addEventListener('resize', () => {
+            if (this.container && this.chart) {
+                this.chart.applyOptions({
+                    width: this.container.clientWidth || window.innerWidth,
+                    height: this.container.clientHeight || 350
+                });
             }
         });
-        resizeObserver.observe(this.container);
     }
 
     renderAFLOutput(aflResult) {
         if (!aflResult || !aflResult.success) return;
 
-        // Clean existing series
+        // Force container reflow
+        if (this.container) {
+            this.chart.applyOptions({
+                width: this.container.clientWidth || window.innerWidth,
+                height: this.container.clientHeight || 350
+            });
+        }
+
+        // Clear existing series
         this.seriesMap.forEach(s => {
             try { this.chart.removeSeries(s); } catch(e){}
         });
@@ -53,7 +65,7 @@ class ChartEngine {
 
         const { plots, time, rawData } = aflResult;
 
-        // 1. Always Render Base Candlesticks
+        // 1. Candlestick Base Series
         if (rawData && rawData.length > 0) {
             const candleSeries = this.chart.addCandlestickSeries({
                 upColor: '#26a69a',
@@ -65,17 +77,17 @@ class ChartEngine {
 
             const formattedCandles = rawData.map(d => ({
                 time: d.time,
-                open: parseFloat(d.open),
-                high: parseFloat(d.high),
-                low: parseFloat(d.low),
-                close: parseFloat(d.close)
+                open: Number(d.open),
+                high: Number(d.high),
+                low: Number(d.low),
+                close: Number(d.close)
             }));
 
             candleSeries.setData(formattedCandles);
             this.seriesMap.set('main_candles', candleSeries);
         }
 
-        // 2. Render AFL Plot Instructions
+        // 2. AFL Line & Histogram Series
         plots.forEach((p, idx) => {
             const style = (p.style || 'line').toLowerCase();
 
@@ -90,7 +102,7 @@ class ChartEngine {
                 for (let i = 0; i < time.length; i++) {
                     const val = p.series[i];
                     if (val !== null && val !== undefined && !isNaN(val)) {
-                        lineData.push({ time: time[i], value: parseFloat(val) });
+                        lineData.push({ time: time[i], value: Number(val) });
                     }
                 }
 
@@ -108,7 +120,7 @@ class ChartEngine {
                 for (let i = 0; i < time.length; i++) {
                     const val = p.series[i];
                     if (val !== null && val !== undefined && !isNaN(val)) {
-                        histData.push({ time: time[i], value: parseFloat(val) });
+                        histData.push({ time: time[i], value: Number(val) });
                     }
                 }
 

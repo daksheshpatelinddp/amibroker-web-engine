@@ -1,19 +1,15 @@
 /**
- * AmiBroker Web Workstation - Application Controller
- * Handles UI interactions, CodeMirror initialization, symbol selection,
- * search dropdown filtering, and triggering chart rendering.
+ * AmiBroker Web Workstation - Main App Controller
  */
 
 document.addEventListener("DOMContentLoaded", () => {
     let currentSymbol = "RELIANCE.NS";
 
-    // 1. Initialize CodeMirror AFL Formula Editor
+    // 1. Initialize CodeMirror Editor
     const textArea = document.getElementById("afl-code-input");
     const defaultAFL = `// Default AmiBroker Formula\nPlot( Close, "Price", "#26a69a", "line", true );\nPlot( MA(Close, 20), "20 SMA", "#2962FF", "line", true );\nPlot( EMA(Close, 50), "50 EMA", "#FF6D00", "line", true );\nPlot( Volume, "Volume", "#26a69a", "histogram", false );`;
     
-    if (textArea) {
-        textArea.value = defaultAFL;
-    }
+    if (textArea) textArea.value = defaultAFL;
 
     const editor = CodeMirror.fromTextArea(textArea, {
         mode: "javascript",
@@ -22,44 +18,37 @@ document.addEventListener("DOMContentLoaded", () => {
         tabSize: 2
     });
 
-    // Helper: Clean symbol suffix for R2 matching
     const getCleanSymbol = (sym) => sym.toUpperCase().replace(/\.(NS|BO)$/i, "").trim();
 
-    // 2. Main Chart Fetching & Rendering Pipeline
+    // 2. Async Execution Pipeline
     const loadAndRenderChart = async () => {
         const cleanKey = getCleanSymbol(currentSymbol);
         
-        // Update Symbol Badge in Top Header
         const badge = document.getElementById("active-symbol-name");
-        if (badge) {
-            badge.innerText = `${cleanKey} (${currentSymbol.includes('.NS') ? 'NSE' : 'R2'})`;
-        }
+        if (badge) badge.innerText = `${cleanKey} (NSE)`;
 
-        // Fetch OHLCV Dataset via DataEngine
         const activeOHLCVData = await window.dataEngine.fetchHistoricalData(currentSymbol);
         const code = editor.getValue();
 
-        // Execute AFL Interpreter Engine
         const aflResult = window.aflEngine.execute(code, activeOHLCVData);
 
         if (aflResult.success) {
             window.chartEngine.renderAFLOutput(aflResult);
         } else {
-            alert("AFL Execution Error: " + aflResult.error);
+            console.error("AFL Execution Error:", aflResult.error);
         }
     };
 
-    // Initial delayed render after canvas initialization
-    setTimeout(loadAndRenderChart, 200);
+    // Trigger Initial Render after DOM is painted
+    requestAnimationFrame(() => {
+        setTimeout(loadAndRenderChart, 300);
+    });
 
-    // 3. Symbol Search Input & Dropdown Controller
+    // 3. Search & Dropdown Events
     const searchInput = document.getElementById("symbol-search-input");
     const dropdown = document.getElementById("search-dropdown");
 
-    const sampleSymbols = [
-        "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
-        "TATAMOTORS", "SBIN", "BHARTIARTL", "ITC", "LTIM"
-    ];
+    const sampleSymbols = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "TATAMOTORS", "SBIN", "BHARTIARTL"];
 
     if (searchInput && dropdown) {
         searchInput.addEventListener("input", (e) => {
@@ -73,15 +62,13 @@ document.addEventListener("DOMContentLoaded", () => {
             if (matches.length > 0) {
                 dropdown.innerHTML = matches.map(s => `
                     <div class="search-item" data-symbol="${s}.NS">
-                        <strong>${s}</strong>
-                        <span style="color:#787b86; font-size:0.75rem;">NSE</span>
+                        <strong>${s}</strong> <span style="color:#787b86; font-size:0.75rem;">NSE</span>
                     </div>
                 `).join("");
             } else {
                 dropdown.innerHTML = `
                     <div class="search-item" data-symbol="${query}">
-                        <strong>${query}</strong>
-                        <span style="color:#787b86; font-size:0.75rem;">Custom Key</span>
+                        <strong>${query}</strong> <span style="color:#787b86; font-size:0.75rem;">Custom</span>
                     </div>`;
             }
             dropdown.classList.remove("hidden");
@@ -97,71 +84,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 loadAndRenderChart();
             }
         });
-
-        // Close dropdown when tapping outside
-        document.addEventListener("click", (e) => {
-            if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
-                dropdown.classList.add("hidden");
-            }
-        });
     }
 
-    // 4. Sidebar Tree Item Selection
-    document.querySelectorAll(".symbol-item").forEach(item => {
-        item.addEventListener("click", (e) => {
-            const selected = e.target.getAttribute("data-symbol");
-            currentSymbol = selected;
-            if (searchInput) searchInput.value = getCleanSymbol(selected);
-            
-            // Highlight active symbol in tree
-            document.querySelectorAll(".symbol-item").forEach(el => el.classList.remove("active"));
-            e.target.classList.add("active");
-
-            loadAndRenderChart();
-        });
-    });
-
-    // 5. AFL Action Buttons
+    // 4. Action Buttons
     const applyBtn = document.getElementById("btn-apply-afl");
-    if (applyBtn) {
-        applyBtn.addEventListener("click", loadAndRenderChart);
-    }
+    if (applyBtn) applyBtn.addEventListener("click", loadAndRenderChart);
 
     const resetBtn = document.getElementById("btn-reset-afl");
     if (resetBtn) {
         resetBtn.addEventListener("click", () => {
             editor.setValue(defaultAFL);
-            loadAndRenderChart();
-        });
-    }
-
-    // 6. AI Formula Generator Controls
-    const aiPromptBar = document.getElementById("ai-prompt-bar");
-    const toggleAiBtn = document.getElementById("btn-toggle-ai");
-    
-    if (toggleAiBtn && aiPromptBar) {
-        toggleAiBtn.addEventListener("click", () => {
-            aiPromptBar.classList.toggle("hidden");
-        });
-    }
-
-    const generateAiBtn = document.getElementById("btn-generate-ai");
-    if (generateAiBtn) {
-        generateAiBtn.addEventListener("click", () => {
-            const promptInput = document.getElementById("ai-prompt-input");
-            if (!promptInput || !promptInput.value) return;
-
-            const prompt = promptInput.value.toLowerCase();
-            let code = defaultAFL;
-
-            if (prompt.includes("rsi")) {
-                code += `\nPlot( RSI(Close, 14), "RSI 14", "#ab47bc", "line", false );`;
-            }
-            if (prompt.includes("ema") || prompt.includes("ma")) {
-                code += `\nPlot( EMA(Close, 200), "200 EMA", "#e91e63", "line", true );`;
-            }
-
-            editor.setValue(code);
             loadAndRenderChart();
         });
     }
