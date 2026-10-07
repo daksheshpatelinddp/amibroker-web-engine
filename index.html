@@ -5,76 +5,111 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AmiBroker Web Workstation</title>
     
-    <!-- CSS Stylesheet -->
-    <link rel="stylesheet" href="css/style.css">
-
-    <!-- CodeMirror CSS & JS -->
+    <!-- CodeMirror Editor Styles -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/javascript/javascript.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
+    
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="css/style.css">
 
     <!-- TradingView Lightweight Charts -->
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    
+    <!-- CodeMirror Editor JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/javascript/javascript.min.js"></script>
 
-    <!-- DuckDB WASM -->
+    <!-- DuckDB-WASM Driver for Parquet Files -->
     <script src="https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-wasm.js"></script>
 </head>
-<body>
-    <div id="app-container">
-        <!-- Header -->
-        <header>
-            <div class="brand">
-                <span class="logo">📈</span>
-                <span class="title">AmiBroker</span>
-            </div>
-            <div class="search-box">
-                <input type="text" id="symbol-search-input" placeholder="Search symbol (e.g. RELIANCE)..." />
-            </div>
-            <div class="symbol-info">
-                <span id="current-symbol-label">Symbol: RELIANCE (NSE)</span>
-                <span class="badge">EOD Ready</span>
-            </div>
-        </header>
+<body class="bg-dark text-light">
 
-        <!-- Main Body -->
-        <div id="main-workspace">
-            <!-- Sidebar -->
-            <aside id="sidebar">
-                <h3>Symbols &amp; Categories</h3>
-                <ul class="symbol-list" id="symbol-list">
-                    <li data-symbol="RELIANCE" class="active">RELIANCE</li>
-                    <li data-symbol="TCS">TCS</li>
-                    <li data-symbol="INFY">INFY</li>
-                    <li data-symbol="HDFCBANK">HDFCBANK</li>
-                    <li data-symbol="ICICIBANK">ICICIBANK</li>
-                    <li data-symbol="TATAMOTORS">TATAMOTORS</li>
-                    <li data-symbol="SBIN">SBIN</li>
-                    <li data-symbol="BHARTIARTL">BHARTIARTL</li>
-                </ul>
-            </aside>
+    <!-- Top Navigation Header -->
+    <header class="app-header">
+        <div class="header-brand">
+            <span class="logo-icon">📈</span>
+            <span class="app-name">AmiBroker</span>
+        </div>
 
-            <!-- Chart & AFL Panel Column -->
-            <main id="content-area">
-                <div id="chart-container"></div>
+        <!-- Symbol Search Container -->
+        <div class="symbol-search-box">
+            <input type="text" id="symbol-search-input" placeholder="🔍 Search symbol (e.g. RELIANCE, TCS, INFY)..." autocomplete="off" />
+            <div id="search-dropdown" class="search-dropdown hidden"></div>
+        </div>
 
-                <!-- AFL Panel -->
-                <div id="afl-panel">
-                    <div id="afl-toolbar">
-                        <span>⚡ AFL Formula Editor</span>
-                        <button id="apply-formula-btn" class="action-btn">Apply Formula</button>
-                    </div>
-                    <div id="editor-wrapper">
-                        <textarea id="afl-editor"></textarea>
+        <!-- Active Symbol & Status Badge -->
+        <div class="header-status">
+            <div class="active-symbol-badge">
+                Symbol: <span id="active-symbol-name">RELIANCE (NSE)</span>
+            </div>
+            <span id="data-status" class="status-indicator ready">EOD Ready</span>
+        </div>
+    </header>
+
+    <!-- Main Application Container -->
+    <main class="app-container">
+        
+        <!-- Sidebar Tree Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h3>Symbols & Categories</h3>
+            </div>
+            <div class="category-tree" id="category-tree">
+                <div class="tree-section">
+                    <span class="tree-title">📁 Nifty 50</span>
+                    <ul class="symbol-list">
+                        <li class="symbol-item active" data-symbol="RELIANCE.NS">RELIANCE</li>
+                        <li class="symbol-item" data-symbol="TCS.NS">TCS</li>
+                        <li class="symbol-item" data-symbol="INFY.NS">INFY</li>
+                        <li class="symbol-item" data-symbol="HDFCBANK.NS">HDFCBANK</li>
+                        <li class="symbol-item" data-symbol="ICICIBANK.NS">ICICIBANK</li>
+                        <li class="symbol-item" data-symbol="TATAMOTORS.NS">TATAMOTORS</li>
+                        <li class="symbol-item" data-symbol="SBIN.NS">SBIN</li>
+                        <li class="symbol-item" data-symbol="BHARTIARTL.NS">BHARTIARTL</li>
+                    </ul>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Chart & AFL Editor Workspace -->
+        <section class="workspace-area">
+            
+            <!-- TradingView Chart Container -->
+            <div class="chart-container" id="chart-workspace">
+                <div id="main-chart" class="chart-cell"></div>
+            </div>
+
+            <!-- AFL Formula Drawer -->
+            <div class="afl-editor-drawer" id="afl-drawer">
+                <div class="afl-toolbar">
+                    <span class="editor-title">⚡ AFL Formula Editor</span>
+                    <div class="afl-actions">
+                        <button id="btn-apply-afl" class="btn btn-primary">Apply Formula</button>
+                        <button id="btn-reset-afl" class="btn btn-secondary">Reset Default</button>
+                        <button id="btn-toggle-ai" class="btn btn-accent">✨ AI Assistant</button>
                     </div>
                 </div>
-            </main>
-        </div>
-    </div>
 
-    <!-- Application Engines -->
+                <!-- Collapsible AI Assistant Drawer -->
+                <div id="ai-prompt-bar" class="ai-prompt-bar hidden">
+                    <input type="text" id="ai-prompt-input" placeholder="e.g., Add 50 EMA and 200 SMA with RSI panel below..." />
+                    <button id="btn-generate-ai" class="btn btn-small">Generate</button>
+                </div>
+
+                <!-- CodeMirror Code Box -->
+                <div class="editor-container">
+                    <textarea id="afl-code-input"></textarea>
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- Application Core Scripts -->
     <script src="js/data-engine.js"></script>
-    <script src="js/chart-engine.js"></script>
     <script src="js/afl-engine.js"></script>
+    <script src="js/chart-engine.js"></script>
+    <script src="js/category-manager.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
