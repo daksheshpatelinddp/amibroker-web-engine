@@ -91,6 +91,9 @@ body {
     cursor: pointer;
     font-size: 0.85rem;
     border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .search-item:hover {
@@ -269,7 +272,7 @@ body {
     font-size: 0.85rem;
 }
 
-/* Responsive Hide Sidebar on Mobile */
+/* Mobile Responsiveness */
 @media (max-width: 768px) {
     .sidebar { display: none; }
     .symbol-search-box { width: 180px; }
