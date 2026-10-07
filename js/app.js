@@ -40,40 +40,49 @@ class App {
     const result = aflEngine.execute(aflCode, this.currentData);
 
     if (result.errors && result.errors.length > 0) {
-      console.warn('AFL Execution Errors:', result.errors);
+      console.warn('AFL Errors:', result.errors);
     } else {
       chartEngine.renderAFLPlots(result.plots);
     }
   }
 
   setupEventListeners() {
+    // Symbol Search
     const symbolSearchInput = document.getElementById('symbol-search');
     if (symbolSearchInput) {
-      symbolSearchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          const selectedSymbol = e.target.value.trim().toUpperCase();
-          if (selectedSymbol) this.loadAndRenderSymbol(selectedSymbol);
-        }
-      });
       symbolSearchInput.addEventListener('change', (e) => {
         const selectedSymbol = e.target.value.trim().toUpperCase();
         if (selectedSymbol) this.loadAndRenderSymbol(selectedSymbol);
       });
     }
 
-    const applyBtn = document.getElementById('btn-apply-afl');
-    if (applyBtn) {
-      const handleApply = (e) => {
-        e.preventDefault();
-        this.applyAFLFormula();
-      };
-      applyBtn.addEventListener('click', handleApply);
-      applyBtn.addEventListener('touchstart', handleApply);
+    // Modal Drawer Toggle Handlers
+    const aflModal = document.getElementById('afl-modal');
+    const toggleBtn = document.getElementById('btn-toggle-analysis');
+    const closeBtn = document.getElementById('btn-close-analysis');
+
+    if (toggleBtn && aflModal) {
+      toggleBtn.onclick = () => aflModal.classList.remove('hidden');
     }
 
+    if (closeBtn && aflModal) {
+      closeBtn.onclick = () => aflModal.classList.add('hidden');
+    }
+
+    // Apply Formula Button
+    const applyBtn = document.getElementById('btn-apply-afl');
+    if (applyBtn) {
+      applyBtn.onclick = (e) => {
+        e.preventDefault();
+        this.applyAFLFormula();
+        if (aflModal) aflModal.classList.add('hidden'); // Close modal on apply
+      };
+    }
+
+    // Reset Formula Button
     const resetBtn = document.getElementById('btn-reset-afl');
     if (resetBtn) {
-      const handleReset = (e) => {
+      resetBtn.onclick = (e) => {
         e.preventDefault();
         const editorElement = document.getElementById('afl-editor-container');
         if (editorElement) {
@@ -81,8 +90,6 @@ class App {
           this.applyAFLFormula();
         }
       };
-      resetBtn.addEventListener('click', handleReset);
-      resetBtn.addEventListener('touchstart', handleReset);
     }
   }
 }

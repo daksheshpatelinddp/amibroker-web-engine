@@ -18,7 +18,7 @@ class ChartEngine {
 
     this.chart = createChart(this.container, {
       width: rect.width || window.innerWidth,
-      height: rect.height || (window.innerHeight - 240),
+      height: rect.height || (window.innerHeight - 48),
       layout: {
         background: { color: '#090d16' },
         textColor: '#94a3b8',
@@ -71,9 +71,8 @@ class ChartEngine {
     this.chart.timeScale().fitContent();
   }
 
-  // Clear existing dynamic AFL lines and plot new ones
   renderAFLPlots(plots) {
-    // Remove old dynamic AFL lines
+    // Clear dynamic indicator plots
     this.dynamicPlotSeries.forEach(series => {
       try {
         this.chart.removeSeries(series);
@@ -83,14 +82,10 @@ class ChartEngine {
     });
     this.dynamicPlotSeries = [];
 
-    // Render new AFL indicator lines
+    // Draw AFL lines
     plots.forEach(plot => {
       if (!plot.data || plot.data.length === 0) return;
-
-      if (plot.style === 'candle') {
-        // Candle plot style matches underlying candles
-        return;
-      }
+      if (plot.style === 'candle') return;
 
       const lineSeries = this.chart.addLineSeries({
         color: plot.color || '#3b82f6',
