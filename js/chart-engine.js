@@ -1,120 +1,145 @@
 // js/chart-engine.js
-import { createChart } from 'https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.mjs';
 
-class ChartEngine {
-  constructor() {
+export class ChartEngine {
+  constructor(containerId) {
+    this.container = typeof containerId === 'string' ? document.getElementById(containerId) : containerId;
+    if (!this.container) {
+      console.error(`ChartEngine: Container element '${containerId}' not found.`);
+      return;
+    }
+
     this.chart = null;
     this.candlestickSeries = null;
-    this.volumeSeries = null;
-    this.dynamicPlotSeries = [];
-    this.container = null;
+    this.indicatorSeriesMap = new Map();
+    this.resizeObserver = null;
+
+    this.initChart();
   }
 
-  init(containerId) {
-    this.container = document.getElementById(containerId);
-    if (!this.container) return;
+  initChart() {
+    // Measure current container dimensions with fallback defaults
+    const width = this.container.clientWidth || this.container.parentElement?.clientWidth || window.innerWidth;
+    const height = this.container.clientHeight || this.container.parentElement?.clientHeight || 400;
 
-    // Calculate concrete dimensions
-    const width = this.container.clientWidth || window.innerWidth;
-    const height = this.container.clientHeight || (window.innerHeight - 48);
-
-    this.chart = createChart(this.container, {
+    // Create TradingView Lightweight Chart instance
+    this.chart = LightweightCharts.createChart(this.container, {
       width: width,
       height: height,
       layout: {
-        background: { color: '#090d16' },
-        textColor: '#94a3b8',
+        background: { type: 'solid', color: '#131722' },
+        textColor: '#d1d4dc',
       },
       grid: {
-        vertLines: { color: '#1e293b' },
-        horzLines: { color: '#1e293b' },
+        vertLines: { color: 'rgba(42, 46, 57, 0.5)' },
+        horzLines: { color: 'rgba(42, 46, 57, 0.5)' },
       },
-      crosshair: { mode: 1 },
-      rightPriceScale: { borderColor: '#334155' },
-      timeScale: { borderColor: '#334155', timeVisible: true },
+      crosshair: {
+        mode: LightweightCharts.CrosshairMode.Normal,
+      },
+      rightPriceScale: {
+        borderColor: 'rgba(197, 203, 206, 0.8)',
+        visible: true,
+      },
+      timeScale: {
+        borderColor: 'rgba(197, 203, 206, 0.8)',
+        timeVisible: true,
+        secondsVisible: false,
+      },
     });
 
+    // Add Candlestick Series
     this.candlestickSeries = this.chart.addCandlestickSeries({
-      upColor: '#10b981',
-      downColor: '#ef4444',
+      upColor: '#26a69a',
+      downColor: '#ef5350',
       borderVisible: false,
-      wickUpColor: '#10b981',
-      wickDownColor: '#ef4444',
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
     });
 
-    this.volumeSeries = this.chart.addHistogramSeries({
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
-      scaleMargins: { top: 0.8, bottom: 0 },
-    });
+    // Setup auto-resizing observer
+    this.setupResizeObserver();
 
-    // Handle mobile orientation / window resizes
-    const handleResize = () => {
-      if (this.container && this.chart) {
-        const w = this.container.clientWidth || window.innerWidth;
-        const h = this.container.clientHeight || (window.innerHeight - 48);
-        if (w > 0 && h > 0) {
-          this.chart.applyOptions({ width: w, height: h });
+    // Trigger immediate delayed resize to handle mobile modal/drawer rendering passes
+    requestAnimationFrame(() => this.resize());
+    setTimeout(() => this.resize(), 100);
+  }
+
+  setupResizeObserver() {
+    if ('ResizeObserver' in window) {
+      this.resizeObserver = new ResizeObserver(entries => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          if (width > 0 && height > 0 && this.chart) {
+            this.chart.resize(width, height);
+          }
         }
-      }
-    };
-
-    window.addEventListener('resize', handleResize);
-    setTimeout(handleResize, 100);
+      });
+      this.resizeObserver.observe(this.container);
+    } else {
+      window.addEventListener('resize', () => this.resize());
+    }
   }
 
-  updateData(data) {
-    if (!data || data.length === 0 || !this.candlestickSeries) return;
+  resize() {
+    if (!this.container || !this.chart) return;
+    const width = this.container.clientWidth || window.innerWidth;
+    const height = this.container.clientHeight || 400;
+    if (width > 0 && height > 0) {
+      this.chart.resize(width, height);
+    }
+  }
 
-    // Direct candlestick mapping
-    const candleData = data.map(d => ({
-      time: d.time,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-    }));
-    this.candlestickSeries.setData(candleData);
+  setCandleData(data) {
+    if (!this.candlestickSeries || !Array.isArray(data)) return;
+    
+    // Format and sort data chronologically for TradingView Lightweight Charts
+    const formattedData = data.map(item => ({
+      time: item.time, // Expects 'YYYY-MM-DD' or UNIX timestamp in seconds
+      open: Number(item.open),
+      high: Number(item.high),
+      low: Number(item.low),
+      close: Number(item.close),
+    })).sort((a, b) => (a.time > b.time ? 1 : -1));
 
-    // Direct volume mapping
-    const volumeData = data.map(d => ({
-      time: d.time,
-      value: d.volume,
-      color: d.close >= d.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)',
-    }));
-    this.volumeSeries.setData(volumeData);
-
-    // Force time scale fit
+    this.candlestickSeries.setData(formattedData);
     this.chart.timeScale().fitContent();
+    this.resize();
   }
 
-  renderAFLPlots(plots) {
-    if (!this.chart) return;
-
-    // Remove existing indicator series
-    this.dynamicPlotSeries.forEach(series => {
+  clearIndicators() {
+    this.indicatorSeriesMap.forEach((series) => {
       try {
         this.chart.removeSeries(series);
       } catch (e) {
-        console.warn('Series cleanup warning:', e);
+        console.warn('Error removing indicator series:', e);
       }
     });
-    this.dynamicPlotSeries = [];
+    this.indicatorSeriesMap.clear();
+  }
 
-    // Add new indicator lines calculated by AFL Engine
-    plots.forEach(plot => {
-      if (!plot.data || plot.data.length === 0 || plot.style === 'candle') return;
+  plotIndicator(id, data, options = {}) {
+    if (!this.chart || !Array.isArray(data)) return;
 
-      const lineSeries = this.chart.addLineSeries({
-        color: plot.color || '#3b82f6',
-        lineWidth: 2,
-        title: plot.title || 'AFL Indicator',
-      });
+    // Remove old plot instance with the same ID if existing
+    if (this.indicatorSeriesMap.has(id)) {
+      this.chart.removeSeries(this.indicatorSeriesMap.get(id));
+      this.indicatorSeriesMap.delete(id);
+    }
 
-      lineSeries.setData(plot.data);
-      this.dynamicPlotSeries.push(lineSeries);
-    });
+    const defaultOptions = {
+      color: '#2196F3',
+      lineWidth: 2,
+      priceLineVisible: false,
+      ...options,
+    };
+
+    const lineSeries = this.chart.addLineSeries(defaultOptions);
+    const formattedData = data.map(item => ({
+      time: item.time,
+      value: Number(item.value),
+    })).sort((a, b) => (a.time > b.time ? 1 : -1));
+
+    lineSeries.setData(formattedData);
+    this.indicatorSeriesMap.set(id, lineSeries);
   }
 }
-
-export const chartEngine = new ChartEngine();
