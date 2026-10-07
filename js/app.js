@@ -11,63 +11,79 @@ let sheetManager;
 let studyRegistry;
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Initialize Core Engines
-  dataEngine = new DataEngine();
-  aflEngine = new AFLEngine();
-  studyRegistry = new StudyRegistry();
-  sheetManager = new SheetManager('workspace-viewport');
+  const statusBadge = document.getElementById('engine-status-badge') || document.querySelector('.status-indicator');
 
-  // 1. Initialize Default AmiBroker Workspace Layout (Sheet 1: Main Workstation)
-  const mainSheet = sheetManager.createSheet('sheet_1', 'Main Chart', false);
-  
-  // Add AmiBroker-style stacked panes (Price Pane + Indicator Pane)
-  const pricePane = mainSheet.instance.addPane('pane_price', 400);
-  const indicatorPane = mainSheet.instance.addPane('pane_indicators', 200);
+  try {
+    // 1. Instantiate Core Subsystems
+    dataEngine = new DataEngine();
+    aflEngine = new AFLEngine();
+    studyRegistry = new StudyRegistry();
+    sheetManager = new SheetManager('workspace-viewport');
 
-  // 2. Initial Data Fetch & Render
-  await loadAndRenderSymbol('RELIANCE');
+    // 2. Initialize DuckDB WASM Engine & Once-Daily EOD Sync
+    await dataEngine.init();
 
-  // 3. Bind UI Controls (Symbol Switcher, AFL Apply Formula, Drawer Toggle)
-  setupUIEventListeners();
+    // 3. Update Status UI to Ready
+    if (statusBadge) {
+      statusBadge.textContent = '● Ready';
+      statusBadge.style.color = '#26a69a';
+    }
+
+    // 4. Build Default Workspace Layout (Sheet 1)
+    const mainSheet = sheetManager.createSheet('sheet_1', 'Main Chart', false);
+    mainSheet.instance.addPane('pane_price', 400);
+    mainSheet.instance.addPane('pane_indicators', 200);
+
+    // 5. Load Default Ticker (RELIANCE)
+    await loadAndRenderSymbol('RELIANCE');
+
+    // 6. Setup Event Listeners
+    setupUIEventListeners();
+
+  } catch (error) {
+    console.error('Fatal initialization error:', error);
+    if (statusBadge) {
+      statusBadge.textContent = '● Error';
+      statusBadge.style.color = '#ef5350';
+    }
+  }
 });
 
 async function loadAndRenderSymbol(symbol) {
   sheetManager.setGlobalSymbolAndInterval(symbol, '1D');
   const activeSheet = sheetManager.getActiveSheet();
-  
   if (!activeSheet) return;
 
   const bars = await dataEngine.fetchBars(activeSheet.symbol);
-  if (!bars || bars.length === 0) return;
-
-  // Retrieve Pane instances
+  
   const pricePane = activeSheet.instance.panes.get('pane_price');
   const indicatorPane = activeSheet.instance.panes.get('pane_indicators');
 
-  // Register and Render Candlesticks on Price Pane
-  const priceStudyId = `${activeSheet.id}_pane_price_candles`;
-  studyRegistry.registerStudy(priceStudyId, activeSheet.id, 'pane_price', { type: 'CANDLESTICK' });
-  pricePane.setCandlestickData(priceStudyId, bars);
+  if (pricePane && bars.length > 0) {
+    const priceStudyId = `${activeSheet.id}_pane_price_candles`;
+    studyRegistry.registerStudy(priceStudyId, activeSheet.id, 'pane_price', { type: 'CANDLESTICK' });
+    pricePane.setCandlestickData(priceStudyId, bars);
+  }
 
-  // Render Default Volume Histogram on Indicator Pane
-  const volumeStudyId = `${activeSheet.id}_pane_indicators_volume`;
-  studyRegistry.registerStudy(volumeStudyId, activeSheet.id, 'pane_indicators', { type: 'HISTOGRAM' });
-  
-  const volumeData = bars.map(b => ({
-    time: b.time,
-    value: b.volume || 0,
-    color: b.close >= b.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
-  }));
-  indicatorPane.plotHistogramStudy(volumeStudyId, volumeData);
+  if (indicatorPane && bars.length > 0) {
+    const volumeStudyId = `${activeSheet.id}_pane_indicators_volume`;
+    studyRegistry.registerStudy(volumeStudyId, activeSheet.id, 'pane_indicators', { type: 'HISTOGRAM' });
+    
+    const volumeData = bars.map(b => ({
+      time: b.time,
+      value: b.volume || 0,
+      color: b.close >= b.open ? 'rgba(38, 166, 154, 0.6)' : 'rgba(239, 83, 80, 0.6)',
+    }));
+    indicatorPane.plotHistogramStudy(volumeStudyId, volumeData);
+  }
 
-  // Double-pass frame request to prevent blank mobile canvas initialization
+  // Double requestAnimationFrame ensures non-zero container dimension measurement
   requestAnimationFrame(() => {
     activeSheet.instance.resizeAll();
   });
 }
 
 function setupUIEventListeners() {
-  // AFL Apply Formula Click
   const applyBtn = document.getElementById('btn-apply-formula');
   if (applyBtn) {
     applyBtn.addEventListener('click', () => {
@@ -75,14 +91,13 @@ function setupUIEventListeners() {
       if (!formula) return;
 
       const activeSheet = sheetManager.getActiveSheet();
-      const currentBars = dataEngine.getCurrentData();
-      
-      // Evaluate AFL Formula
+      const currentSymbol = activeSheet.symbol;
+      const currentBars = dataEngine.getCurrentData(currentSymbol);
+
       const results = aflEngine.evaluate(formula, currentBars);
 
       if (results && results.plots) {
         const pricePane = activeSheet.instance.panes.get('pane_price');
-        
         results.plots.forEach((plot, idx) => {
           const studyId = `${activeSheet.id}_pane_price_afl_plot_${idx}`;
           studyRegistry.registerStudy(studyId, activeSheet.id, 'pane_price', { title: plot.title });
@@ -96,7 +111,6 @@ function setupUIEventListeners() {
     });
   }
 
-  // Handle Window Resizing Across All Panes
   window.addEventListener('resize', () => {
     const activeSheet = sheetManager.getActiveSheet();
     if (activeSheet) activeSheet.instance.resizeAll();
