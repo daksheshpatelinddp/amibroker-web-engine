@@ -1,182 +1,279 @@
+/* Base Reset & Variables */
+:root {
+    --bg-dark: #12151e;
+    --bg-card: #1e222d;
+    --bg-header: #131722;
+    --border-color: #2a2e39;
+    --text-primary: #d1d4dc;
+    --text-muted: #787b86;
+    --accent-blue: #2962ff;
+    --accent-green: #089981;
+    --accent-gold: #ffb703;
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-body, html {
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: #131722;
-    color: #d1d4dc;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-}
-
-#app-container {
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-primary);
+    height: 100vh;
     display: flex;
     flex-direction: column;
-    height: 100vh;
-    width: 100vw;
+    overflow: hidden;
 }
 
-/* Header */
-header {
-    height: 48px;
-    background-color: #1e222d;
+/* Header & Search Bar */
+.app-header {
+    background-color: var(--bg-header);
+    border-bottom: 1px solid var(--border-color);
+    padding: 8px 16px;
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    padding: 0 16px;
-    gap: 16px;
-    border-bottom: 1px solid #2a2e39;
-    flex-shrink: 0;
+    height: 52px;
+    z-index: 100;
 }
 
-.brand {
+.header-brand {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-weight: bold;
-    font-size: 16px;
+    font-weight: 700;
+    font-size: 1.1rem;
     color: #ffffff;
 }
 
-.search-box input {
-    background-color: #2a2e39;
+.symbol-search-box {
+    position: relative;
+    width: 320px;
+}
+
+#symbol-search-input {
+    width: 100%;
+    background: #1e222d;
     border: 1px solid #363c4e;
     color: #ffffff;
     padding: 6px 12px;
     border-radius: 4px;
-    font-size: 13px;
-    width: 220px;
+    font-size: 0.85rem;
     outline: none;
 }
 
-.search-box input:focus {
-    border-color: #2962ff;
+#symbol-search-input:focus {
+    border-color: var(--accent-blue);
 }
 
-.symbol-info {
-    margin-left: auto;
+.search-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #1e222d;
+    border: 1px solid var(--border-color);
+    border-radius: 0 0 4px 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+}
+
+.search-dropdown.hidden {
+    display: none;
+}
+
+.search-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.search-item:hover {
+    background: #2a2e39;
+    color: var(--accent-blue);
+}
+
+.header-status {
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 13px;
 }
 
-.badge {
-    background-color: #089981;
-    color: #ffffff;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 11px;
+.active-symbol-badge {
+    background: #1e293b;
+    color: #38bdf8;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: 1px solid #0284c7;
 }
 
-/* Workspace Split */
-#main-workspace {
+.status-indicator.ready {
+    color: var(--accent-green);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* Layout Containers */
+.app-container {
     display: flex;
     flex: 1;
-    height: calc(100vh - 48px);
+    height: calc(100vh - 52px);
     overflow: hidden;
 }
 
-/* Sidebar */
-#sidebar {
-    width: 180px;
-    background-color: #181b23;
-    border-right: 1px solid #2a2e39;
-    padding: 12px;
+/* Sidebar Tree */
+.sidebar {
+    width: 220px;
+    background-color: var(--bg-card);
+    border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
-    flex-shrink: 0;
 }
 
-#sidebar h3 {
-    font-size: 12px;
-    text-transform: uppercase;
-    color: #787b86;
-    margin-bottom: 10px;
+.sidebar-header {
+    padding: 10px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.category-tree {
+    flex: 1;
+    padding: 8px;
+    overflow-y: auto;
+}
+
+.tree-title {
+    font-size: 0.8rem;
+    font-weight: bold;
+    color: var(--text-muted);
+    display: block;
+    margin-bottom: 6px;
 }
 
 .symbol-list {
     list-style: none;
-    overflow-y: auto;
+    padding-left: 8px;
 }
 
-.symbol-list li {
-    padding: 8px 10px;
-    border-radius: 4px;
+.symbol-item {
+    padding: 6px 8px;
+    font-size: 0.85rem;
     cursor: pointer;
-    font-size: 13px;
-    color: #b2b5be;
+    border-radius: 4px;
+    color: var(--text-primary);
 }
 
-.symbol-list li:hover {
-    background-color: #2a2e39;
-    color: #ffffff;
-}
-
-.symbol-list li.active {
-    background-color: #2962ff;
-    color: #ffffff;
-}
-
-/* Content Area */
-#content-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-}
-
-/* Chart Canvas */
-#chart-container {
-    flex: 1 1 60%;
-    width: 100%;
-    background-color: #131722;
-    position: relative;
-}
-
-/* AFL Panel */
-#afl-panel {
-    flex: 0 0 40%;
-    display: flex;
-    flex-direction: column;
-    background-color: #1e222d;
-    border-top: 1px solid #2a2e39;
-}
-
-#afl-toolbar {
-    height: 36px;
-    background-color: #181b23;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 12px;
-    border-bottom: 1px solid #2a2e39;
-    font-size: 12px;
+.symbol-item:hover, .symbol-item.active {
+    background: #2a2e39;
+    color: var(--accent-blue);
     font-weight: 600;
 }
 
-.action-btn {
-    background-color: #2962ff;
-    color: #ffffff;
-    border: none;
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
+/* Workspace & Chart Container */
+.workspace-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #131722;
 }
 
-#editor-wrapper {
+.chart-container {
     flex: 1;
-    overflow: hidden;
+    min-height: 300px;
+    position: relative;
+    background-color: #131722 !important;
+}
+
+.chart-cell {
+    width: 100%;
+    height: 100%;
+    min-height: 300px;
+}
+
+/* AFL Editor Box */
+.afl-editor-drawer {
+    background-color: var(--bg-card);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.afl-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px;
+    background-color: var(--bg-header);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.editor-title {
+    font-size: 0.85rem;
+    font-weight: bold;
+    color: var(--accent-gold);
+}
+
+.afl-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.btn {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.btn-primary { background: var(--accent-blue); color: #fff; }
+.btn-secondary { background: #363a45; color: var(--text-primary); }
+.btn-accent { background: #6d28d9; color: #fff; }
+
+.ai-prompt-bar {
+    display: flex;
+    gap: 8px;
+    padding: 6px 12px;
+    background-color: #171b26;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.ai-prompt-bar.hidden { display: none; }
+
+.ai-prompt-bar input {
+    flex: 1;
+    background: #0d0e15;
+    border: 1px solid var(--border-color);
+    color: #fff;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.editor-container {
+    padding: 0;
 }
 
 .CodeMirror {
-    height: 100% !important;
-    background-color: #1e222d !important;
-    color: #d1d4dc !important;
-    font-family: monospace;
+    height: 140px !important;
+    background-color: #282a36 !important;
+    font-size: 0.85rem;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .sidebar { display: none; }
+    .symbol-search-box { width: 180px; }
 }
