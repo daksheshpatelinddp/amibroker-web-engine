@@ -8,16 +8,16 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     html, body {
+      width: 100%;
       height: 100%;
-      height: 100vh;
-      height: -webkit-fill-available;
       margin: 0;
       padding: 0;
       overflow: hidden;
+      background-color: #090d16;
     }
   </style>
 </head>
-<body class="bg-slate-900 text-slate-100 flex flex-col h-screen overflow-hidden">
+<body class="text-slate-100 flex flex-col h-screen w-screen overflow-hidden">
 
   <!-- Top Navbar -->
   <header class="h-12 bg-slate-800 border-b border-slate-700 flex items-center justify-between px-3 shrink-0 z-10">
@@ -25,7 +25,7 @@
       <span class="font-bold text-red-500 text-base">AmiBroker</span>
       <input id="symbol-search" type="text" value="RELIANCE" placeholder="Symbol..." class="bg-slate-900 text-slate-200 text-xs px-2 py-1 rounded border border-slate-700 w-24 focus:outline-none focus:border-blue-500 uppercase">
       
-      <!-- Analysis / AFL Editor Toggle Button -->
+      <!-- Analysis Button -->
       <button id="btn-toggle-analysis" type="button" class="bg-slate-700 hover:bg-slate-600 active:bg-slate-800 text-xs px-2.5 py-1 rounded text-blue-400 font-medium flex items-center gap-1 border border-slate-600">
         ⚡ <span>Analysis</span>
       </button>
@@ -38,16 +38,15 @@
     </div>
   </header>
 
-  <!-- Fullscreen Chart Canvas -->
-  <main class="flex-1 w-full bg-slate-950 relative overflow-hidden">
-    <div id="chart-container" class="absolute inset-0 w-full h-full"></div>
+  <!-- Fullscreen Chart Container -->
+  <main class="flex-1 w-full relative overflow-hidden bg-slate-950">
+    <div id="chart-container" class="w-full h-full"></div>
   </main>
 
-  <!-- Analysis / AFL Editor Drawer Overlay -->
+  <!-- Analysis Drawer Overlay -->
   <div id="afl-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex flex-col justify-end backdrop-blur-sm">
     <div class="bg-slate-800 border-t border-slate-700 rounded-t-xl flex flex-col h-[65vh] w-full max-w-3xl mx-auto shadow-2xl">
       
-      <!-- Drawer Header -->
       <div class="h-10 bg-slate-750 border-b border-slate-700 flex items-center justify-between px-4 rounded-t-xl">
         <span class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
           <span>⚡</span> Analysis & AFL Formula Editor
@@ -59,7 +58,6 @@
         </div>
       </div>
 
-      <!-- Textarea Editor -->
       <div class="flex-1 p-2 bg-slate-900">
         <textarea id="afl-editor-container" class="w-full h-full bg-transparent font-mono text-xs text-slate-200 outline-none resize-none border-none focus:ring-0" placeholder="Enter AFL formula here...">// Default AmiBroker Formula
 Plot( Close, "Price", "#26a69a", "candle", true );
