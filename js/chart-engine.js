@@ -15,9 +15,12 @@ class ChartEngine {
     this.container = document.getElementById(containerId);
     if (!this.container) return;
 
+    // Chart dimensions calculation for mobile
+    const rect = this.container.getBoundingClientRect();
+
     this.chart = createChart(this.container, {
-      width: this.container.clientWidth,
-      height: this.container.clientHeight || 450,
+      width: rect.width || window.innerWidth,
+      height: rect.height || (window.innerHeight - 240),
       layout: {
         background: { color: '#090d16' },
         textColor: '#94a3b8',
@@ -31,7 +34,6 @@ class ChartEngine {
       timeScale: { borderColor: '#334155', timeVisible: true },
     });
 
-    // Candlestick Series
     this.candlestickSeries = this.chart.addCandlestickSeries({
       upColor: '#10b981',
       downColor: '#ef4444',
@@ -40,14 +42,12 @@ class ChartEngine {
       wickDownColor: '#ef4444',
     });
 
-    // Volume Series
     this.volumeSeries = this.chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
       priceScaleId: '',
       scaleMargins: { top: 0.8, bottom: 0 },
     });
 
-    // Moving Average Series
     this.sma20Series = this.chart.addLineSeries({
       color: '#3b82f6',
       lineWidth: 2,
@@ -60,14 +60,14 @@ class ChartEngine {
       title: 'EMA 50',
     });
 
-    window.addEventListener('resize', () => {
-      if (this.container && this.chart) {
-        this.chart.applyOptions({
-          width: this.container.clientWidth,
-          height: this.container.clientHeight,
-        });
+    const resizeObserver = new ResizeObserver(entries => {
+      if (entries.length === 0 || !entries[0].contentRect) return;
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0) {
+        this.chart.applyOptions({ width, height });
       }
     });
+    resizeObserver.observe(this.container);
   }
 
   calculateSMA(data, period) {

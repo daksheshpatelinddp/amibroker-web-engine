@@ -8,20 +8,26 @@ class DataEngine {
     this.isInitialized = false;
     this.r2BaseUrl = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
     this.cacheName = 'amibroker-parquet-cache-v1';
-    
-    // Configured for historical data from 2023 to 2026 (Expandable down to 2000)
     this.availableYears = [2023, 2024, 2025, 2026];
   }
 
-  updateStatus(message, isDownloading = false) {
+  // Visual status update helper
+  updateStatus(message, state = 'loading') {
     const statusText = document.getElementById('status-text');
     const statusDot = document.getElementById('status-dot');
     
     if (statusText) statusText.textContent = message;
     if (statusDot) {
-      statusDot.className = `w-2 h-2 rounded-full ${
-        isDownloading ? 'bg-amber-400 animate-ping' : 'bg-emerald-500'
-      }`;
+      if (state === 'downloading') {
+        statusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping';
+        if (statusText) statusText.className = 'text-amber-300 font-semibold text-[11px]';
+      } else if (state === 'cached') {
+        statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
+        if (statusText) statusText.className = 'text-emerald-400 font-semibold text-[11px]';
+      } else {
+        statusDot.className = 'w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse';
+        if (statusText) statusText.className = 'text-blue-300 font-semibold text-[11px]';
+      }
     }
   }
 
@@ -29,7 +35,7 @@ class DataEngine {
     if (this.isInitialized) return;
 
     try {
-      this.updateStatus('Initializing DuckDB-WASM...', true);
+      this.updateStatus('Booting DuckDB-WASM...', 'loading');
 
       const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
       const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
@@ -40,13 +46,13 @@ class DataEngine {
       await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
       this.conn = await this.db.connect();
 
+      // Download / Cache Parquet Files
       await this.loadYearlyParquetFiles();
 
       this.isInitialized = true;
-      this.updateStatus('EOD Data Ready (Cached)', false);
     } catch (err) {
       console.error('Failed to initialize DataEngine:', err);
-      this.updateStatus('Data Engine Error', false);
+      this.updateStatus('Engine Error', 'error');
       throw err;
     }
   }
@@ -61,38 +67,41 @@ class DataEngine {
       let response = await cache.match(fileUrl);
 
       if (!response) {
-        this.updateStatus(`Downloading ${fileName} from R2...`, true);
+        // Downloading from Cloudflare R2 (Class B Operation)
+        this.updateStatus(`R2 Download: ${fileName}...`, 'downloading');
         try {
           response = await fetch(fileUrl);
           if (response.ok) {
-            // Store response in browser CacheStorage to avoid future R2 requests
+            // Save in Browser CacheStorage for future visits
             await cache.put(fileUrl, response.clone());
           } else {
-            console.warn(`Parquet file not found on R2: ${fileName}`);
+            console.warn(`File ${fileName} not found on R2.`);
             continue;
           }
         } catch (fetchErr) {
-          console.error(`Failed to download ${fileName}:`, fetchErr);
+          console.error(`Download failed for ${fileName}:`, fetchErr);
           continue;
         }
       } else {
-        this.updateStatus(`Loading ${fileName} from browser cache...`, false);
+        // Read directly from persistent Browser Storage (Zero R2 Cost)
+        this.updateStatus(`Cache Hit: ${fileName}`, 'cached');
       }
 
       const arrayBuffer = await response.arrayBuffer();
       const buffer = new Uint8Array(arrayBuffer);
       
-      // Register file inside DuckDB virtual file system
+      // Register Buffer in DuckDB Virtual File System
       await this.db.registerFileBuffer(fileName, buffer);
     }
+
+    this.updateStatus('EOD Data Cached & Ready', 'cached');
   }
 
   async getSymbolData(symbol) {
     if (!this.isInitialized) await this.init();
 
-    this.updateStatus(`Querying ${symbol}...`, false);
+    this.updateStatus(`Querying ${symbol}...`, 'loading');
 
-    // SQL query scanning across registered parquet files
     const query = `
       SELECT 
         Date as date,
@@ -117,11 +126,11 @@ class DataEngine {
         volume: Number(row.volume)
       }));
 
-      this.updateStatus(`EOD Ready (${rows.length} bars)`, false);
+      this.updateStatus(`Ready: ${symbol} (${rows.length} bars)`, 'cached');
       return rows;
     } catch (error) {
-      console.error(`Error querying data for symbol ${symbol}:`, error);
-      this.updateStatus(`No data for ${symbol}`, false);
+      console.error(`Error querying symbol ${symbol}:`, error);
+      this.updateStatus(`No data for ${symbol}`, 'error');
       return [];
     }
   }

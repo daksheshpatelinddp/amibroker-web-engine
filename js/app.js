@@ -8,13 +8,13 @@ class App {
   }
 
   async init() {
-    // 1. Initialize TradingView Lightweight Chart Engine
+    // 1. Initialize Charting Container
     chartEngine.init('chart-container');
 
-    // 2. Initialize DuckDB Engine & load parquet files
+    // 2. Initialize DuckDB Data Engine & Load/Cache Data
     await dataEngine.init();
 
-    // 3. Render default symbol on app boot
+    // 3. Initial load
     await this.loadAndRenderSymbol(this.currentSymbol);
 
     // 4. Bind Search Input Events
@@ -23,9 +23,6 @@ class App {
 
   async loadAndRenderSymbol(symbol) {
     this.currentSymbol = symbol;
-    
-    const badge = document.getElementById('current-symbol-badge');
-    if (badge) badge.textContent = `Symbol: ${symbol} (NSE)`;
 
     const symbolData = await dataEngine.getSymbolData(symbol);
     if (symbolData && symbolData.length > 0) {
