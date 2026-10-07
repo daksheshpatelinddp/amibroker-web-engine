@@ -19,45 +19,43 @@ class ChartEngine {
       width: this.container.clientWidth,
       height: this.container.clientHeight || 450,
       layout: {
-        background: { color: '#131722' },
-        textColor: '#d1d4dc',
+        background: { color: '#090d16' },
+        textColor: '#94a3b8',
       },
       grid: {
-        vertLines: { color: '#2B2B43' },
-        horzLines: { color: '#2B2B43' },
+        vertLines: { color: '#1e293b' },
+        horzLines: { color: '#1e293b' },
       },
       crosshair: { mode: 1 },
-      rightPriceScale: { borderColor: '#2B2B43' },
-      timeScale: { borderColor: '#2B2B43', timeVisible: true },
+      rightPriceScale: { borderColor: '#334155' },
+      timeScale: { borderColor: '#334155', timeVisible: true },
     });
 
-    // Add Candlestick Series
+    // Candlestick Series
     this.candlestickSeries = this.chart.addCandlestickSeries({
-      upColor: '#26a69a',
-      downColor: '#ef5350',
+      upColor: '#10b981',
+      downColor: '#ef4444',
       borderVisible: false,
-      wickUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
+      wickUpColor: '#10b981',
+      wickDownColor: '#ef4444',
     });
 
-    // Add Volume Histogram Series
+    // Volume Series
     this.volumeSeries = this.chart.addHistogramSeries({
-      color: '#26a69a',
       priceFormat: { type: 'volume' },
       priceScaleId: '',
       scaleMargins: { top: 0.8, bottom: 0 },
     });
 
-    // Add 20 SMA Line
+    // Moving Average Series
     this.sma20Series = this.chart.addLineSeries({
-      color: '#2962FF',
+      color: '#3b82f6',
       lineWidth: 2,
       title: 'SMA 20',
     });
 
-    // Add 50 EMA Line
     this.ema50Series = this.chart.addLineSeries({
-      color: '#FF6D00',
+      color: '#f97316',
       lineWidth: 2,
       title: 'EMA 50',
     });
@@ -93,7 +91,7 @@ class ChartEngine {
     for (let i = 0; i < data.length; i++) {
       if (i < period - 1) {
         prevEma += data[i].close;
-        if (i === period - 2) prevEma /= period - 1;
+        if (i === period - 2) prevEma /= (period - 1);
         continue;
       }
       if (i === period - 1) {
@@ -111,18 +109,15 @@ class ChartEngine {
   updateData(data) {
     if (!data || data.length === 0) return;
 
-    // Set Candlesticks
     this.candlestickSeries.setData(data);
 
-    // Set Volume
     const volumeData = data.map(d => ({
       time: d.time,
       value: d.volume,
-      color: d.close >= d.open ? '#26a69a88' : '#ef535088',
+      color: d.close >= d.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)',
     }));
     this.volumeSeries.setData(volumeData);
 
-    // Set Moving Averages
     this.sma20Series.setData(this.calculateSMA(data, 20));
     this.ema50Series.setData(this.calculateEMA(data, 50));
 
