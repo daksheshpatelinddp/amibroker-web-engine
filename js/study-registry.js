@@ -7,11 +7,7 @@ export class StudyRegistry {
 
   registerStudy(studyId, sheetId, paneId, meta = {}) {
     const studyRecord = {
-      studyId,
-      sheetId,
-      paneId,
-      timestamp: Date.now(),
-      ...meta,
+      studyId, sheetId, paneId, timestamp: Date.now(), ...meta,
     };
     this.registry.set(studyId, studyRecord);
     return studyRecord;

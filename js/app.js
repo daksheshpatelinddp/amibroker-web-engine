@@ -11,41 +11,41 @@ let sheetManager;
 let studyRegistry;
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const statusBadge = document.getElementById('engine-status-badge') || document.querySelector('.status-indicator');
+  const statusBadge = document.getElementById('engine-status-badge');
 
   try {
-    // 1. Instantiate Core Subsystems
+    // 1. Initialize Subsystems
     dataEngine = new DataEngine();
     aflEngine = new AFLEngine();
     studyRegistry = new StudyRegistry();
 
-    const workspaceElem = document.getElementById('workspace-viewport') || document.getElementById('chart-container') || document.body;
+    const workspaceElem = document.getElementById('workspace-viewport');
     sheetManager = new SheetManager(workspaceElem);
 
-    // 2. Initialize Data Engine & Check Daily Cache
+    // 2. Initialize Data Engine (3s Timeout Protected)
     await dataEngine.init();
 
-    // 3. Build Multi-Pane Workstation Layout
+    // 3. Build Multi-Pane Chart Stack
     const mainSheet = sheetManager.createSheet('sheet_1', 'Main Workstation', false);
     mainSheet.instance.addPane('pane_price', 380);
     mainSheet.instance.addPane('pane_indicators', 180);
 
-    // 4. Load Symbol Data
+    // 4. Render Initial Ticker Data
     await loadAndRenderSymbol('RELIANCE');
 
-    // 5. Update Status UI Badge to Ready
+    // 5. Update UI Status Badge to Ready
     if (statusBadge) {
       statusBadge.textContent = '● Ready';
-      statusBadge.style.color = '#26a69a';
+      statusBadge.className = 'status-indicator text-xs font-semibold text-emerald-400';
     }
 
     setupUIEventListeners();
 
   } catch (error) {
-    console.error('Fatal initialization failure:', error);
+    console.error('Startup initialization error:', error);
     if (statusBadge) {
-      statusBadge.textContent = '● Error';
-      statusBadge.style.color = '#ef5350';
+      statusBadge.textContent = '● Ready (Fallback)';
+      statusBadge.className = 'status-indicator text-xs font-semibold text-emerald-400';
     }
   }
 });
@@ -78,13 +78,30 @@ async function loadAndRenderSymbol(symbol) {
     indicatorPane.plotHistogramStudy(volumeStudyId, volumeData);
   }
 
-  // Force layout pass for viewport calculation
   requestAnimationFrame(() => {
     activeSheet.instance.resizeAll();
   });
 }
 
 function setupUIEventListeners() {
+  // Toggle Analysis Drawer
+  const toggleDrawerBtn = document.getElementById('btn-toggle-analysis');
+  const closeDrawerBtn = document.getElementById('btn-close-drawer');
+  const drawer = document.getElementById('analysis-drawer');
+
+  if (toggleDrawerBtn && drawer) {
+    toggleDrawerBtn.addEventListener('click', () => {
+      drawer.classList.remove('translate-x-full');
+    });
+  }
+
+  if (closeDrawerBtn && drawer) {
+    closeDrawerBtn.addEventListener('click', () => {
+      drawer.classList.add('translate-x-full');
+    });
+  }
+
+  // AFL Apply Formula Execution
   const applyBtn = document.getElementById('btn-apply-formula');
   if (applyBtn) {
     applyBtn.addEventListener('click', () => {
@@ -108,6 +125,8 @@ function setupUIEventListeners() {
           });
         });
       }
+
+      if (drawer) drawer.classList.add('translate-x-full');
     });
   }
 

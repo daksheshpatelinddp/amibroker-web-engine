@@ -4,10 +4,10 @@ import { SheetWorkstation } from './chart-engine.js';
 
 export class SheetManager {
   constructor(workspaceContainerId) {
-    this.container = typeof workspaceContainerId === 'string' 
-      ? document.getElementById(workspaceContainerId) 
+    this.container = typeof workspaceContainerId === 'string'
+      ? document.getElementById(workspaceContainerId)
       : workspaceContainerId;
-      
+
     this.sheets = new Map();
     this.activeSheetId = null;
     this.currentGlobalSymbol = 'RELIANCE';

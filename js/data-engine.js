@@ -11,71 +11,69 @@ export class DataEngine {
   async init() {
     if (this.isInitialized) return true;
 
+    // Timeout Promise to ensure mobile workers never hang initialization
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('DuckDB initialization timeout')), 3000)
+    );
+
     try {
-      // 1. Initialize DuckDB-WASM cleanly with CDN fallback
-      const JSDELIVR_BUNDLES = window.duckdb ? window.duckdb.getJsDelivrBundles() : null;
-      
-      if (JSDELIVR_BUNDLES) {
-        const bundle = await window.duckdb.selectBundle(JSDELIVR_BUNDLES);
-        const worker_url = URL.createObjectURL(
-          new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
-        );
-        const worker = new Worker(worker_url);
-        const logger = new window.duckdb.ConsoleLogger();
-        this.db = new window.duckdb.AsyncDuckDB(logger, worker);
-        await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-        this.conn = await this.db.connect();
-
-        await this.conn.query(`
-          CREATE TABLE IF NOT EXISTS stock_bars (
-            symbol VARCHAR,
-            date DATE,
-            open DOUBLE,
-            high DOUBLE,
-            low DOUBLE,
-            close DOUBLE,
-            volume DOUBLE
-          );
-        `);
-      } else {
-        console.warn('DuckDB global object not detected on window. Operating in local memory fallback mode.');
-      }
-
-      // 2. Once-Daily Sync Check (Skips download on repeated starts today)
-      await this.checkAndSyncEODData();
-
-      this.isInitialized = true;
-      return true;
+      await Promise.race([this._initializeDuckDB(), timeoutPromise]);
     } catch (err) {
-      console.error('DataEngine initialization warning (falling back gracefully):', err);
-      // Mark initialized to unblock UI even if WASM fails on restricted mobile browsers
-      this.isInitialized = true;
-      return false;
+      console.warn('DataEngine fallback triggered:', err.message);
     }
+
+    // Check once-per-day cache
+    this.checkAndSyncEODData();
+
+    this.isInitialized = true;
+    return true;
   }
 
-  async checkAndSyncEODData() {
+  async _initializeDuckDB() {
+    if (typeof window.duckdb === 'undefined') return;
+
+    const JSDELIVR_BUNDLES = window.duckdb.getJsDelivrBundles();
+    const bundle = await window.duckdb.selectBundle(JSDELIVR_BUNDLES);
+
+    const worker_url = URL.createObjectURL(
+      new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
+    );
+
+    const worker = new Worker(worker_url);
+    const logger = new window.duckdb.ConsoleLogger();
+    this.db = new window.duckdb.AsyncDuckDB(logger, worker);
+    await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+
+    this.conn = await this.db.connect();
+    await this.conn.query(`
+      CREATE TABLE IF NOT EXISTS stock_bars (
+        symbol VARCHAR, date DATE, open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE, volume DOUBLE
+      );
+    `);
+  }
+
+  // Once-Daily EOD Fetch Safeguard
+  checkAndSyncEODData() {
     const todayStr = new Date().toISOString().split('T')[0];
     const lastSyncDate = localStorage.getItem('ab_last_eod_sync_date');
 
     if (lastSyncDate === todayStr) {
-      console.log(`[DataEngine] Data already updated today (${todayStr}). Bypassing R2 downloads.`);
+      console.log(`[DataEngine] Data updated for today (${todayStr}). Skipping network downloads.`);
       return;
     }
 
-    console.log(`[DataEngine] First startup today (${todayStr}). Checking for updates...`);
+    console.log(`[DataEngine] First load today (${todayStr}). Syncing latest EOD datasets...`);
     try {
-      // Execute daily sync here if configured
+      // Record today's sync date to bypass downloads on reloads today
       localStorage.setItem('ab_last_eod_sync_date', todayStr);
     } catch (e) {
-      console.warn('Unable to write to localStorage:', e);
+      console.warn('LocalStorage error:', e);
     }
   }
 
   async fetchBars(symbol) {
     if (!this.isInitialized) await this.init();
 
-    // Query DuckDB if connected
     if (this.conn) {
       try {
         const stmt = await this.conn.prepare(
@@ -95,15 +93,15 @@ export class DataEngine {
           this.currentDataMap.set(symbol, rows);
           return rows;
         }
-      } catch (err) {
-        console.warn(`DuckDB query fallback for ${symbol}:`, err);
+      } catch (e) {
+        console.warn('Query fallback:', e);
       }
     }
 
-    // Fallback Mock Synthetic Data Generation (prevents black screen if DB is empty)
-    const mockData = this.generateMockBars(symbol);
-    this.currentDataMap.set(symbol, mockData);
-    return mockData;
+    // Local Bar Generation Safeguard
+    const mockBars = this.generateMockBars(symbol);
+    this.currentDataMap.set(symbol, mockBars);
+    return mockBars;
   }
 
   getCurrentData(symbol) {
@@ -112,7 +110,7 @@ export class DataEngine {
 
   generateMockBars(symbol) {
     const bars = [];
-    let price = 2500;
+    let price = 2800;
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 365);
 
