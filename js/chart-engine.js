@@ -1,5 +1,5 @@
 /**
- * AmiBroker Web Workstation - Chart Renderer
+ * AmiBroker Web Workstation - Chart Engine
  */
 
 class ChartEngine {
@@ -13,7 +13,6 @@ class ChartEngine {
     initChart() {
         if (!this.container) return;
 
-        // Force explicit dark background
         this.container.style.backgroundColor = '#131722';
 
         this.chart = LightweightCharts.createChart(this.container, {
@@ -36,10 +35,9 @@ class ChartEngine {
         const resizeObserver = new ResizeObserver(entries => {
             if (!entries || entries.length === 0) return;
             const { width, height } = entries[0].contentRect;
-            this.chart.applyOptions({ 
-                width: width || window.innerWidth, 
-                height: height > 0 ? height : 350 
-            });
+            if (width > 0 && height > 0) {
+                this.chart.applyOptions({ width, height });
+            }
         });
         resizeObserver.observe(this.container);
     }
@@ -47,15 +45,15 @@ class ChartEngine {
     renderAFLOutput(aflResult) {
         if (!aflResult || !aflResult.success) return;
 
-        // Clear previous series cleanly
+        // Clean existing series
         this.seriesMap.forEach(s => {
-            try { this.chart.removeSeries(s); } catch (e) {}
+            try { this.chart.removeSeries(s); } catch(e){}
         });
         this.seriesMap.clear();
 
         const { plots, time, rawData } = aflResult;
 
-        // Render Base Candlestick Series
+        // 1. Always Render Base Candlesticks
         if (rawData && rawData.length > 0) {
             const candleSeries = this.chart.addCandlestickSeries({
                 upColor: '#26a69a',
@@ -64,22 +62,24 @@ class ChartEngine {
                 wickUpColor: '#26a69a',
                 wickDownColor: '#ef5350',
             });
-            
+
             const formattedCandles = rawData.map(d => ({
                 time: d.time,
-                open: Number(d.open),
-                high: Number(d.high),
-                low: Number(d.low),
-                close: Number(d.close)
+                open: parseFloat(d.open),
+                high: parseFloat(d.high),
+                low: parseFloat(d.low),
+                close: parseFloat(d.close)
             }));
 
             candleSeries.setData(formattedCandles);
             this.seriesMap.set('main_candles', candleSeries);
         }
 
-        // Render AFL Plot Series
+        // 2. Render AFL Plot Instructions
         plots.forEach((p, idx) => {
-            if (p.style === 'line') {
+            const style = (p.style || 'line').toLowerCase();
+
+            if (style === 'line' || style === 'dashed') {
                 const lineSeries = this.chart.addLineSeries({
                     color: p.color || '#2962FF',
                     lineWidth: 2,
@@ -90,7 +90,7 @@ class ChartEngine {
                 for (let i = 0; i < time.length; i++) {
                     const val = p.series[i];
                     if (val !== null && val !== undefined && !isNaN(val)) {
-                        lineData.push({ time: time[i], value: Number(val) });
+                        lineData.push({ time: time[i], value: parseFloat(val) });
                     }
                 }
 
@@ -98,7 +98,7 @@ class ChartEngine {
                     lineSeries.setData(lineData);
                     this.seriesMap.set(`plot_${idx}`, lineSeries);
                 }
-            } else if (p.style === 'histogram') {
+            } else if (style === 'histogram') {
                 const histSeries = this.chart.addHistogramSeries({
                     color: p.color || '#26a69a',
                     priceScaleId: p.overlay ? '' : 'volume_pane',
@@ -108,7 +108,7 @@ class ChartEngine {
                 for (let i = 0; i < time.length; i++) {
                     const val = p.series[i];
                     if (val !== null && val !== undefined && !isNaN(val)) {
-                        histData.push({ time: time[i], value: Number(val) });
+                        histData.push({ time: time[i], value: parseFloat(val) });
                     }
                 }
 
