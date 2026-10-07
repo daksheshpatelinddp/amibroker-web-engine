@@ -1,6 +1,5 @@
 /**
  * AmiBroker Web Workstation - AFL Vector Engine
- * Evaluates AFL formulas over OHLCV vector arrays and computes indicator series.
  */
 
 class AFLEngine {
@@ -12,7 +11,6 @@ class AFLEngine {
         this.plots = [];
     }
 
-    // Vector Simple Moving Average
     sma(arr, period) {
         let res = new Array(arr.length).fill(null);
         for (let i = period - 1; i < arr.length; i++) {
@@ -23,7 +21,6 @@ class AFLEngine {
         return res;
     }
 
-    // Vector Exponential Moving Average
     ema(arr, period) {
         let res = new Array(arr.length).fill(null);
         let k = 2 / (period + 1);
@@ -37,7 +34,6 @@ class AFLEngine {
         return res;
     }
 
-    // Vector Relative Strength Index
     rsi(closeArr, period = 14) {
         let res = new Array(closeArr.length).fill(null);
         let gains = 0, losses = 0;
@@ -66,23 +62,24 @@ class AFLEngine {
         return res;
     }
 
-    // Register Plot Command
     plot(series, name, color = '#2962FF', style = 'line', overlay = true) {
         this.plots.push({ series, name, color, style, overlay });
     }
 
-    // Run Formula against incoming OHLCV Data
     execute(aflCode, ohlcvData) {
         this.reset();
         
-        const Open = ohlcvData.map(d => d.open);
-        const High = ohlcvData.map(d => d.high);
-        const Low = ohlcvData.map(d => d.low);
-        const Close = ohlcvData.map(d => d.close);
-        const Volume = ohlcvData.map(d => d.volume);
+        if (!ohlcvData || ohlcvData.length === 0) {
+            return { success: false, error: "Empty dataset provided" };
+        }
+
+        const Open = ohlcvData.map(d => parseFloat(d.open));
+        const High = ohlcvData.map(d => parseFloat(d.high));
+        const Low = ohlcvData.map(d => parseFloat(d.low));
+        const Close = ohlcvData.map(d => parseFloat(d.close));
+        const Volume = ohlcvData.map(d => parseFloat(d.volume || 0));
         const Time = ohlcvData.map(d => d.time);
 
-        // Standard AmiBroker shorthand aliases
         const O = Open, H = High, L = Low, C = Close, V = Volume;
         const MA = (arr, p) => this.sma(arr, p);
         const EMA = (arr, p) => this.ema(arr, p);
@@ -105,7 +102,6 @@ class AFLEngine {
 
             return { success: true, plots: this.plots, time: Time, rawData: ohlcvData };
         } catch (err) {
-            console.error("AFL Parsing Error:", err);
             return { success: false, error: err.message };
         }
     }
