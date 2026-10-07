@@ -1,83 +1,71 @@
-// js/data-engine.js
+// js/app.js
 
-class DataEngine {
-    constructor() {
-        this.db = null;
-        this.conn = null;
-        this.baseUrl = "https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev";
-        this.isInitialized = false;
+document.addEventListener('DOMContentLoaded', async () => {
+    // Initialize AFL CodeMirror Editor
+    if (window.aflEngine) {
+        window.aflEngine.initEditor('afl-editor');
     }
 
-    async init() {
-        if (this.isInitialized) return;
-        try {
-            const JSDELIVR_BUNDLES = window.duckdb.getJsDelivrBundles();
-            const bundle = await window.duckdb.selectBundle(JSDELIVR_BUNDLES);
-            
-            const worker_url = URL.createObjectURL(
-                new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
-            );
+    const currentSymbolLabel = document.getElementById('current-symbol-label');
+    const symbolSearchInput = document.getElementById('symbol-search-input');
+    const applyFormulaBtn = document.getElementById('apply-formula-btn');
 
-            const worker = new Worker(worker_url);
-            const logger = new window.duckdb.ConsoleLogger();
-            this.db = new window.duckdb.AsyncDuckDB(logger, worker);
-            await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-            this.conn = await this.db.connect();
-            
-            this.isInitialized = true;
-            console.log("DuckDB-WASM initialized successfully.");
-        } catch (error) {
-            console.error("Failed to initialize DuckDB-WASM:", error);
-            throw error;
-        }
-    }
+    let activeSymbol = "RELIANCE";
 
-    async loadSymbolData(symbol) {
-        if (!this.isInitialized) {
-            await this.init();
+    async function loadAndRenderSymbol(symbol) {
+        const cleanSymbol = symbol.trim().toUpperCase();
+        if (!cleanSymbol) return;
+
+        activeSymbol = cleanSymbol;
+
+        if (currentSymbolLabel) {
+            currentSymbolLabel.textContent = `Symbol: ${activeSymbol} (NSE)`;
         }
 
-        const cleanSymbol = symbol.toUpperCase().replace('.PARQUET', '');
-        const parquetUrl = `${this.baseUrl}/${cleanSymbol}.parquet`;
-
         try {
-            // Register or fetch the parquet file into DuckDB virtual filesystem
-            const response = await fetch(parquetUrl);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await window.dataEngine.loadSymbolData(activeSymbol);
+            if (data && data.length > 0) {
+                window.chartEngine.render(data);
+            } else {
+                console.warn(`No data found for ${activeSymbol}`);
             }
-            const buffer = await response.arrayBuffer();
-            const fileName = `${cleanSymbol}.parquet`;
-            
-            await this.db.registerFileBuffer(fileName, new Uint8Array(buffer));
-
-            // Query and normalize data fields
-            const query = `
-                SELECT 
-                    strftime(CAST(Date AS DATE), '%Y-%m-%d') AS time,
-                    CAST(Open AS DOUBLE) AS open,
-                    CAST(High AS DOUBLE) AS high,
-                    CAST(Low AS DOUBLE) AS low,
-                    CAST(Close AS DOUBLE) AS close,
-                    CAST(Volume AS DOUBLE) AS volume
-                FROM '${fileName}'
-                ORDER BY Date ASC
-            `;
-
-            const result = await this.conn.query(query);
-            const rows = result.toArray().map(row => row.toJSON());
-
-            // Filter out invalid rows and ensure sorted order
-            const formattedData = rows
-                .filter(r => r.time && !isNaN(r.close))
-                .sort((a, b) => (a.time > b.time ? 1 : -1));
-
-            return formattedData;
-        } catch (error) {
-            console.error(`Error loading data for ${symbol}:`, error);
-            return [];
+        } catch (err) {
+            console.error(`Error loading symbol ${activeSymbol}:`, err);
         }
     }
-}
 
-window.dataEngine = new DataEngine();
+    // Trigger DuckDB init and render initial symbol
+    await window.dataEngine.init();
+    await loadAndRenderSymbol(activeSymbol);
+
+    // Fix Symbol Search Input Listeners
+    if (symbolSearchInput) {
+        symbolSearchInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                await loadAndRenderSymbol(symbolSearchInput.value);
+                symbolSearchInput.blur();
+            }
+        });
+
+        symbolSearchInput.addEventListener('change', async () => {
+            if (symbolSearchInput.value) {
+                await loadAndRenderSymbol(symbolSearchInput.value);
+            }
+        });
+    }
+
+    // Apply AFL Formula Handler
+    if (applyFormulaBtn) {
+        applyFormulaBtn.addEventListener('click', async () => {
+            await loadAndRenderSymbol(activeSymbol);
+        });
+    }
+
+    // Force recalculation of chart container dimensions after mount
+    setTimeout(() => {
+        if (window.chartEngine) {
+            window.chartEngine.handleResize();
+        }
+    }, 200);
+});
