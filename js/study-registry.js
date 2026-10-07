@@ -2,7 +2,7 @@
 
 export class StudyRegistry {
   constructor() {
-    this.registry = new Map(); // studyId -> { sheetId, paneId, formulaCode, data }
+    this.registry = new Map();
   }
 
   registerStudy(studyId, sheetId, paneId, meta = {}) {
@@ -19,16 +19,5 @@ export class StudyRegistry {
 
   getStudy(studyId) {
     return this.registry.get(studyId);
-  }
-
-  // Returns all study streams associated with a specific sheet/pane for Backtester / Scanner
-  getStudiesForPane(sheetId, paneId) {
-    const matches = [];
-    this.registry.forEach(record => {
-      if (record.sheetId === sheetId && record.paneId === paneId) {
-        matches.push(record);
-      }
-    });
-    return matches;
   }
 }

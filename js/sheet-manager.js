@@ -4,34 +4,34 @@ import { SheetWorkstation } from './chart-engine.js';
 
 export class SheetManager {
   constructor(workspaceContainerId) {
-    this.container = document.getElementById(workspaceContainerId);
-    this.sheets = new Map(); // sheetId -> { metadata, instance }
+    this.container = typeof workspaceContainerId === 'string' 
+      ? document.getElementById(workspaceContainerId) 
+      : workspaceContainerId;
+      
+    this.sheets = new Map();
     this.activeSheetId = null;
     this.currentGlobalSymbol = 'RELIANCE';
     this.currentGlobalInterval = '1D';
   }
 
-  createSheet(sheetId, name, isLocked = false, symbol = null, interval = null) {
-    const sheetDOMContainer = document.createElement('div');
-    sheetDOMContainer.id = `sheet_container_${sheetId}`;
-    sheetDOMContainer.className = 'sheet-container';
-    sheetDOMContainer.style.display = 'none';
-    sheetDOMContainer.style.width = '100%';
-    sheetDOMContainer.style.height = '100%';
-    sheetDOMContainer.style.overflowY = 'auto';
+  createSheet(sheetId, name, isLocked = false) {
+    const sheetDOM = document.createElement('div');
+    sheetDOM.id = `sheet_container_${sheetId}`;
+    sheetDOM.style.display = 'none';
+    sheetDOM.style.width = '100%';
+    sheetDOM.style.height = '100%';
 
-    this.container.appendChild(sheetDOMContainer);
+    this.container.appendChild(sheetDOM);
 
-    const workstation = new SheetWorkstation(sheetId, sheetDOMContainer);
-    
+    const workstation = new SheetWorkstation(sheetId, sheetDOM);
     const sheetData = {
       id: sheetId,
       name: name,
       isLocked: isLocked,
-      symbol: symbol || this.currentGlobalSymbol,
-      interval: interval || this.currentGlobalInterval,
+      symbol: this.currentGlobalSymbol,
+      interval: this.currentGlobalInterval,
       instance: workstation,
-      dom: sheetDOMContainer,
+      dom: sheetDOM,
     };
 
     this.sheets.set(sheetId, sheetData);
@@ -57,16 +57,6 @@ export class SheetManager {
     });
   }
 
-  toggleSheetLock(sheetId) {
-    const sheet = this.sheets.get(sheetId);
-    if (sheet) {
-      sheet.isLocked = !sheet.isLocked;
-      return sheet.isLocked;
-    }
-    return false;
-  }
-
-  // Global symbol/interval sync handler across unlocked sheets
   setGlobalSymbolAndInterval(symbol, interval) {
     this.currentGlobalSymbol = symbol;
     this.currentGlobalInterval = interval;
