@@ -8,10 +8,13 @@ class DataEngine {
     this.isInitialized = false;
     this.r2BaseUrl = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
     this.cacheName = 'amibroker-parquet-cache-v1';
-    this.availableYears = [2023, 2024, 2025, 2026];
+    
+    // Static past years to permanently cache locally
+    this.historicalYears = [2023, 2024, 2025];
+    // Dynamic current year that receives daily EOD updates
+    this.currentYear = new Date().getFullYear(); // 2026
   }
 
-  // Visual status update helper
   updateStatus(message, state = 'loading') {
     const statusText = document.getElementById('status-text');
     const statusDot = document.getElementById('status-dot');
@@ -46,7 +49,6 @@ class DataEngine {
       await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
       this.conn = await this.db.connect();
 
-      // Download / Cache Parquet Files
       await this.loadYearlyParquetFiles();
 
       this.isInitialized = true;
@@ -60,19 +62,18 @@ class DataEngine {
   async loadYearlyParquetFiles() {
     const cache = await caches.open(this.cacheName);
 
-    for (const year of this.availableYears) {
+    // 1. Process Static Historical Years (Served from CacheStorage after initial download)
+    for (const year of this.historicalYears) {
       const fileName = `${year}.parquet`;
       const fileUrl = `${this.r2BaseUrl}/${fileName}`;
 
       let response = await cache.match(fileUrl);
 
       if (!response) {
-        // Downloading from Cloudflare R2 (Class B Operation)
         this.updateStatus(`R2 Download: ${fileName}...`, 'downloading');
         try {
           response = await fetch(fileUrl);
           if (response.ok) {
-            // Save in Browser CacheStorage for future visits
             await cache.put(fileUrl, response.clone());
           } else {
             console.warn(`File ${fileName} not found on R2.`);
@@ -83,18 +84,39 @@ class DataEngine {
           continue;
         }
       } else {
-        // Read directly from persistent Browser Storage (Zero R2 Cost)
         this.updateStatus(`Cache Hit: ${fileName}`, 'cached');
       }
 
       const arrayBuffer = await response.arrayBuffer();
-      const buffer = new Uint8Array(arrayBuffer);
-      
-      // Register Buffer in DuckDB Virtual File System
-      await this.db.registerFileBuffer(fileName, buffer);
+      await this.db.registerFileBuffer(fileName, new Uint8Array(arrayBuffer));
     }
 
-    this.updateStatus('EOD Data Cached & Ready', 'cached');
+    // 2. Process Current Year (Always fetch fresh daily EOD updates from R2 on startup)
+    const currentYearFile = `${this.currentYear}.parquet`;
+    const currentYearUrl = `${this.r2BaseUrl}/${currentYearFile}`;
+    this.updateStatus(`Updating Daily EOD: ${currentYearFile}...`, 'downloading');
+
+    try {
+      const freshResponse = await fetch(currentYearUrl, { cache: 'no-store' });
+      if (freshResponse.ok) {
+        // Overwrite cached entry with today's latest EOD dataset
+        await cache.put(currentYearUrl, freshResponse.clone());
+        const arrayBuffer = await freshResponse.arrayBuffer();
+        await this.db.registerFileBuffer(currentYearFile, new Uint8Array(arrayBuffer));
+      } else {
+        console.warn(`Could not fetch fresh ${currentYearFile} from R2.`);
+      }
+    } catch (err) {
+      console.error(`Error fetching fresh EOD data for ${currentYearFile}:`, err);
+      // Fallback to cached version if network is offline
+      const cachedFallback = await cache.match(currentYearUrl);
+      if (cachedFallback) {
+        const arrayBuffer = await cachedFallback.arrayBuffer();
+        await this.db.registerFileBuffer(currentYearFile, new Uint8Array(arrayBuffer));
+      }
+    }
+
+    this.updateStatus('EOD Data Ready & Up-to-Date', 'cached');
   }
 
   async getSymbolData(symbol) {

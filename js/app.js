@@ -1,51 +1,84 @@
 // js/app.js
 import { dataEngine } from './data-engine.js';
 import { chartEngine } from './chart-engine.js';
+import { aflEngine } from './afl-engine.js';
 
 class App {
   constructor() {
     this.currentSymbol = 'RELIANCE';
+    this.currentData = [];
   }
 
   async init() {
-    // 1. Initialize Charting Container
     chartEngine.init('chart-container');
-
-    // 2. Initialize DuckDB Data Engine & Load/Cache Data
     await dataEngine.init();
 
-    // 3. Initial load
     await this.loadAndRenderSymbol(this.currentSymbol);
-
-    // 4. Bind Search Input Events
     this.setupEventListeners();
   }
 
   async loadAndRenderSymbol(symbol) {
     this.currentSymbol = symbol;
+    this.currentData = await dataEngine.getSymbolData(symbol);
 
-    const symbolData = await dataEngine.getSymbolData(symbol);
-    if (symbolData && symbolData.length > 0) {
-      chartEngine.updateData(symbolData);
+    if (this.currentData && this.currentData.length > 0) {
+      chartEngine.updateData(this.currentData);
+      // Run current AFL code against newly loaded symbol
+      this.applyAFLFormula();
+    }
+  }
+
+  applyAFLFormula() {
+    const editorElement = document.getElementById('afl-editor-container');
+    let aflCode = '';
+
+    if (editorElement) {
+      aflCode = editorElement.innerText || editorElement.textContent;
+    }
+
+    if (!aflCode || this.currentData.length === 0) return;
+
+    const result = aflEngine.execute(aflCode, this.currentData);
+
+    if (result.errors && result.errors.length > 0) {
+      console.warn('AFL Execution Errors:', result.errors);
+    } else {
+      chartEngine.renderAFLPlots(result.plots);
     }
   }
 
   setupEventListeners() {
+    // Search input
     const symbolSearchInput = document.getElementById('symbol-search');
     if (symbolSearchInput) {
       symbolSearchInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           const selectedSymbol = e.target.value.trim().toUpperCase();
-          if (selectedSymbol) {
-            this.loadAndRenderSymbol(selectedSymbol);
-          }
+          if (selectedSymbol) this.loadAndRenderSymbol(selectedSymbol);
         }
       });
-
       symbolSearchInput.addEventListener('change', (e) => {
         const selectedSymbol = e.target.value.trim().toUpperCase();
-        if (selectedSymbol) {
-          this.loadAndRenderSymbol(selectedSymbol);
+        if (selectedSymbol) this.loadAndRenderSymbol(selectedSymbol);
+      });
+    }
+
+    // Apply Formula Button
+    const applyBtn = document.getElementById('btn-apply-afl');
+    if (applyBtn) {
+      applyBtn.addEventListener('click', () => {
+        this.applyAFLFormula();
+      });
+    }
+
+    // Reset Formula Button
+    const resetBtn = document.getElementById('btn-reset-afl');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        const editorElement = document.getElementById('afl-editor-container');
+        if (editorElement) {
+          editorElement.innerText = `// Default AmiBroker Formula\nPlot( Close, "Price", "#26a69a", "candle", true );\nPlot( MA(Close, 20), "SMA 20", "#3b82f6", "line" );\nPlot( EMA(Close, 50), "EMA 50", "#f97316", "line" );`;
+          this.applyAFLFormula();
         }
       });
     }
