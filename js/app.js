@@ -23,7 +23,6 @@ class App {
 
     if (this.currentData && this.currentData.length > 0) {
       chartEngine.updateData(this.currentData);
-      // Run current AFL code against newly loaded symbol
       this.applyAFLFormula();
     }
   }
@@ -33,7 +32,7 @@ class App {
     let aflCode = '';
 
     if (editorElement) {
-      aflCode = editorElement.innerText || editorElement.textContent;
+      aflCode = editorElement.value || editorElement.innerText || editorElement.textContent;
     }
 
     if (!aflCode || this.currentData.length === 0) return;
@@ -48,7 +47,6 @@ class App {
   }
 
   setupEventListeners() {
-    // Search input
     const symbolSearchInput = document.getElementById('symbol-search');
     if (symbolSearchInput) {
       symbolSearchInput.addEventListener('keydown', (e) => {
@@ -63,24 +61,28 @@ class App {
       });
     }
 
-    // Apply Formula Button
     const applyBtn = document.getElementById('btn-apply-afl');
     if (applyBtn) {
-      applyBtn.addEventListener('click', () => {
+      const handleApply = (e) => {
+        e.preventDefault();
         this.applyAFLFormula();
-      });
+      };
+      applyBtn.addEventListener('click', handleApply);
+      applyBtn.addEventListener('touchstart', handleApply);
     }
 
-    // Reset Formula Button
     const resetBtn = document.getElementById('btn-reset-afl');
     if (resetBtn) {
-      resetBtn.addEventListener('click', () => {
+      const handleReset = (e) => {
+        e.preventDefault();
         const editorElement = document.getElementById('afl-editor-container');
         if (editorElement) {
-          editorElement.innerText = `// Default AmiBroker Formula\nPlot( Close, "Price", "#26a69a", "candle", true );\nPlot( MA(Close, 20), "SMA 20", "#3b82f6", "line" );\nPlot( EMA(Close, 50), "EMA 50", "#f97316", "line" );`;
+          editorElement.value = `// Default AmiBroker Formula\nPlot( Close, "Price", "#26a69a", "candle", true );\nPlot( MA(Close, 20), "SMA 20", "#3b82f6", "line" );\nPlot( EMA(Close, 50), "EMA 50", "#f97316", "line" );`;
           this.applyAFLFormula();
         }
-      });
+      };
+      resetBtn.addEventListener('click', handleReset);
+      resetBtn.addEventListener('touchstart', handleReset);
     }
   }
 }

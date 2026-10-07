@@ -5,7 +5,6 @@ class AFLEngine {
     this.variables = {};
   }
 
-  // Simple moving average calculation on price array
   calculateSMA(prices, period) {
     const result = new Array(prices.length).fill(null);
     for (let i = 0; i < prices.length; i++) {
@@ -19,7 +18,6 @@ class AFLEngine {
     return result;
   }
 
-  // Exponential moving average calculation on price array
   calculateEMA(prices, period) {
     const result = new Array(prices.length).fill(null);
     const k = 2 / (period + 1);
@@ -43,7 +41,6 @@ class AFLEngine {
     return result;
   }
 
-  // Execute AFL script string against loaded symbol price bars
   execute(code, symbolData) {
     if (!symbolData || symbolData.length === 0) return { plots: [], errors: ['No data loaded'] };
 
@@ -54,7 +51,6 @@ class AFLEngine {
     const closes = symbolData.map(d => d.close);
     const volumes = symbolData.map(d => d.volume);
 
-    // Context environment available inside AFL expressions
     const env = {
       Open: opens,
       High: highs,
@@ -68,18 +64,18 @@ class AFLEngine {
     const plots = [];
     const errors = [];
 
-    // Parse AFL script line by line
-    const lines = code.split('\n');
+    // Standardize line breaks across browsers
+    const sanitizedCode = code.replace(/<br\s*[\/]?>/gi, '\n').replace(/<div>/gi, '\n').replace(/<\/div>/gi, '');
+    const lines = sanitizedCode.split('\n');
 
     for (let i = 0; i < lines.length; i++) {
       let line = lines[i].trim();
       
-      // Strip comments
       if (line.startsWith('//') || line === '') continue;
       if (line.endsWith(';')) line = line.slice(0, -1).trim();
 
-      // Check for Plot() function calls
-      if (line.startsWith('Plot(')) {
+      // Case-insensitive match for Plot(...)
+      if (/^Plot\s*\(/i.test(line)) {
         try {
           const content = line.substring(line.indexOf('(') + 1, line.lastIndexOf(')'));
           const args = content.split(',').map(arg => arg.trim().replace(/^["']|["']$/g, ''));
@@ -91,18 +87,18 @@ class AFLEngine {
 
           let dataValues = [];
 
-          if (arrayExpr === 'Close') {
+          if (/^Close$/i.test(arrayExpr)) {
             dataValues = closes;
-          } else if (arrayExpr === 'Open') {
+          } else if (/^Open$/i.test(arrayExpr)) {
             dataValues = opens;
-          } else if (arrayExpr === 'High') {
+          } else if (/^High$/i.test(arrayExpr)) {
             dataValues = highs;
-          } else if (arrayExpr === 'Low') {
+          } else if (/^Low$/i.test(arrayExpr)) {
             dataValues = lows;
-          } else if (arrayExpr === 'Volume') {
+          } else if (/^Volume$/i.test(arrayExpr)) {
             dataValues = volumes;
           } else {
-            // Evaluate function call like MA(Close, 20) or EMA(Close, 50)
+            // Parse technical indicators like MA(Close, 20) or EMA(Close, 50)
             const maMatch = arrayExpr.match(/(MA|EMA)\s*\(\s*(Close\vert{}Open\vert{}High\vert{}Low)\s*,\s*(\d+)\s*\)/i);
             if (maMatch) {
               const funcName = maMatch[1].toUpperCase();
@@ -114,7 +110,6 @@ class AFLEngine {
             }
           }
 
-          // Format plotted output for TradingView Lightweight Charts
           const seriesData = dates.map((time, idx) => ({
             time: time,
             value: dataValues[idx]
