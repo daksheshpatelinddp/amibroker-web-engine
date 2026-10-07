@@ -1,4 +1,3 @@
-/* css/style.css */
 * {
     box-sizing: border-box;
     margin: 0;
@@ -11,7 +10,7 @@ body, html {
     overflow: hidden;
     background-color: #131722;
     color: #d1d4dc;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
 #app-container {
@@ -21,55 +20,143 @@ body, html {
     width: 100vw;
 }
 
-/* Header Navbar */
+/* Header */
 header {
     height: 48px;
     background-color: #1e222d;
     display: flex;
     align-items: center;
-    padding: 0 12px;
-    gap: 12px;
+    padding: 0 16px;
+    gap: 16px;
     border-bottom: 1px solid #2a2e39;
     flex-shrink: 0;
 }
 
-/* Workspace main split */
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: bold;
+    font-size: 16px;
+    color: #ffffff;
+}
+
+.search-box input {
+    background-color: #2a2e39;
+    border: 1px solid #363c4e;
+    color: #ffffff;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    width: 220px;
+    outline: none;
+}
+
+.search-box input:focus {
+    border-color: #2962ff;
+}
+
+.symbol-info {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+}
+
+.badge {
+    background-color: #089981;
+    color: #ffffff;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+/* Workspace Split */
 #main-workspace {
     display: flex;
-    flex-direction: column;
     flex: 1;
     height: calc(100vh - 48px);
     overflow: hidden;
 }
 
-/* Chart Canvas Container */
+/* Sidebar */
+#sidebar {
+    width: 180px;
+    background-color: #181b23;
+    border-right: 1px solid #2a2e39;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+#sidebar h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    color: #787b86;
+    margin-bottom: 10px;
+}
+
+.symbol-list {
+    list-style: none;
+    overflow-y: auto;
+}
+
+.symbol-list li {
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #b2b5be;
+}
+
+.symbol-list li:hover {
+    background-color: #2a2e39;
+    color: #ffffff;
+}
+
+.symbol-list li.active {
+    background-color: #2962ff;
+    color: #ffffff;
+}
+
+/* Content Area */
+#content-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Chart Canvas */
 #chart-container {
     flex: 1 1 60%;
     width: 100%;
-    position: relative;
     background-color: #131722;
-    min-height: 250px;
+    position: relative;
 }
 
-/* AFL Formula Bottom Panel */
+/* AFL Panel */
 #afl-panel {
     flex: 0 0 40%;
     display: flex;
     flex-direction: column;
     background-color: #1e222d;
-    border-top: 2px solid #2a2e39;
-    overflow: hidden;
+    border-top: 1px solid #2a2e39;
 }
 
 #afl-toolbar {
-    height: 38px;
+    height: 36px;
+    background-color: #181b23;
     display: flex;
     align-items: center;
-    padding: 0 8px;
-    gap: 8px;
-    background-color: #181b23;
+    justify-content: space-between;
+    padding: 0 12px;
     border-bottom: 1px solid #2a2e39;
-    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 600;
 }
 
 .action-btn {
@@ -79,22 +166,17 @@ header {
     padding: 4px 12px;
     border-radius: 4px;
     font-size: 12px;
-    font-weight: 600;
     cursor: pointer;
-}
-
-.action-btn:hover {
-    background-color: #1e54e4;
 }
 
 #editor-wrapper {
     flex: 1;
-    overflow: auto;
+    overflow: hidden;
 }
 
 .CodeMirror {
     height: 100% !important;
-    font-size: 13px;
     background-color: #1e222d !important;
     color: #d1d4dc !important;
+    font-family: monospace;
 }
