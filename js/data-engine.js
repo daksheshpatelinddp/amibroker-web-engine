@@ -4,7 +4,7 @@
 
 class DataEngine {
     constructor() {
-        this.r2BaseUrl = "https://your-r2-bucket-url.r2.dev";
+        this.r2BaseUrl = "https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev";
     }
 
     cleanSymbolKey(symbol) {
