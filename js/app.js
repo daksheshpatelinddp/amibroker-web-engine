@@ -20,15 +20,14 @@ class WorkstationApp {
       await this.dataEngine.initialize();
       this.chartEngine.initChart();
 
-      // Bind responsive symbol search handlers
       this.setupSymbolSearchModal();
 
-      // Load default symbol
+      // Initial Chart Load
       await this.loadSymbolData(this.currentSymbol);
 
       this.updateStatusBadge(true);
     } catch (err) {
-      console.error("[App] Startup failed:", err);
+      console.error("[App] Workstation startup error:", err);
       this.updateStatusBadge(false, err.message);
     }
   }
@@ -58,8 +57,13 @@ class WorkstationApp {
       searchInput.value = "";
       setTimeout(() => searchInput.focus(), 100);
 
+      // Show loading indicator
+      if (resultsList) {
+        resultsList.innerHTML = `<div class="p-6 text-slate-400 text-center text-xs animate-pulse">Loading 3000+ symbols from Cloudflare R2...</div>`;
+      }
+
       const symbols = await this.dataEngine.getAllSymbols();
-      if (countLabel) countLabel.textContent = `${symbols.length} symbols loaded`;
+      if (countLabel) countLabel.textContent = `${symbols.length} symbols available`;
       this.renderSymbolList(symbols);
     };
 
@@ -70,12 +74,10 @@ class WorkstationApp {
     searchBtn.onclick = openModal;
     if (closeBtn) closeBtn.onclick = closeModal;
 
-    // Close when tapping outside modal body on mobile backdrop
     modal.onclick = (e) => {
       if (e.target === modal) closeModal();
     };
 
-    // Keyboard Shortcuts (Ctrl+K or Cmd+K to open, ESC to close)
     window.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -85,15 +87,15 @@ class WorkstationApp {
       }
     });
 
-    // Real-time Search Input Filter
+    // Real-time Search Input Filter across 3000+ tickers
     searchInput.addEventListener("input", async (e) => {
       const q = e.target.value.trim().toUpperCase();
       const allSymbols = await this.dataEngine.getAllSymbols();
-      const filtered = allSymbols.filter((s) => s.includes(q));
+      const filtered = allSymbols.filter((s) => s.includes(q)).slice(0, 100); // Render top 100 matches for performance
       this.renderSymbolList(filtered);
     });
 
-    // Quick Ticker Chips Selection
+    // Quick Ticker Chips
     document.querySelectorAll(".quick-chip").forEach((chip) => {
       chip.onclick = async () => {
         const symbol = chip.textContent.trim();
