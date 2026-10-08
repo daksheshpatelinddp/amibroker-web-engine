@@ -1,7 +1,7 @@
 /**
  * js/data-engine.js
  * AmiBroker Web Workstation - DuckDB-WASM & Tiered Parquet Data Engine
- * Features On-Screen Live Debug Console
+ * Exact implementation adapted from reference project index.html
  */
 
 class DataEngine {
@@ -27,19 +27,6 @@ class DataEngine {
     this.allSymbols = [];
     this.selectedSymbol = '';
     this.onSymbolChangeCallback = null;
-
-    // Attach global error capturer immediately
-    this.setupGlobalErrorLogging();
-  }
-
-  setupGlobalErrorLogging() {
-    window.addEventListener('error', (e) => {
-      this.showErrorOnScreen(`GLOBAL ERROR: ${e.message} at ${e.filename}:${e.lineno}`);
-    });
-
-    window.addEventListener('unhandledrejection', (e) => {
-      this.showErrorOnScreen(`UNHANDLED PROMISE REJECTION: ${e.reason?.message || e.reason}`);
-    });
   }
 
   showErrorOnScreen(errText) {
@@ -91,28 +78,23 @@ class DataEngine {
   }
 
   /**
-   * Initialize DuckDB-WASM Instance
+   * Exact DuckDB-WASM Worker Init from Reference Project
    */
   async init() {
     try {
-      this.setLoaderProgress('Initializing DuckDB WASM...', 10, 'Step 1/3: Locating CDN Bundles...');
+      this.setLoaderProgress('Initializing DuckDB Engine...', 10, 'Creating same-origin worker...');
       this.updateStatus('Initializing DB...', 'amber');
 
       const duckdb = window.duckdb;
       if (!duckdb) {
-        throw new Error('window.duckdb is undefined. DuckDB script tag in index.html failed to load.');
+        throw new Error('DuckDB script tag not loaded properly.');
       }
 
-      this.setLoaderProgress('Selecting WASM Bundle...', 15, 'Step 1/3: Fetching WASM binaries...');
       const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
       const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
 
-      this.setLoaderProgress('Creating Same-Origin Worker...', 20, 'Step 1/3: Fetching worker script...');
-      const workerScript = await fetch(bundle.mainWorker).then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status} fetching mainWorker from jsDelivr`);
-        return r.text();
-      });
-
+      // Same-origin worker blob technique from reference project
+      const workerScript = await fetch(bundle.mainWorker).then(r => r.text());
       const workerBlobUrl = URL.createObjectURL(
         new Blob([workerScript], { type: 'text/javascript' })
       );
@@ -121,21 +103,20 @@ class DataEngine {
       const logger = new duckdb.ConsoleLogger();
       this.db = new duckdb.AsyncDuckDB(logger, worker);
 
-      this.setLoaderProgress('Instantiating WASM Module...', 25, 'Step 1/3: Compiling WASM module...');
       await this.db.instantiate(bundle.mainModule);
       URL.revokeObjectURL(workerBlobUrl);
 
       this.conn = await this.db.connect();
 
-      this.setLoaderProgress('DuckDB Engine Online', 30, 'Step 2/3: Checking Parquet Files...');
+      this.setLoaderProgress('DuckDB Worker Ready', 25, 'Downloading Parquet dataset from R2...');
 
-      // Load Parquet files into virtual memory
+      // Download/cache files into virtual memory
       this.localParquetFiles = await this.loadParquetFilesWithCache();
 
-      // Index available symbols
+      // Index symbols
       await this.indexSymbols();
 
-      // Setup Search Combobox
+      // Setup UI
       this.setupComboboxUI();
 
       this.isInitialized = true;
@@ -146,12 +127,12 @@ class DataEngine {
         this.onSymbolChangeCallback(this.selectedSymbol);
       }
     } catch (error) {
-      this.showErrorOnScreen(`INIT FAIL: ${error.stack || error.message || error}`);
+      this.showErrorOnScreen(`INIT FAIL: ${error.message || error}`);
     }
   }
 
   /**
-   * Load and Cache Parquet files in IndexedDB
+   * Exact Tiered Parquet Cache from Reference Project
    */
   async loadParquetFilesWithCache() {
     const localNames = [];
@@ -168,17 +149,17 @@ class DataEngine {
         ? `${filename}::${this.cacheVersion}::${todayStr}`
         : `${filename}::${this.cacheVersion}`;
 
-      const progressStart = 30 + Math.floor(((step - 1) / totalFiles) * 55);
-      const progressEnd = 30 + Math.floor((step / totalFiles) * 60);
+      const progressStart = 25 + Math.floor(((step - 1) / totalFiles) * 60);
+      const progressEnd = 25 + Math.floor((step / totalFiles) * 60);
 
       let buffer = await this.idbGet(cacheKey);
       if (buffer) {
-        this.setLoaderProgress(`Loading ${filename} (cached)...`, progressEnd, 'Using IndexedDB offline cache');
+        this.setLoaderProgress(`Loading ${filename} (cached)...`, progressEnd, 'Using local IndexedDB cache');
       } else {
-        this.setLoaderProgress(`Downloading ${filename} from R2...`, progressStart, `Fetching ${url}...`);
+        this.setLoaderProgress(`Downloading ${filename} from R2...`, progressStart, 'Fetching remote Parquet bytes...');
         const resp = await fetch(url);
         if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status} when fetching ${url}`);
+          throw new Error(`Failed to fetch ${filename} from R2: HTTP ${resp.status}`);
         }
         buffer = await resp.arrayBuffer();
         await this.idbPut(cacheKey, buffer);
@@ -190,7 +171,7 @@ class DataEngine {
       localNames.push(localName);
     }
 
-    this.setLoaderProgress('Building DuckDB SQL View...', 88, 'Mapping local_2023 .. local_2026...');
+    // Register View 'all_stocks'
     const createViewQuery = `
       CREATE VIEW all_stocks AS 
       SELECT * FROM read_parquet([${localNames.map(f => `'${f}'`).join(',')}]);
@@ -201,10 +182,10 @@ class DataEngine {
   }
 
   /**
-   * Index symbols with HAVING COUNT(*) >= 50
+   * Exact Symbol Index Query from Reference Project
    */
   async indexSymbols() {
-    this.setLoaderProgress('Indexing Symbol Universe...', 92, 'Step 3/3: Extracting active tickers...');
+    this.setLoaderProgress('Indexing Symbol Universe...', 90, 'Filtering active tickers...');
     
     try {
       const query = `
@@ -232,14 +213,11 @@ class DataEngine {
         this.selectedSymbol = defaultSymbol;
       }
     } catch (err) {
-      this.showErrorOnScreen(`SYMBOL INDEXING FAIL: ${err.message}`);
+      this.showErrorOnScreen(`SYMBOL INDEX FAIL: ${err.message}`);
       this.allSymbols = [];
     }
   }
 
-  /**
-   * Bind top toolbar symbol search box
-   */
   setupComboboxUI() {
     const searchInput = document.getElementById('symbolSearchInput');
     const dropdown = document.getElementById('symbolDropdown');
