@@ -1,5 +1,5 @@
 /**
- * DataEngine - Fully Initialized DuckDB-WASM with Direct Cloudflare R2 Parquet Access
+ * DataEngine - DuckDB-WASM Engine with Full 38 MB R2 Pre-Fetch & CacheStorage VFS Registration
  */
 import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm";
 
@@ -8,7 +8,7 @@ export class DataEngine {
     this.r2BaseUrl = "https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev";
     this.availableYears = [2023, 2024, 2025, 2026];
     this.currentYear = new Date().getFullYear(); // 2026
-    this.cacheName = "ab-r2-parquet-cache-v1";
+    this.cacheName = "ab-r2-parquet-cache-v2";
     this.db = null;
     this.conn = null;
     this.symbolList = [];
@@ -16,11 +16,11 @@ export class DataEngine {
   }
 
   async initialize() {
-    console.log("[DataEngine] Booting DuckDB-WASM Worker Engine & R2 Sync...");
-    this.updateCacheStatusUI("Initializing DuckDB-WASM...");
+    console.log("[DataEngine] Initializing DuckDB-WASM & Downloading R2 Parquet files...");
+    this.updateCacheStatusUI("Initializing Engine...");
 
     try {
-      // 1. Initialize DuckDB-WASM Worker from CDN bundles
+      // 1. Initialize DuckDB-WASM Worker from CDN
       const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
       const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
 
@@ -36,67 +36,85 @@ export class DataEngine {
       URL.revokeObjectURL(worker_url);
 
       this.conn = await this.db.connect();
-      console.log("[DataEngine] DuckDB-WASM Engine successfully connected.");
+      console.log("[DataEngine] DuckDB-WASM Engine Instance Ready.");
 
-      // 2. Perform Browser CacheStorage sync for Cloudflare R2 files
-      await this.syncR2ParquetCache();
-
-      // 3. Register HTTP/S Remote Filesystem Access in DuckDB
-      await this.conn.query(`INSTALL httpfs; LOAD httpfs;`);
+      // 2. Download 38 MB Parquet files from R2, store in CacheStorage, and register in DuckDB VFS
+      await this.loadAndCacheParquetFiles();
 
       this.isInitialized = true;
-      this.updateCacheStatusUI("DuckDB-WASM Ready (R2 Connected)");
-      
-      // Warm up symbol list asynchronously from R2 Parquet files
-      this.getAllSymbols().catch((e) => console.warn("Symbol extraction warming up:", e));
+      this.updateCacheStatusUI("R2 Parquet Cached & Ready");
+
+      // 3. Extract all unique symbols from local DuckDB VFS
+      await this.getAllSymbols();
 
       return true;
     } catch (err) {
-      console.error("[DataEngine] DuckDB-WASM initialization failed:", err);
-      this.updateCacheStatusUI("Engine Error: Fallback Active");
+      console.error("[DataEngine] Initialization / R2 Sync Error:", err);
+      this.updateCacheStatusUI("R2 Fetch Error: Check CORS");
       return false;
     }
   }
 
-  async syncR2ParquetCache() {
+  /**
+   * Downloads full 38 MB Parquet files, caches them in CacheStorage, and mounts them in DuckDB VFS
+   */
+  async loadAndCacheParquetFiles() {
     const cache = await caches.open(this.cacheName);
 
     for (const year of this.availableYears) {
-      const url = `${this.r2BaseUrl}/data_${year}.parquet`;
+      const fileUrl = `${this.r2BaseUrl}/data_${year}.parquet`;
+      const vfsFileName = `data_${year}.parquet`;
+      const today = new Date().toISOString().slice(0, 10);
+      const lastSync = localStorage.getItem(`r2_sync_${year}`);
 
-      if (year < this.currentYear) {
-        // Permanent Cache for historical years (2000 - 2025)
-        const match = await cache.match(url);
-        if (!match) {
-          console.log(`[DataEngine] Permanent caching for historical year ${year}...`);
-          await cache.add(url).catch((e) => console.warn(`Parquet year ${year} pending on R2:`, e));
-        }
+      let response = null;
+
+      // Check browser CacheStorage first
+      const cachedResponse = await cache.match(fileUrl);
+
+      if (cachedResponse && (year < this.currentYear || lastSync === today)) {
+        console.log(`[DataEngine] Loading cached ${vfsFileName} from CacheStorage...`);
+        this.updateCacheStatusUI(`Loaded ${vfsFileName} from Cache`);
+        response = cachedResponse;
       } else {
-        // Current year (2026): Refresh daily on app startup to fetch evening EOD updates
-        const lastSync = localStorage.getItem(`r2_sync_${year}`);
-        const today = new Date().toISOString().slice(0, 10);
+        console.log(`[DataEngine] Downloading 38 MB ${vfsFileName} from R2...`);
+        this.updateCacheStatusUI(`Downloading ${vfsFileName} (~38 MB)...`);
 
-        if (lastSync !== today) {
-          console.log(`[DataEngine] Daily refresh for current year ${year} parquet...`);
-          await cache.add(url).catch((e) => console.warn(`Current year parquet fetch pending:`, e));
+        // Force CORS pre-fetch for entire file
+        response = await fetch(fileUrl, { mode: "cors" });
+
+        if (!response.ok) {
+          console.warn(`[DataEngine] Could not download ${fileUrl} (Status: ${response.status})`);
+          continue;
+        }
+
+        // Put full 200 OK response into CacheStorage permanently
+        await cache.put(fileUrl, response.clone());
+        if (year === this.currentYear) {
           localStorage.setItem(`r2_sync_${year}`, today);
         }
+        console.log(`[DataEngine] Successfully stored ${vfsFileName} in CacheStorage.`);
       }
+
+      // Convert ArrayBuffer and register in DuckDB Virtual File System
+      const buffer = new Uint8Array(await response.arrayBuffer());
+      await this.db.registerFileBuffer(vfsFileName, buffer);
+      console.log(`[DataEngine] Registered ${vfsFileName} in DuckDB VFS.`);
     }
   }
 
   /**
-   * Directly queries distinct symbols across all R2 Parquet files in DuckDB
+   * Queries distinct tickers directly from DuckDB VFS Parquet files
    */
   async getAllSymbols() {
     if (this.symbolList.length > 0) return this.symbolList;
 
     if (this.isInitialized && this.conn) {
       try {
-        console.log("[DataEngine] Querying distinct symbols from Cloudflare R2 Parquet...");
+        console.log("[DataEngine] Querying distinct symbols from DuckDB VFS...");
         const query = `
           SELECT DISTINCT symbol 
-          FROM read_parquet('${this.r2BaseUrl}/data_*.parquet') 
+          FROM read_parquet('data_*.parquet') 
           ORDER BY symbol ASC
         `;
         const result = await this.conn.query(query);
@@ -104,15 +122,15 @@ export class DataEngine {
 
         if (rows.length > 0) {
           this.symbolList = rows.map((r) => r.symbol).filter(Boolean);
-          console.log(`[DataEngine] Loaded ${this.symbolList.length} distinct symbols from R2.`);
+          console.log(`[DataEngine] Loaded ${this.symbolList.length} distinct symbols from local Parquet.`);
           return this.symbolList;
         }
       } catch (err) {
-        console.warn("[DataEngine] Could not fetch symbols via DuckDB SQL query, using default fallback list:", err);
+        console.warn("[DataEngine] VFS symbol query failed:", err);
       }
     }
 
-    // Default fallback list while remote queries initialize
+    // Fallback symbol list
     this.symbolList = [
       "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "BHARTIARTL", "SBIN",
       "LTIM", "ITC", "HINDUNILVR", "BAJFINANCE", "LT", "KOTAKBANK", "AXISBANK",
@@ -123,29 +141,29 @@ export class DataEngine {
   }
 
   /**
-   * Queries historical OHLCV data for a specific symbol from R2 Parquet files
+   * Queries historical OHLCV candles for selected symbol directly from local DuckDB VFS
    */
   async getHistoricalData(symbol) {
     if (this.isInitialized && this.conn) {
       try {
-        console.log(`[DataEngine] Querying DuckDB for symbol: ${symbol}`);
+        console.log(`[DataEngine] Executing VFS DuckDB query for: ${symbol}`);
         const query = `
           SELECT 
-            epoch(date) AS time,
+            epoch(CAST(date AS TIMESTAMP)) AS time,
             open,
             high,
             low,
             close,
             volume
-          FROM read_parquet('${this.r2BaseUrl}/data_*.parquet')
-          WHERE symbol = '${symbol}'
+          FROM read_parquet('data_*.parquet')
+          WHERE UPPER(symbol) = UPPER('${symbol}')
           ORDER BY date ASC
         `;
         const result = await this.conn.query(query);
         const rows = result.toArray().map((r) => r.toJSON());
 
         if (rows.length > 0) {
-          console.log(`[DataEngine] Retrieved ${rows.length} candles for ${symbol} from R2.`);
+          console.log(`[DataEngine] Fetched ${rows.length} OHLCV bars for ${symbol}.`);
           return rows.map((r) => ({
             time: Number(r.time),
             open: Number(r.open),
@@ -156,11 +174,10 @@ export class DataEngine {
           }));
         }
       } catch (err) {
-        console.warn(`[DataEngine] DuckDB query failed for ${symbol}, generating fallback chart:`, err);
+        console.warn(`[DataEngine] Query failed for ${symbol}:`, err);
       }
     }
 
-    // Generate fallback data if DuckDB query is pending
     return this.generateFallbackOHLCV(symbol);
   }
 
