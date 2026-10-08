@@ -5,7 +5,7 @@
 
 const R2_BASE_URL = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
 const CACHE_NAME = 'amibroker-parquet-v1';
-const START_YEAR = 2023; // Dataset contains 2023 to 2026
+const START_YEAR = 2023; // Data available from 2023 onwards
 const CURRENT_YEAR = new Date().getFullYear();
 
 export class DataEngine {
@@ -19,15 +19,31 @@ export class DataEngine {
     }
 
     /**
-     * Initializes DuckDB-WASM worker and loads Parquet files into virtual FS.
+     * Dispatch status events to update the UI pill and bottom status bar
      */
-    async init(statusCallback = null) {
+    notifyStatus(text, type = 'info') {
+        window.dispatchEvent(new CustomEvent('r2-cache-update', {
+            detail: { message: text, type }
+        }));
+    }
+
+    notifyEngineStatus(text, statusClass) {
+        window.dispatchEvent(new CustomEvent('engine-status-update', {
+            detail: { text, statusClass }
+        }));
+    }
+
+    /**
+     * Initializes DuckDB-WASM worker and registers Parquet files.
+     */
+    async init() {
         if (this.isInitialized) return;
 
         try {
-            if (statusCallback) statusCallback('Initializing DuckDB WASM...');
+            this.notifyEngineStatus('Initializing Engine...', 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20');
+            this.notifyStatus('Connecting to DuckDB WASM...');
 
-            // Import DuckDB-WASM bundles dynamically from CDN
+            // Dynamically load DuckDB WASM from CDN
             const duckdbModule = await import('https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm');
             this.duckdb = duckdbModule;
 
@@ -41,21 +57,25 @@ export class DataEngine {
             await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
             this.conn = await this.db.connect();
 
-            // Fetch and cache all Parquet files (2023 to 2026) into DuckDB Virtual FileSystem
-            await this.loadAndRegisterParquetFiles(statusCallback);
+            // Fetch and register Parquet files (2023 to 2026)
+            await this.loadAndRegisterParquetFiles();
 
-            // Create unified view over all loaded parquet files
+            // Create unified view over all registered files
             await this.createUnifiedView();
 
-            // Cache available symbol list
+            // Load symbol list (~3,000+ equities)
             await this.loadSymbolList();
 
             this.isInitialized = true;
-            if (statusCallback) statusCallback('Ready');
-            console.log('DataEngine initialized successfully.');
+
+            this.notifyEngineStatus('Engine Ready', 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20');
+            this.notifyStatus(`Cached ${this.registeredFiles.length} Parquet Files (${this.symbolList.length} Symbols)`);
+
+            console.log(`DataEngine ready: ${this.symbolList.length} symbols loaded.`);
         } catch (error) {
-            console.error('Failed to initialize DataEngine:', error);
-            if (statusCallback) statusCallback('Init Failed');
+            console.error('DataEngine initialization failed:', error);
+            this.notifyEngineStatus('Engine Error', 'bg-red-500/10 text-red-400 border-red-500/20');
+            this.notifyStatus('Failed to load Parquet dataset');
             throw error;
         }
     }
@@ -63,7 +83,7 @@ export class DataEngine {
     /**
      * Fetches parquet files using CacheStorage API and registers buffers in DuckDB-WASM.
      */
-    async loadAndRegisterParquetFiles(statusCallback) {
+    async loadAndRegisterParquetFiles() {
         const cache = await caches.open(CACHE_NAME);
         this.registeredFiles = [];
 
@@ -71,14 +91,14 @@ export class DataEngine {
             const fileName = `data_${year}.parquet`;
             const fileUrl = `${R2_BASE_URL}/${fileName}`;
 
-            if (statusCallback) statusCallback(`Loading ${fileName}...`);
+            this.notifyStatus(`Downloading ${fileName}...`);
 
             try {
                 let response;
                 const isCurrentYear = (year === CURRENT_YEAR);
 
                 if (isCurrentYear) {
-                    // Check daily refresh for current year file
+                    // Current year daily refresh check
                     const cachedResponse = await cache.match(fileUrl);
                     const lastFetched = localStorage.getItem(`last_fetch_${fileName}`);
                     const todayStr = new Date().toISOString().split('T')[0];
@@ -95,7 +115,7 @@ export class DataEngine {
                         }
                     }
                 } else {
-                    // Historical years (2023-2025): Fetch once and cache permanently
+                    // Historical years (2023-2025): Permanent browser caching
                     response = await cache.match(fileUrl);
                     if (!response) {
                         response = await fetch(fileUrl);
@@ -112,8 +132,12 @@ export class DataEngine {
                     this.registeredFiles.push(fileName);
                 }
             } catch (err) {
-                console.warn(`Could not load Parquet file for year ${year}:`, err);
+                console.warn(`Could not load ${fileName}:`, err);
             }
+        }
+
+        if (this.registeredFiles.length === 0) {
+            throw new Error('No Parquet files could be downloaded from R2.');
         }
     }
 
@@ -121,10 +145,6 @@ export class DataEngine {
      * Constructs a unified SQL view merging all registered year Parquet files.
      */
     async createUnifiedView() {
-        if (!this.registeredFiles || this.registeredFiles.length === 0) {
-            throw new Error('No Parquet files were registered in DuckDB.');
-        }
-
         const filesListStr = this.registeredFiles.map(f => `'${f}'`).join(', ');
         const query = `
             CREATE OR REPLACE VIEW stock_data AS 
