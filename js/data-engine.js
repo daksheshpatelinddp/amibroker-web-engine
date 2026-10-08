@@ -1,10 +1,7 @@
 /**
  * js/data-engine.js
  * AmiBroker Web Workstation - DuckDB-WASM & Tiered Parquet Data Engine
- * Adapted directly from verified DuckDB-WASM worker & IndexedDB caching pipeline.
  */
-
-import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
 
 class DataEngine {
   constructor() {
@@ -73,40 +70,45 @@ class DataEngine {
   }
 
   /**
-   * Initialize DuckDB-WASM Engine using verified worker blob technique
+   * Initialize DuckDB-WASM Engine using same-origin blob worker
    */
   async init() {
     try {
-      this.setLoaderProgress('Initializing DuckDB Engine...', 10, 'Creating same-origin worker...');
+      this.setLoaderProgress('Initializing DuckDB Engine...', 10, 'Creating local worker...');
       this.updateStatus('Initializing DB...', 'amber');
+
+      const duckdb = window.duckdb;
+      if (!duckdb) {
+        throw new Error('DuckDB library script tag not found.');
+      }
 
       const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
       const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
 
-      // Same-origin blob worker fix from reference project
+      // Fetch worker script as text and create same-origin Blob URL
       const workerScript = await fetch(bundle.mainWorker).then(r => r.text());
       const workerBlobUrl = URL.createObjectURL(
         new Blob([workerScript], { type: 'text/javascript' })
       );
-      
+
       const worker = new Worker(workerBlobUrl);
       const logger = new duckdb.ConsoleLogger();
       this.db = new duckdb.AsyncDuckDB(logger, worker);
-      
+
       await this.db.instantiate(bundle.mainModule);
       URL.revokeObjectURL(workerBlobUrl);
-      
+
       this.conn = await this.db.connect();
 
       this.setLoaderProgress('DuckDB Worker Ready', 25, 'Downloading Parquet dataset from R2...');
 
-      // Load Parquet files into DuckDB virtual memory
+      // Download Parquet files into virtual memory
       this.localParquetFiles = await this.loadParquetFilesWithCache();
 
-      // Index available symbols automatically
+      // Index available stock symbols
       await this.indexSymbols();
 
-      // Bind search input UI
+      // Bind search combobox UI
       this.setupComboboxUI();
 
       this.isInitialized = true;
@@ -118,7 +120,7 @@ class DataEngine {
       }
     } catch (error) {
       console.error('DataEngine Initialization Error:', error);
-      this.setLoaderProgress('Engine Initialization Failed', 100, error.message || 'Worker setup failed');
+      this.setLoaderProgress('Initialization Failed', 100, error.message || 'Worker setup failed');
       this.updateStatus('Engine Failed', 'red');
     }
   }
@@ -174,7 +176,7 @@ class DataEngine {
   }
 
   /**
-   * Index Symbols using verified HAVING COUNT(*) >= 50 query
+   * Index symbols with HAVING COUNT(*) >= 50
    */
   async indexSymbols() {
     this.setLoaderProgress('Indexing Symbol Universe...', 90, 'Filtering active tickers...');
