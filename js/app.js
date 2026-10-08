@@ -1,81 +1,81 @@
-import { DataEngine } from './data-engine.js';
-import { ChartEngine } from './chart-engine.js';
-import { SheetManager } from './sheet-manager.js';
-import { CategoryManager } from './category-manager.js';
-import { AFLEngine } from './afl-engine.js';
+import { DataEngine } from "./data-engine.js";
+import { ChartEngine } from "./chart-engine.js";
+import { SheetManager } from "./sheet-manager.js";
+import { StudyRegistry } from "./study-registry.js";
 
-class App {
-    constructor() {
-        this.dataEngine = new DataEngine();
-        this.chartEngine = new ChartEngine('chart-container');
-        this.sheetManager = new SheetManager();
-        this.categoryManager = new CategoryManager();
-        this.aflEngine = new AFLEngine();
-    }
+class WorkstationApp {
+  constructor() {
+    this.dataEngine = new DataEngine();
+    this.chartEngine = new ChartEngine("chart-container");
+    this.studyRegistry = new StudyRegistry();
+    this.sheetManager = new SheetManager("sheet-bar", (sheet) => this.onSheetChanged(sheet));
+  }
 
-    async init() {
-        this.setupStatusListeners();
+  async start() {
+    try {
+      console.log("[App] Booting AmiBroker Web Workstation...");
 
-        // Step 1: Initialize Data Engine (DuckDB + R2 Download)
-        await this.dataEngine.init();
+      // 1. Render Workstation Tabs & Controls
+      this.sheetManager.render();
 
-        // Step 2: Populate symbol selector / autocomplete
-        const symbols = this.dataEngine.getSymbols();
-        this.populateSymbolDropdown(symbols);
+      // 2. Initialize Data Engine (DuckDB / R2 Cache)
+      await this.dataEngine.initialize();
 
-        // Step 3: Load initial default symbol (e.g., RELIANCE)
-        const defaultSymbol = symbols.includes('RELIANCE') ? 'RELIANCE' : symbols[0];
-        if (defaultSymbol) {
-            await this.loadSymbolData(defaultSymbol);
-        }
+      // 3. Initialize Multi-Pane Chart Stack
+      this.chartEngine.initChart();
 
-        this.setupEventListeners();
-    }
+      // 4. Fetch & Load Initial Symbol Data
+      const symbolSelect = document.getElementById("symbol-select");
+      const symbol = symbolSelect ? symbolSelect.value : "RELIANCE";
+      
+      const historicalData = await this.dataEngine.getHistoricalData(symbol);
+      this.chartEngine.setData(historicalData);
 
-    setupStatusListeners() {
-        const r2StatusEl = document.getElementById('r2-cache-status');
-        const statusPill = document.getElementById('status-pill');
+      // 5. Update Status Badge to Ready
+      this.updateStatusBadge(true);
 
-        window.addEventListener('r2-cache-update', (e) => {
-            if (r2StatusEl) r2StatusEl.textContent = `R2 Cache: ${e.detail.message}`;
+      // Event listener for symbol selector changes
+      if (symbolSelect) {
+        symbolSelect.addEventListener("change", async (e) => {
+          const newSymbol = e.target.value;
+          const activeSheet = this.sheetManager.getActiveSheet();
+          
+          if (!activeSheet.locked) {
+            this.chartEngine.setSymbolAndInterval(newSymbol, "D");
+            const freshData = await this.dataEngine.getHistoricalData(newSymbol);
+            this.chartEngine.setData(freshData);
+          }
         });
+      }
 
-        window.addEventListener('engine-status-update', (e) => {
-            if (statusPill) {
-                statusPill.className = `px-2 py-0.5 rounded text-xs border ${e.detail.statusClass}`;
-                statusPill.textContent = e.detail.text;
-            }
-        });
+    } catch (err) {
+      console.error("[App] Workstation startup failed:", err);
+      this.updateStatusBadge(false, err.message);
     }
+  }
 
-    populateSymbolDropdown(symbols) {
-        const datalist = document.getElementById('symbol-list');
-        if (datalist) {
-            datalist.innerHTML = symbols.map(sym => `<option value="${sym}">`).join('');
-        }
-    }
+  onSheetChanged(sheet) {
+    console.log(`[App] Switched to ${sheet.name} (Chart ID: ${sheet.chartId})`);
+    // Load drawings and AFL study formulas registered for this Chart ID
+    const studies = this.studyRegistry.getStudiesForChart(sheet.chartId);
+    console.log(`[App] Active studies for Chart ID ${sheet.chartId}:`, studies);
+  }
 
-    async loadSymbolData(symbol) {
-        const data = await this.dataEngine.getOHLCV(symbol);
-        if (data && data.length > 0) {
-            this.chartEngine.plotOHLCV(data, symbol);
-        }
-    }
+  updateStatusBadge(isReady, errorMsg = "") {
+    const badge = document.getElementById("status-badge");
+    if (!badge) return;
 
-    setupEventListeners() {
-        const symbolInput = document.getElementById('symbol-input');
-        if (symbolInput) {
-            symbolInput.addEventListener('change', async (e) => {
-                const selectedSymbol = e.target.value.trim().toUpperCase();
-                if (selectedSymbol) {
-                    await this.loadSymbolData(selectedSymbol);
-                }
-            });
-        }
+    if (isReady) {
+      badge.textContent = "● Ready";
+      badge.className = "px-2 py-0.5 text-[10px] font-medium rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+    } else {
+      badge.textContent = `● Error: ${errorMsg || 'Failed'}`;
+      badge.className = "px-2 py-0.5 text-[10px] font-medium rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20";
     }
+  }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    const app = new App();
-    app.init().catch(err => console.error('App launch error:', err));
+document.addEventListener("DOMContentLoaded", () => {
+  const app = new WorkstationApp();
+  app.start();
 });
