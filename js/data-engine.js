@@ -5,7 +5,7 @@
 
 const R2_BASE_URL = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
 const CACHE_NAME = 'amibroker-parquet-v1';
-const START_YEAR = 2000;
+const START_YEAR = 2023; // Dataset contains 2023 to 2026
 const CURRENT_YEAR = new Date().getFullYear();
 
 export class DataEngine {
@@ -15,40 +15,34 @@ export class DataEngine {
         this.duckdb = null;
         this.isInitialized = false;
         this.symbolList = [];
+        this.registeredFiles = [];
     }
 
     /**
      * Initializes DuckDB-WASM worker and loads Parquet files into virtual FS.
      */
-    async init() {
+    async init(statusCallback = null) {
         if (this.isInitialized) return;
 
         try {
+            if (statusCallback) statusCallback('Initializing DuckDB WASM...');
+
             // Import DuckDB-WASM bundles dynamically from CDN
             const duckdbModule = await import('https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm');
             this.duckdb = duckdbModule;
 
-            const MANUAL_BUNDLES = {
-                mvp: {
-                    mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-mvp.wasm',
-                    mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-mvp.worker.js',
-                },
-                eh: {
-                    mainModule: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-eh.wasm',
-                    mainWorker: 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/dist/duckdb-browser-eh.worker.js',
-                },
-            };
-
-            const bundle = await duckdbModule.selectBundle(MANUAL_BUNDLES);
-            const worker = new Worker(bundle.mainWorker);
+            const JSDELIVR_BUNDLES = duckdbModule.getJsDelivrBundles();
+            const bundle = await duckdbModule.selectBundle(JSDELIVR_BUNDLES);
+            
+            const worker = await duckdbModule.createWorker(bundle.mainWorker);
             const logger = new duckdbModule.ConsoleLogger();
             
             this.db = new duckdbModule.AsyncDuckDB(logger, worker);
-            await this.db.instantiate(bundle.mainModule);
+            await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
             this.conn = await this.db.connect();
 
-            // Fetch and cache all Parquet files into DuckDB Virtual FileSystem
-            await this.loadAndRegisterParquetFiles();
+            // Fetch and cache all Parquet files (2023 to 2026) into DuckDB Virtual FileSystem
+            await this.loadAndRegisterParquetFiles(statusCallback);
 
             // Create unified view over all loaded parquet files
             await this.createUnifiedView();
@@ -57,9 +51,11 @@ export class DataEngine {
             await this.loadSymbolList();
 
             this.isInitialized = true;
+            if (statusCallback) statusCallback('Ready');
             console.log('DataEngine initialized successfully.');
         } catch (error) {
             console.error('Failed to initialize DataEngine:', error);
+            if (statusCallback) statusCallback('Init Failed');
             throw error;
         }
     }
@@ -67,13 +63,15 @@ export class DataEngine {
     /**
      * Fetches parquet files using CacheStorage API and registers buffers in DuckDB-WASM.
      */
-    async loadAndRegisterParquetFiles() {
+    async loadAndRegisterParquetFiles(statusCallback) {
         const cache = await caches.open(CACHE_NAME);
-        const registeredFiles = [];
+        this.registeredFiles = [];
 
         for (let year = START_YEAR; year <= CURRENT_YEAR; year++) {
             const fileName = `data_${year}.parquet`;
             const fileUrl = `${R2_BASE_URL}/${fileName}`;
+
+            if (statusCallback) statusCallback(`Loading ${fileName}...`);
 
             try {
                 let response;
@@ -88,18 +86,16 @@ export class DataEngine {
                     if (cachedResponse && lastFetched === todayStr) {
                         response = cachedResponse;
                     } else {
-                        // Fetch fresh current year Parquet file from R2
                         response = await fetch(fileUrl, { cache: 'no-cache' });
                         if (response.ok) {
                             await cache.put(fileUrl, response.clone());
                             localStorage.setItem(`last_fetch_${fileName}`, todayStr);
                         } else if (cachedResponse) {
-                            // Fallback to cached version if offline/failed
                             response = cachedResponse;
                         }
                     }
                 } else {
-                    // Historical years (2000-2025): Fetch once and cache permanently
+                    // Historical years (2023-2025): Fetch once and cache permanently
                     response = await cache.match(fileUrl);
                     if (!response) {
                         response = await fetch(fileUrl);
@@ -113,14 +109,12 @@ export class DataEngine {
                     const arrayBuffer = await response.arrayBuffer();
                     const uint8Array = new Uint8Array(arrayBuffer);
                     await this.db.registerFileBuffer(fileName, uint8Array);
-                    registeredFiles.push(fileName);
+                    this.registeredFiles.push(fileName);
                 }
             } catch (err) {
                 console.warn(`Could not load Parquet file for year ${year}:`, err);
             }
         }
-
-        this.registeredFiles = registeredFiles;
     }
 
     /**
@@ -144,7 +138,7 @@ export class DataEngine {
      */
     async loadSymbolList() {
         const result = await this.conn.query(`
-            SELECT DISTINCT symbol FROM stock_data ORDER BY symbol ASC;
+            SELECT DISTINCT symbol FROM stock_data WHERE symbol IS NOT NULL ORDER BY symbol ASC;
         `);
         
         const rows = result.toArray().map(row => row.toJSON());
@@ -161,8 +155,6 @@ export class DataEngine {
 
     /**
      * Queries OHLCV bar chart data for a specific stock symbol.
-     * @param {string} symbol - Stock ticker symbol (e.g. "RELIANCE")
-     * @returns {Array<Object>} Array of bar objects formatted for Lightweight Charts
      */
     async getOHLCV(symbol) {
         if (!symbol) return [];
@@ -177,7 +169,7 @@ export class DataEngine {
                 close, 
                 volume 
             FROM stock_data 
-            WHERE symbol = '${sanitizedSymbol}'
+            WHERE UPPER(symbol) = '${sanitizedSymbol}'
             ORDER BY date ASC;
         `;
 
@@ -185,11 +177,8 @@ export class DataEngine {
         const rows = result.toArray().map(r => r.toJSON());
 
         return rows.map(row => {
-            // Convert date representation to UNIX timestamp (seconds) or YYYY-MM-DD string
             let timeVal = row.date_str;
-            if (typeof timeVal === 'number' || !isNaN(timeVal)) {
-                timeVal = Math.floor(new Date(row.date_str).getTime() / 1000);
-            } else if (typeof timeVal === 'string' && timeVal.includes('T')) {
+            if (typeof timeVal === 'string' && timeVal.includes('T')) {
                 timeVal = timeVal.split('T')[0];
             }
 
