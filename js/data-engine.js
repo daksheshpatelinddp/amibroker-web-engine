@@ -1,7 +1,7 @@
 /**
  * js/data-engine.js
  * AmiBroker Web Workstation - DuckDB-WASM & Tiered Parquet Data Engine
- * Includes static caching for archived years & daily EOD revalidation for current year.
+ * Features real-time download progress tracking & auto symbol extraction.
  */
 
 import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
@@ -13,21 +13,21 @@ class DataEngine {
     this.isInitialized = false;
     this.baseUrl = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
     
-    // Define year range (Past archived years are cached permanently)
     this.archivedYears = [2023, 2024, 2025];
     this.currentYear = 2026;
     
     this.allSymbols = [];
-    this.selectedSymbol = 'RELIANCE';
+    this.selectedSymbol = '';
     this.onSymbolChangeCallback = null;
   }
 
   /**
-   * Initialize DuckDB-WASM instance & load Parquet dataset
+   * Initialize DuckDB-WASM & start file downloading / indexing
    */
   async init() {
     try {
-      this.updateStatus('Initializing DuckDB...', 'amber');
+      this.setLoaderProgress('Initializing DuckDB WASM Engine...', 10, 'Preparing memory...');
+      this.updateStatus('Initializing DB...', 'amber');
 
       const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
       const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
@@ -45,56 +45,108 @@ class DataEngine {
 
       this.conn = await this.db.connect();
 
-      // Load files with smart caching strategy
+      // Download Parquet files with live progress
       await this.loadParquetFiles();
 
-      // Extract unique symbol universe
+      // Extract symbols automatically from DuckDB cache
       await this.indexSymbols();
 
-      // Setup UI listeners for search combobox
+      // Setup Search Combobox UI
       this.setupComboboxUI();
 
       this.isInitialized = true;
+      this.hideLoader();
       this.updateStatus('Data Engine Ready', 'emerald');
+
+      // Trigger default symbol load if callback registered
+      if (this.selectedSymbol && typeof this.onSymbolChangeCallback === 'function') {
+        this.onSymbolChangeCallback(this.selectedSymbol);
+      }
     } catch (error) {
       console.error('DataEngine Initialization Error:', error);
+      this.setLoaderProgress('Failed to load dataset', 100, 'Check browser console / CORS connection.');
       this.updateStatus('Engine Failed', 'red');
     }
   }
 
   /**
-   * Smart Multi-Year Tiered Caching Strategy:
-   * - Archived years (2023-2025): Downloaded ONCE and permanently stored in CacheStorage.
-   * - Current year (2026): Checked & updated once daily for EOD data.
+   * Fetch Parquet file with progress tracking
+   */
+  async fetchWithProgress(url, progressStart, progressEnd, label) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+    const contentLength = response.headers.get('content-length');
+    const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
+    
+    const reader = response.body.getReader();
+    let loadedBytes = 0;
+    const chunks = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      chunks.push(value);
+      loadedBytes += value.length;
+
+      if (totalBytes > 0) {
+        const percent = Math.round(progressStart + ((loadedBytes / totalBytes) * (progressEnd - progressStart)));
+        const loadedMB = (loadedBytes / (1024 * 1024)).toFixed(1);
+        const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+        this.setLoaderProgress(`Downloading ${label}... (${loadedMB}MB / ${totalMB}MB)`, percent, `Caching file in local CacheStorage...`);
+      } else {
+        this.setLoaderProgress(`Downloading ${label}...`, progressStart, `Streaming data buffer...`);
+      }
+    }
+
+    const allChunks = new Uint8Array(loadedBytes);
+    let position = 0;
+    for (const chunk of chunks) {
+      allChunks.set(chunk, position);
+      position += chunk.length;
+    }
+
+    return new Response(allChunks.buffer, {
+      headers: { 'Content-Type': 'application/octet-stream' }
+    });
+  }
+
+  /**
+   * Load and cache Parquet files across static & active tiers
    */
   async loadParquetFiles() {
     const staticCache = await caches.open('ami-parquet-static-v1');
     const activeCache = await caches.open('ami-parquet-active-v1');
-
     const registeredFiles = [];
 
-    // 1. Process Permanent Archived Years (2023 .. 2025)
+    const totalYears = this.archivedYears.length + 1;
+    let currentStep = 0;
+
+    // 1. Load Archived Past Years (2023 - 2025)
     for (const year of this.archivedYears) {
+      currentStep++;
       const fileName = `${year}.parquet`;
       const fileUrl = `${this.baseUrl}/${fileName}`;
-      
+      const pStart = 20 + Math.floor(((currentStep - 1) / totalYears) * 60);
+      const pEnd = 20 + Math.floor((currentStep / totalYears) * 60);
+
       let response = await staticCache.match(fileUrl);
+
       if (!response) {
-        this.updateStatus(`Caching ${fileName}...`, 'amber');
-        response = await fetch(fileUrl);
-        if (response.ok) {
-          await staticCache.put(fileUrl, response.clone());
-        }
+        response = await this.fetchWithProgress(fileUrl, pStart, pEnd, fileName);
+        await staticCache.put(fileUrl, response.clone());
+      } else {
+        this.setLoaderProgress(`Loaded ${fileName} from CacheStorage`, pEnd, 'Using permanent offline cache');
       }
 
-      if (response && response.ok) {
-        const buffer = new Uint8Array(await response.arrayBuffer());
-        await this.db.registerFileBuffer(fileName, buffer);
-        registeredFiles.push(`'${fileName}'`);
-      }
+      const buffer = new Uint8Array(await response.arrayBuffer());
+      await this.db.registerFileBuffer(fileName, buffer);
+      registeredFiles.push(`'${fileName}'`);
     }
 
-    // 2. Process Active Current Year (2026) with Daily Cache Check
+    // 2. Load Active Current Year (2026) with Daily Check
+    currentStep++;
     const activeFileName = `${this.currentYear}.parquet`;
     const activeFileUrl = `${this.baseUrl}/${activeFileName}`;
     const todayStr = new Date().toISOString().split('T')[0];
@@ -102,62 +154,62 @@ class DataEngine {
 
     let activeResponse = await activeCache.match(activeFileUrl);
 
-    // Revalidate once a day or if missing from cache
     if (!activeResponse || lastFetchDate !== todayStr) {
-      this.updateStatus(`Updating ${activeFileName}...`, 'amber');
       try {
-        const networkResponse = await fetch(activeFileUrl);
-        if (networkResponse.ok) {
-          await activeCache.put(activeFileUrl, networkResponse.clone());
-          localStorage.setItem('ami_active_year_fetch_date', todayStr);
-          activeResponse = networkResponse;
-        }
+        activeResponse = await this.fetchWithProgress(activeFileUrl, 80, 90, activeFileName);
+        await activeCache.put(activeFileUrl, activeResponse.clone());
+        localStorage.setItem('ami_active_year_fetch_date', todayStr);
       } catch (err) {
-        console.warn(`Could not update ${activeFileName} from network, falling back to cache if present.`, err);
+        console.warn(`Fallback to active cache for ${activeFileName}:`, err);
       }
+    } else {
+      this.setLoaderProgress(`Loaded ${activeFileName} from CacheStorage`, 90, 'Active year updated today');
     }
 
-    if (activeResponse && activeResponse.ok) {
+    if (activeResponse) {
       const buffer = new Uint8Array(await activeResponse.arrayBuffer());
       await this.db.registerFileBuffer(activeFileName, buffer);
       registeredFiles.push(`'${activeFileName}'`);
     }
 
-    // Create unified view across all year files
+    // Register unified DuckDB SQL View
     if (registeredFiles.length > 0) {
+      this.setLoaderProgress('Building DuckDB SQL Database View...', 95, 'Mapping all year partitions...');
       const createViewQuery = `
         CREATE VIEW all_stocks AS 
         SELECT * FROM read_parquet([${registeredFiles.join(', ')}]);
       `;
       await this.conn.query(createViewQuery);
     } else {
-      throw new Error('No Parquet files could be loaded from R2 or cache.');
+      throw new Error('No Parquet data files available');
     }
   }
 
   /**
-   * Extract unique symbols from dataset to populate search index
+   * Auto-extract all unique ticker symbols from DuckDB dataset
    */
   async indexSymbols() {
+    this.setLoaderProgress('Indexing Ticker Universe...', 98, 'Extracting symbol universe...');
+    
     try {
       const res = await this.conn.query(`
-        SELECT DISTINCT Ticker FROM all_stocks ORDER BY Ticker ASC;
+        SELECT DISTINCT Ticker FROM all_stocks WHERE Ticker IS NOT NULL ORDER BY Ticker ASC;
       `);
       
       const rows = res.toArray().map(r => r.toJSON());
-      this.allSymbols = rows.map(r => String(r.Ticker).trim().toUpperCase());
-      
-      if (this.allSymbols.length > 0 && !this.allSymbols.includes(this.selectedSymbol)) {
-        this.selectedSymbol = this.allSymbols[0];
+      this.allSymbols = rows.map(r => String(r.Ticker).trim().toUpperCase()).filter(Boolean);
+
+      if (this.allSymbols.length > 0) {
+        this.selectedSymbol = this.allSymbols[0]; // Auto-select first symbol (e.g. RELIANCE)
       }
     } catch (err) {
-      console.warn('Could not index symbols from all_stocks view:', err);
-      this.allSymbols = ['RELIANCE', 'TCS', 'INFY'];
+      console.error('Symbol indexing error:', err);
+      this.allSymbols = [];
     }
   }
 
   /**
-   * Setup UI events for searchable combobox dropdown
+   * Setup UI events for Search Combobox
    */
   setupComboboxUI() {
     const searchInput = document.getElementById('symbolSearchInput');
@@ -166,6 +218,7 @@ class DataEngine {
     if (!searchInput || !dropdown) return;
 
     searchInput.value = this.selectedSymbol;
+    searchInput.placeholder = 'Search Symbol...';
 
     const renderDropdownItems = (filterText = '') => {
       const query = filterText.trim().toUpperCase();
@@ -174,7 +227,7 @@ class DataEngine {
         : this.allSymbols.slice(0, 50);
 
       if (filtered.length === 0) {
-        dropdown.innerHTML = `<div class="px-3 py-2 text-slate-500 italic">No symbols found</div>`;
+        dropdown.innerHTML = `<div class="px-3 py-2 text-slate-500 italic">No matching symbols</div>`;
       } else {
         dropdown.innerHTML = filtered.map(sym => `
           <div 
@@ -208,9 +261,10 @@ class DataEngine {
   }
 
   /**
-   * Set currently selected symbol and notify listeners
+   * Change current active symbol
    */
   setSymbol(symbol) {
+    if (!symbol) return;
     this.selectedSymbol = symbol.toUpperCase();
     const searchInput = document.getElementById('symbolSearchInput');
     if (searchInput) searchInput.value = this.selectedSymbol;
@@ -221,7 +275,7 @@ class DataEngine {
   }
 
   /**
-   * Query OHLCV data for selected symbol and timeframe
+   * Query OHLCV data for symbol
    */
   async getOHLCV(symbol, timeframe = '1D') {
     if (!this.isInitialized || !this.conn) return [];
@@ -284,7 +338,31 @@ class DataEngine {
   }
 
   /**
-   * Status UI helper
+   * Update Progress Loader UI
+   */
+  setLoaderProgress(msg, percent, subText) {
+    const msgEl = document.getElementById('loaderMessage');
+    const subEl = document.getElementById('loaderSubText');
+    const barEl = document.getElementById('loaderProgressBar');
+
+    if (msgEl) msgEl.innerText = msg;
+    if (subEl) subEl.innerText = subText || '';
+    if (barEl) barEl.style.width = `${percent}%`;
+  }
+
+  /**
+   * Hide Progress Loader UI
+   */
+  hideLoader() {
+    const loader = document.getElementById('loaderOverlay');
+    if (loader) {
+      loader.classList.add('transition-opacity', 'duration-300', 'opacity-0');
+      setTimeout(() => loader.remove(), 300);
+    }
+  }
+
+  /**
+   * Update top status indicator
    */
   updateStatus(text, color) {
     const el = document.getElementById('engineStatus');
