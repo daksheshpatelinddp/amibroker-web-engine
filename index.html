@@ -1,136 +1,74 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-900 text-slate-100">
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>AmiBroker Web Workstation</title>
+
+  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              500: '#0284c7',
+              600: '#0284c7',
+              900: '#0c4a6e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- TradingView Lightweight Charts CDN -->
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
   <link rel="stylesheet" href="css/style.css" />
-
-  <!-- hyparquet standalone bundle (Global window.hyparquet) -->
-  <script src="https://cdn.jsdelivr.net/npm/hyparquet/dist/hyparquet.min.js"></script>
-
-  <!-- TradingView Lightweight Charts v5 -->
-  <script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
-<body class="h-full flex flex-col overflow-hidden bg-slate-950 font-sans text-xs antialiased select-none">
-
-  <!-- TOP TOOLBAR -->
-  <header class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0 z-30">
+<body class="h-full flex flex-col overflow-hidden text-xs antialiased select-none">
+  <!-- Top Navigation / Status Header -->
+  <header class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0">
     <div class="flex items-center space-x-3">
-      <!-- App Brand -->
-      <div class="flex items-center space-x-1.5 font-bold text-sky-400 text-sm">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 h1 0 01-1 1H5a1 1 0 01-1-1V4z"></path>
-        </svg>
-        <span>AmiWeb</span>
-      </div>
-
-      <div class="h-4 w-px bg-slate-800"></div>
-
-      <!-- SEARCHABLE SYMBOL COMBOBOX -->
-      <div class="relative flex items-center space-x-1">
-        <button id="symbolLinkBtn" class="w-5 h-5 rounded flex items-center justify-center font-bold text-[10px] bg-gray-700 text-slate-300 hover:opacity-80 transition-opacity" title="Symbol Link Group">S</button>
-        
-        <div class="relative">
-          <input 
-            type="text" 
-            id="symbolSearchInput" 
-            placeholder="Loading..." 
-            autocomplete="off"
-            class="w-36 bg-slate-800 text-slate-100 px-2 py-1 text-xs rounded border border-slate-700 focus:outline-none focus:border-sky-500 uppercase font-semibold tracking-wide placeholder-slate-500"
-          />
-          <div 
-            id="symbolDropdown" 
-            class="hidden absolute top-full left-0 mt-1 w-56 max-h-64 bg-slate-900 border border-slate-700 rounded shadow-2xl overflow-y-auto z-50 divide-y divide-slate-800/50"
-          ></div>
-        </div>
-      </div>
-
-      <!-- INTERVAL SELECTOR -->
-      <div class="flex items-center space-x-1">
-        <button id="intervalLinkBtn" class="w-5 h-5 rounded flex items-center justify-center font-bold text-[10px] bg-gray-700 text-slate-300 hover:opacity-80 transition-opacity" title="Interval Link Group">I</button>
-        
-        <select id="intervalSelect" class="bg-slate-800 text-slate-200 px-2 py-1 text-xs rounded border border-slate-700 focus:outline-none focus:border-sky-500 font-medium">
-          <option value="1D" selected>Daily (1D)</option>
-          <option value="1W">Weekly (1W)</option>
-          <option value="1M">Monthly (1M)</option>
-        </select>
-      </div>
-
-      <div class="h-4 w-px bg-slate-800"></div>
-
-      <!-- LOCK TOGGLE -->
-      <button id="lockSheetBtn" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 flex items-center space-x-1 transition-colors">
-        <span id="lockIcon">🔓</span>
-        <span id="lockText" class="font-medium">Unlocked</span>
-      </button>
+      <span class="font-bold text-slate-200 tracking-wide">AmiBroker Web</span>
+      <span id="status-badge" class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        ● Initializing Engine...
+      </span>
     </div>
-
-    <!-- RIGHT STATUS -->
-    <div class="flex items-center space-x-2">
-      <button id="openAFLBtn" class="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded font-medium transition-colors flex items-center space-x-1">
-        <span>AFL Formula</span>
-      </button>
-
-      <div class="h-4 w-px bg-slate-800"></div>
-
-      <div id="engineStatus" class="flex items-center space-x-1.5 text-[11px] text-amber-400 font-mono bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800">
-        <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-        <span>Initializing...</span>
-      </div>
+    <div class="flex items-center space-x-2" id="header-controls">
+      <!-- Timeframe / Symbol Selectors -->
+      <select id="symbol-select" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs outline-none">
+        <option value="RELIANCE">RELIANCE</option>
+        <option value="TCS">TCS</option>
+        <option value="INFY">INFY</option>
+      </select>
     </div>
   </header>
 
-  <!-- MAIN WORKSPACE -->
-  <main class="flex-1 flex overflow-hidden min-h-0 relative">
-    <div id="chartWorkspace" class="flex-1 flex flex-col min-h-0 bg-slate-950 relative overflow-hidden">
-      
-      <!-- LOADING & PROGRESS OVERLAY -->
-      <div id="loaderOverlay" class="absolute inset-0 bg-slate-950/95 backdrop-blur-sm z-40 flex flex-col items-center justify-center p-4 space-y-4">
-        <div class="w-10 h-10 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
-        <div class="text-center space-y-1">
-          <div id="loaderMessage" class="text-sm font-semibold text-slate-200">Initializing Data Engine...</div>
-          <div id="loaderSubText" class="text-xs font-mono text-slate-400">Loading hyparquet JS Reader...</div>
-        </div>
-        <!-- Progress Bar -->
-        <div class="w-64 bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700">
-          <div id="loaderProgressBar" class="bg-sky-500 h-full w-0 transition-all duration-200"></div>
-        </div>
+  <!-- Main Workstation Canvas Area -->
+  <main class="flex-1 flex flex-col min-h-0 relative">
+    <!-- Workstation Sheet Tabs -->
+    <div id="sheet-bar" class="h-8 bg-slate-900/80 border-b border-slate-800 flex items-center px-2 space-x-1 overflow-x-auto shrink-0">
+      <!-- Sheet Tabs injected by SheetManager -->
+    </div>
 
-        <!-- ON-SCREEN ERROR CONSOLE -->
-        <div id="errorDisplay" class="hidden w-full max-w-lg bg-red-950/80 border border-red-700/60 rounded p-3 text-red-200 font-mono text-[11px] overflow-x-auto max-h-48 whitespace-pre-wrap select-text"></div>
-      </div>
-
+    <!-- Multi-pane Chart Stack -->
+    <div id="chart-workspace" class="flex-1 min-h-0 w-full relative bg-slate-950 flex flex-col">
+      <div id="chart-container" class="w-full h-full min-h-0 flex-1"></div>
     </div>
   </main>
 
-  <!-- FOOTER TAB BAR -->
-  <footer class="h-8 bg-slate-900 border-t border-slate-800 flex items-center px-2 shrink-0 justify-between select-none">
-    <div id="sheetTabBar" class="flex items-center space-x-1 overflow-x-auto no-scrollbar"></div>
-    <div class="text-[10px] text-slate-500 font-mono px-2">Render Web Workstation v2.0</div>
+  <!-- Footer / System Info -->
+  <footer class="h-6 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-3 text-[10px] text-slate-400 shrink-0">
+    <span id="cache-status">Cache: Checking...</span>
+    <span id="data-timestamp">Updated: --</span>
   </footer>
 
-  <!-- AFL MODAL -->
-  <div id="aflModal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl w-full max-w-3xl flex flex-col max-h-[85vh]">
-      <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-        <h3 class="font-semibold text-slate-200 text-sm">AFL Formula Editor</h3>
-        <button id="closeAFLBtn" class="text-slate-400 hover:text-slate-200">✕</button>
-      </div>
-      <div class="p-4 flex-1 flex flex-col space-y-3 min-h-0">
-        <textarea id="aflCodeInput" class="w-full flex-1 bg-slate-950 text-slate-100 font-mono text-xs p-3 rounded border border-slate-800 focus:outline-none focus:border-sky-500 resize-none" rows="10"></textarea>
-      </div>
-      <div class="px-4 py-3 border-t border-slate-800 flex items-center justify-between bg-slate-900/50">
-        <span class="text-[11px] text-slate-500">Press Apply to execute formula.</span>
-        <div class="flex items-center space-x-2">
-          <button id="cancelAFLBtn" class="px-3 py-1.5 bg-slate-800 text-slate-300 rounded font-medium">Cancel</button>
-          <button id="applyAFLBtn" class="px-3 py-1.5 bg-sky-600 text-white rounded font-medium">Apply</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
+  <!-- Application Entry Point -->
   <script type="module" src="js/app.js"></script>
 </body>
 </html>
