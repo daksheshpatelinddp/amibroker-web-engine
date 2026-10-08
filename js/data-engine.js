@@ -1,15 +1,14 @@
 /**
  * js/data-engine.js
- * AmiBroker Web Workstation - DuckDB-WASM & Tiered Parquet Data Engine
- * Exact implementation adapted from reference project index.html
+ * AmiBroker Web Workstation - Pure JS Parquet Engine via hyparquet & IndexedDB
  */
+
+import { parquetRead } from 'https://cdn.jsdelivr.net/npm/hyparquet@0.4.0/src/hyparquet.js';
 
 class DataEngine {
   constructor() {
-    this.db = null;
-    this.conn = null;
     this.isInitialized = false;
-    
+
     this.baseUrl = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
     this.parquetFiles = [
       `${this.baseUrl}/2023.parquet`,
@@ -18,15 +17,28 @@ class DataEngine {
       `${this.baseUrl}/2026.parquet`
     ];
 
-    this.cacheVersion = 'v6';
-    this.cacheDbName = 'nse-parquet-cache';
+    this.cacheVersion = 'v7';
+    this.cacheDbName = 'hyparquet-stock-cache';
     this.cacheStore = 'files';
     this.currentYear = new Date().getFullYear();
 
-    this.localParquetFiles = [];
+    this.records = [];
+    this.symbolMap = new Map(); // Map<Symbol, Array<Record>>
     this.allSymbols = [];
     this.selectedSymbol = '';
     this.onSymbolChangeCallback = null;
+
+    this.setupGlobalErrorLogging();
+  }
+
+  setupGlobalErrorLogging() {
+    window.addEventListener('error', (e) => {
+      this.showErrorOnScreen(`GLOBAL ERROR: ${e.message} at ${e.filename}:${e.lineno}`);
+    });
+
+    window.addEventListener('unhandledrejection', (e) => {
+      this.showErrorOnScreen(`PROMISE ERROR: ${e.reason?.message || e.reason}`);
+    });
   }
 
   showErrorOnScreen(errText) {
@@ -78,45 +90,91 @@ class DataEngine {
   }
 
   /**
-   * Exact DuckDB-WASM Worker Init from Reference Project
+   * Main Initialization Pipeline
    */
   async init() {
     try {
-      this.setLoaderProgress('Initializing DuckDB Engine...', 10, 'Creating same-origin worker...');
-      this.updateStatus('Initializing DB...', 'amber');
+      this.setLoaderProgress('Initializing Engine...', 10, 'Preparing hyparquet reader...');
+      this.updateStatus('Loading Data...', 'amber');
 
-      const duckdb = window.duckdb;
-      if (!duckdb) {
-        throw new Error('DuckDB script tag not loaded properly.');
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const totalFiles = this.parquetFiles.length;
+      let step = 0;
+
+      for (const url of this.parquetFiles) {
+        step++;
+        const filename = url.split('/').pop();
+        const year = parseInt(filename, 10);
+        const isCurrentYear = year === this.currentYear;
+        const cacheKey = isCurrentYear
+          ? `${filename}::${this.cacheVersion}::${todayStr}`
+          : `${filename}::${this.cacheVersion}`;
+
+        const progressStart = 10 + Math.floor(((step - 1) / totalFiles) * 70);
+        const progressEnd = 10 + Math.floor((step / totalFiles) * 70);
+
+        let buffer = await this.idbGet(cacheKey);
+
+        if (buffer) {
+          this.setLoaderProgress(`Parsing ${filename} (cached)...`, progressEnd, 'Using local IndexedDB cache');
+        } else {
+          this.setLoaderProgress(`Downloading ${filename}...`, progressStart, `Fetching remote Parquet bytes...`);
+          const resp = await fetch(url);
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status} fetching ${filename}`);
+          }
+          buffer = await resp.arrayBuffer();
+          await this.idbPut(cacheKey, buffer);
+          this.setLoaderProgress(`Cached ${filename}`, progressEnd, 'Saved to IndexedDB cache');
+        }
+
+        // Parse Parquet natively in Pure JS
+        await parquetRead({
+          file: buffer,
+          onRecord: (record) => {
+            const rawSymbol = record.Symbol || record.symbol;
+            if (!rawSymbol) return;
+
+            const sym = String(rawSymbol).trim().toUpperCase();
+            if (!this.symbolMap.has(sym)) {
+              this.symbolMap.set(sym, []);
+            }
+
+            this.symbolMap.get(sym).push({
+              Date: record.Date || record.date,
+              Open: Number(record.Open || record.open || 0),
+              High: Number(record.High || record.high || 0),
+              Low: Number(record.Low || record.low || 0),
+              Close: Number(record.Close || record.close || 0),
+              Volume: Number(record.Volume || record.volume || 0)
+            });
+          }
+        });
       }
 
-      const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
-      const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+      this.setLoaderProgress('Indexing Symbol Universe...', 90, 'Filtering active tickers...');
 
-      // Same-origin worker blob technique from reference project
-      const workerScript = await fetch(bundle.mainWorker).then(r => r.text());
-      const workerBlobUrl = URL.createObjectURL(
-        new Blob([workerScript], { type: 'text/javascript' })
-      );
+      // Filter tickers with at least 50 historical candles
+      const validSymbols = [];
+      for (const [sym, rows] of this.symbolMap.entries()) {
+        if (rows.length >= 50) {
+          validSymbols.push(sym);
+          // Sort candles chronologically
+          rows.sort((a, b) => new Date(a.Date) - new Date(b.Date));
+        }
+      }
 
-      const worker = new Worker(workerBlobUrl);
-      const logger = new duckdb.ConsoleLogger();
-      this.db = new duckdb.AsyncDuckDB(logger, worker);
+      this.allSymbols = validSymbols.sort();
 
-      await this.db.instantiate(bundle.mainModule);
-      URL.revokeObjectURL(workerBlobUrl);
+      if (this.allSymbols.length > 0) {
+        const PREFERRED_DEFAULTS = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK', 'SBIN'];
+        let defaultSymbol = this.allSymbols.find(s => PREFERRED_DEFAULTS.includes(s));
+        if (!defaultSymbol) {
+          defaultSymbol = this.allSymbols[0];
+        }
+        this.selectedSymbol = defaultSymbol;
+      }
 
-      this.conn = await this.db.connect();
-
-      this.setLoaderProgress('DuckDB Worker Ready', 25, 'Downloading Parquet dataset from R2...');
-
-      // Download/cache files into virtual memory
-      this.localParquetFiles = await this.loadParquetFilesWithCache();
-
-      // Index symbols
-      await this.indexSymbols();
-
-      // Setup UI
       this.setupComboboxUI();
 
       this.isInitialized = true;
@@ -126,98 +184,14 @@ class DataEngine {
       if (this.selectedSymbol && typeof this.onSymbolChangeCallback === 'function') {
         this.onSymbolChangeCallback(this.selectedSymbol);
       }
-    } catch (error) {
-      this.showErrorOnScreen(`INIT FAIL: ${error.message || error}`);
-    }
-  }
-
-  /**
-   * Exact Tiered Parquet Cache from Reference Project
-   */
-  async loadParquetFilesWithCache() {
-    const localNames = [];
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const totalFiles = this.parquetFiles.length;
-    let step = 0;
-
-    for (const url of this.parquetFiles) {
-      step++;
-      const filename = url.split('/').pop();
-      const year = parseInt(filename, 10);
-      const isCurrentYear = year === this.currentYear;
-      const cacheKey = isCurrentYear
-        ? `${filename}::${this.cacheVersion}::${todayStr}`
-        : `${filename}::${this.cacheVersion}`;
-
-      const progressStart = 25 + Math.floor(((step - 1) / totalFiles) * 60);
-      const progressEnd = 25 + Math.floor((step / totalFiles) * 60);
-
-      let buffer = await this.idbGet(cacheKey);
-      if (buffer) {
-        this.setLoaderProgress(`Loading ${filename} (cached)...`, progressEnd, 'Using local IndexedDB cache');
-      } else {
-        this.setLoaderProgress(`Downloading ${filename} from R2...`, progressStart, 'Fetching remote Parquet bytes...');
-        const resp = await fetch(url);
-        if (!resp.ok) {
-          throw new Error(`Failed to fetch ${filename} from R2: HTTP ${resp.status}`);
-        }
-        buffer = await resp.arrayBuffer();
-        await this.idbPut(cacheKey, buffer);
-        this.setLoaderProgress(`Cached ${filename}`, progressEnd, 'Saved to IndexedDB cache');
-      }
-
-      const localName = `local_${filename}`;
-      await this.db.registerFileBuffer(localName, new Uint8Array(buffer));
-      localNames.push(localName);
-    }
-
-    // Register View 'all_stocks'
-    const createViewQuery = `
-      CREATE VIEW all_stocks AS 
-      SELECT * FROM read_parquet([${localNames.map(f => `'${f}'`).join(',')}]);
-    `;
-    await this.conn.query(createViewQuery);
-
-    return localNames;
-  }
-
-  /**
-   * Exact Symbol Index Query from Reference Project
-   */
-  async indexSymbols() {
-    this.setLoaderProgress('Indexing Symbol Universe...', 90, 'Filtering active tickers...');
-    
-    try {
-      const query = `
-        SELECT Symbol
-        FROM all_stocks
-        WHERE Symbol IS NOT NULL AND TRIM(Symbol) <> ''
-        GROUP BY Symbol
-        HAVING COUNT(*) >= 50
-        ORDER BY Symbol ASC
-      `;
-
-      const result = await this.conn.query(query);
-      const rawRows = result.toArray().map(row => row.toJSON());
-
-      this.allSymbols = rawRows.map(obj => obj.Symbol ?? obj.symbol ?? Object.values(obj)[0]).filter(Boolean);
-
-      if (this.allSymbols.length > 0) {
-        const PREFERRED_DEFAULTS = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK', 'SBIN'];
-        const normalize = s => String(s).replace(/[^A-Za-z0-9 ]/g, '').toUpperCase().trim();
-
-        let defaultSymbol = this.allSymbols.find(s => PREFERRED_DEFAULTS.includes(normalize(s)));
-        if (!defaultSymbol) {
-          defaultSymbol = this.allSymbols[0];
-        }
-        this.selectedSymbol = defaultSymbol;
-      }
     } catch (err) {
-      this.showErrorOnScreen(`SYMBOL INDEX FAIL: ${err.message}`);
-      this.allSymbols = [];
+      this.showErrorOnScreen(`INIT FAIL: ${err.message || err}`);
     }
   }
 
+  /**
+   * Bind Symbol Search Combobox
+   */
   setupComboboxUI() {
     const searchInput = document.getElementById('symbolSearchInput');
     const dropdown = document.getElementById('symbolDropdown');
@@ -278,64 +252,70 @@ class DataEngine {
     }
   }
 
+  /**
+   * Query OHLCV Candles for Active Symbol & Timeframe
+   */
   async getOHLCV(symbol, timeframe = '1D') {
-    if (!this.isInitialized || !this.conn) return [];
+    if (!this.isInitialized) return [];
 
     const targetSymbol = (symbol || this.selectedSymbol).toUpperCase();
+    const rawRows = this.symbolMap.get(targetSymbol) || [];
 
-    try {
-      let query = `
-        SELECT Date, Open, High, Low, Close, Volume 
-        FROM all_stocks 
-        WHERE UPPER(Symbol) = '${targetSymbol}' 
-        ORDER BY Date ASC;
-      `;
+    if (rawRows.length === 0) return [];
+
+    if (timeframe === '1D') {
+      return rawRows.map(r => ({
+        time: typeof r.Date === 'string' ? r.Date.split('T')[0] : new Date(r.Date).toISOString().split('T')[0],
+        open: r.Open,
+        high: r.High,
+        low: r.Low,
+        close: r.Close,
+        volume: r.Volume
+      }));
+    }
+
+    // Weekly / Monthly Aggregation
+    const aggregated = [];
+    let currentGroupKey = null;
+    let currentCandle = null;
+
+    for (const r of rawRows) {
+      const d = new Date(r.Date);
+      let groupKey = '';
 
       if (timeframe === '1W') {
-        query = `
-          SELECT 
-            DATE_TRUNC('week', Date::DATE) as Date,
-            FIRST(Open ORDER BY Date ASC) as Open,
-            MAX(High) as High,
-            MIN(Low) as Low,
-            LAST(Close ORDER BY Date ASC) as Close,
-            SUM(Volume) as Volume
-          FROM all_stocks
-          WHERE UPPER(Symbol) = '${targetSymbol}'
-          GROUP BY DATE_TRUNC('week', Date::DATE)
-          ORDER BY Date ASC;
-        `;
+        // Group by Year and Week Number
+        const startOfYear = new Date(d.getFullYear(), 0, 1);
+        const weekNum = Math.ceil((((d - startOfYear) / 86400000) + startOfYear.getDay() + 1) / 7);
+        groupKey = `${d.getFullYear()}-W${weekNum}`;
       } else if (timeframe === '1M') {
-        query = `
-          SELECT 
-            DATE_TRUNC('month', Date::DATE) as Date,
-            FIRST(Open ORDER BY Date ASC) as Open,
-            MAX(High) as High,
-            MIN(Low) as Low,
-            LAST(Close ORDER BY Date ASC) as Close,
-            SUM(Volume) as Volume
-          FROM all_stocks
-          WHERE UPPER(Symbol) = '${targetSymbol}'
-          GROUP BY DATE_TRUNC('month', Date::DATE)
-          ORDER BY Date ASC;
-        `;
+        // Group by Year and Month
+        groupKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       }
 
-      const res = await this.conn.query(query);
-      const rows = res.toArray().map(r => r.toJSON());
+      const dateStr = typeof r.Date === 'string' ? r.Date.split('T')[0] : d.toISOString().split('T')[0];
 
-      return rows.map(r => ({
-        time: typeof r.Date === 'string' ? r.Date.split('T')[0] : new Date(r.Date).toISOString().split('T')[0],
-        open: Number(r.Open),
-        high: Number(r.High),
-        low: Number(r.Low),
-        close: Number(r.Close),
-        volume: Number(r.Volume || 0)
-      }));
-    } catch (err) {
-      console.error(`Error querying OHLCV for ${targetSymbol}:`, err);
-      return [];
+      if (groupKey !== currentGroupKey) {
+        if (currentCandle) aggregated.push(currentCandle);
+        currentGroupKey = groupKey;
+        currentCandle = {
+          time: dateStr,
+          open: r.Open,
+          high: r.High,
+          low: r.Low,
+          close: r.Close,
+          volume: r.Volume
+        };
+      } else {
+        currentCandle.high = Math.max(currentCandle.high, r.High);
+        currentCandle.low = Math.min(currentCandle.low, r.Low);
+        currentCandle.close = r.Close;
+        currentCandle.volume += r.Volume;
+      }
     }
+
+    if (currentCandle) aggregated.push(currentCandle);
+    return aggregated;
   }
 
   setLoaderProgress(msg, percent, subText) {
