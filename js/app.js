@@ -1,8 +1,6 @@
 import { dataEngine } from './data-engine.js';
 import { chartEngine } from './chart-engine.js';
 import { sheetManager } from './sheet-manager.js';
-import { studyRegistry } from './study-registry.js';
-import { aflEngine } from './afl-engine.js';
 
 class Application {
     constructor() {
@@ -13,37 +11,55 @@ class Application {
         if (this.initialized) return;
 
         try {
-            console.log('Initializing AmiBroker Web Workstation...');
-            
-            // Step 1: Initialize hyparquet & IndexedDB engine
+            this.updateStatusBadge('Initializing Engine...', 'warning');
+
+            // Initialize IndexedDB
             await dataEngine.init();
 
-            // Step 2: Initialize Chart & Sheet Engines
-            chartEngine.init();
-            sheetManager.init();
+            // Initialize Charting & Sheet UI
+            if (chartEngine && typeof chartEngine.init === 'function') {
+                chartEngine.init();
+            }
+            if (sheetManager && typeof sheetManager.init === 'function') {
+                sheetManager.init();
+            }
 
-            // Step 3: Register event listeners for Workstation Controls
             this.setupUIListeners();
-
             this.initialized = true;
-            console.log('AmiBroker Web Workstation initialized successfully.');
 
-            // Load default symbol for active sheet
+            this.updateStatusBadge('Engine Ready', 'success');
+
+            // Load default symbol
             await this.loadActiveSymbol('RELIANCE');
         } catch (error) {
             console.error('Failed to initialize AmiBroker Workstation:', error);
+            this.updateStatusBadge('Initialization Failed', 'error');
         }
     }
 
+    updateStatusBadge(text, state) {
+        const statusBadges = document.querySelectorAll('.status-badge, #engine-status, header span');
+        statusBadges.forEach(badge => {
+            if (badge && badge.textContent.includes('Engine')) {
+                badge.textContent = `• ${text}`;
+                if (state === 'success') {
+                    badge.style.color = '#22c55e';
+                } else if (state === 'error') {
+                    badge.style.color = '#ef4444';
+                } else {
+                    badge.style.color = '#eab308';
+                }
+            }
+        });
+    }
+
     setupUIListeners() {
-        const symbolInput = document.getElementById('symbol-input');
+        const symbolInput = document.getElementById('symbol-input') || document.querySelector('select');
         if (symbolInput) {
-            symbolInput.addEventListener('keydown', async (e) => {
-                if (e.key === 'Enter') {
-                    const symbol = e.target.value.trim().toUpperCase();
-                    if (symbol) {
-                        await this.loadActiveSymbol(symbol);
-                    }
+            symbolInput.addEventListener('change', async (e) => {
+                const symbol = e.target.value.trim().toUpperCase();
+                if (symbol) {
+                    await this.loadActiveSymbol(symbol);
                 }
             });
         }
@@ -51,13 +67,11 @@ class Application {
 
     async loadActiveSymbol(symbol) {
         try {
-            console.log(`Loading data for symbol: ${symbol}...`);
             const data = await dataEngine.getStockData(symbol, 2023, 2026);
             if (data && data.length > 0) {
-                chartEngine.renderCandlestickData(data);
-                console.log(`Successfully loaded ${data.length} records for ${symbol}`);
-            } else {
-                console.warn(`No price data found for symbol: ${symbol}`);
+                if (chartEngine && typeof chartEngine.renderCandlestickData === 'function') {
+                    chartEngine.renderCandlestickData(data);
+                }
             }
         } catch (err) {
             console.error(`Error loading symbol ${symbol}:`, err);
