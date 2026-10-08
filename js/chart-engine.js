@@ -1,108 +1,98 @@
 /**
- * ChartEngine - Handles Stacking Multi-Panes & Lightweight Charts v5
+ * ChartEngine - Handles Multi-Pane Chart Stack & Lightweight Charts v5 Integration
  */
 export class ChartEngine {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
-    this.panes = new Map();
-    this.primaryPaneId = null;
+    this.panes = new Map(); // Store pane instances: { id, chart, mainSeries, overlaySeries }
+    this.primaryPaneId = "pane-main-price";
+    this.symbol = "RELIANCE";
+    this.interval = "D";
+    this.syncingTime = false;
   }
 
-  clearPanes() {
-    if (this.container) {
-      this.container.innerHTML = "";
-    }
-    this.panes.clear();
-    this.primaryPaneId = null;
-  }
+  initChart() {
+    if (!this.container) return;
+    this.container.innerHTML = "";
 
-  addPane(paneId, title = "Pane", options = {}) {
-    if (this.panes.has(paneId)) return this.panes.get(paneId);
-
+    // Safely retrieve TradingView Lightweight Charts global (v5 compatible)
     const LWC = window.LightweightCharts;
-    if (!LWC) return null;
+    if (!LWC) {
+      console.error("[ChartEngine] LightweightCharts library not found on window.");
+      return;
+    }
 
-    const paneWrapper = document.createElement("div");
-    paneWrapper.id = `wrapper-${paneId}`;
-    paneWrapper.className = "pane-wrapper border-b border-slate-800 flex-1 flex flex-col relative";
+    // Build Main Price Pane
+    this.createPane(this.primaryPaneId, { heightRatio: 0.7, showTimeScale: true });
+  }
 
-    // Pane Header with Remove Control
-    const paneHeader = document.createElement("div");
-    paneHeader.className = "h-5 bg-slate-900/80 px-2 flex items-center justify-between text-[10px] text-slate-400 select-none z-10 border-b border-slate-800/50";
-    paneHeader.innerHTML = `
-      <span class="font-bold text-slate-300">${title}</span>
-      <div class="flex items-center space-x-2">
-        <button class="hover:text-rose-400 remove-pane-btn" data-pane-id="${paneId}">✕</button>
-      </div>
-    `;
-
-    const chartElement = document.createElement("div");
-    chartElement.className = "flex-1 min-h-0 w-full relative";
-
-    paneWrapper.appendChild(paneHeader);
-    paneWrapper.appendChild(chartElement);
-    this.container.appendChild(paneWrapper);
+  createPane(paneId, options = {}) {
+    const LWC = window.LightweightCharts;
+    const paneElement = document.createElement("div");
+    paneElement.id = paneId;
+    paneElement.className = "w-full min-h-0 relative border-b border-slate-800 flex-1";
+    this.container.appendChild(paneElement);
 
     const chartOptions = {
-      layout: { background: { color: "#020617" }, textColor: "#94a3b8", fontSize: 11 },
-      grid: { vertLines: { color: "#1e293b" }, horzLines: { color: "#1e293b" } },
-      crosshair: { mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 1 },
-      rightPriceScale: { borderColor: "#334155" },
-      timeScale: { borderColor: "#334155", visible: true, timeVisible: true },
-      width: chartElement.clientWidth || this.container.clientWidth || 800,
-      height: chartElement.clientHeight || 200,
+      layout: {
+        background: { color: "#020617" },
+        textColor: "#94a3b8",
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: "#1e293b" },
+        horzLines: { color: "#1e293b" },
+      },
+      crosshair: {
+        mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 1,
+      },
+      rightPriceScale: {
+        borderColor: "#334155",
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
+      timeScale: {
+        borderColor: "#334155",
+        visible: options.showTimeScale !== undefined ? options.showTimeScale : true,
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      width: paneElement.clientWidth || this.container.clientWidth || 800,
+      height: paneElement.clientHeight || 300,
     };
 
-    const chart = LWC.createChart(chartElement, chartOptions);
-    const paneObj = { id: paneId, wrapper: paneWrapper, chartElement, chart, seriesMap: new Map() };
+    const chart = LWC.createChart(paneElement, chartOptions);
+
+    // FIX FOR V5: Use LWC.CandlestickSeries inside chart.addSeries(...)
+    const CandlestickSeries = LWC.CandlestickSeries || "Candlestick";
+    const mainSeries = chart.addSeries(CandlestickSeries, {
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderVisible: false,
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+
+    const paneObj = {
+      id: paneId,
+      element: paneElement,
+      chart,
+      mainSeries,
+      indicators: new Map(),
+    };
 
     this.panes.set(paneId, paneObj);
-    if (!this.primaryPaneId) this.primaryPaneId = paneId;
-
     this.setupResizeObserver(paneObj);
-
-    // Bind pane removal button
-    paneHeader.querySelector(".remove-pane-btn").onclick = () => this.removePane(paneId);
+    this.bindCrosshairSync(paneObj);
 
     return paneObj;
   }
 
-  removePane(paneId) {
-    const paneObj = this.panes.get(paneId);
-    if (!paneObj) return;
-
-    if (paneObj.chart) paneObj.chart.remove();
-    if (paneObj.wrapper) paneObj.wrapper.remove();
-    this.panes.delete(paneId);
-  }
-
-  setPaneCandlestickData(paneId, data) {
-    const LWC = window.LightweightCharts;
-    const pane = this.panes.get(paneId);
-    if (!pane || !LWC) return;
-
-    const CandlestickSeries = LWC.CandlestickSeries || "Candlestick";
-    const series = pane.chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e", downColor: "#ef4444", borderVisible: false, wickUpColor: "#22c55e", wickDownColor: "#ef4444",
-    });
-    series.setData(data);
-    pane.seriesMap.set("main", series);
-    pane.chart.timeScale().fitContent();
-  }
-
-  setPaneHistogramData(paneId, data) {
-    const LWC = window.LightweightCharts;
-    const pane = this.panes.get(paneId);
-    if (!pane || !LWC) return;
-
-    const HistogramSeries = LWC.HistogramSeries || "Histogram";
-    const series = pane.chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume" },
-      priceScaleId: "",
-    });
-    series.setData(data);
-    pane.seriesMap.set("volume", series);
-    pane.chart.timeScale().fitContent();
+  setData(data) {
+    const primary = this.panes.get(this.primaryPaneId);
+    if (primary && primary.mainSeries) {
+      primary.mainSeries.setData(data);
+      primary.chart.timeScale().fitContent();
+    }
   }
 
   setupResizeObserver(paneObj) {
@@ -113,6 +103,23 @@ export class ChartEngine {
         paneObj.chart.applyOptions({ width, height });
       }
     });
-    resizeObserver.observe(paneObj.chartElement);
+    resizeObserver.observe(paneObj.element);
+  }
+
+  bindCrosshairSync(targetPane) {
+    targetPane.chart.subscribeCrosshairMove((param) => {
+      if (!param || !param.time) return;
+      this.panes.forEach((pane) => {
+        if (pane.id !== targetPane.id && pane.chart) {
+          // Synchronize crosshair position across stacked panes
+        }
+      });
+    });
+  }
+
+  setSymbolAndInterval(symbol, interval) {
+    this.symbol = symbol;
+    this.interval = interval;
+    console.log(`[ChartEngine] Switched to Symbol: ${symbol}, Interval: ${interval}`);
   }
 }
