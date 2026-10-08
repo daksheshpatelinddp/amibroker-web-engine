@@ -7,35 +7,58 @@ class WorkstationApp {
   constructor() {
     this.dataEngine = new DataEngine();
     this.chartEngine = new ChartEngine("chart-container");
-    this.sheetManager = new SheetManager("sheet-bar");
     this.studyRegistry = new StudyRegistry();
+    this.sheetManager = new SheetManager("sheet-bar", (sheet) => this.onSheetChanged(sheet));
   }
 
   async start() {
     try {
-      console.log("[App] Starting Workstation...");
-      
-      // 1. Initialize Sheet Bar
+      console.log("[App] Booting AmiBroker Web Workstation...");
+
+      // 1. Render Workstation Tabs & Controls
       this.sheetManager.render();
 
-      // 2. Initialize Data Engine
+      // 2. Initialize Data Engine (DuckDB / R2 Cache)
       await this.dataEngine.initialize();
 
-      // 3. Initialize Chart Canvas
+      // 3. Initialize Multi-Pane Chart Stack
       this.chartEngine.initChart();
 
-      // 4. Fetch & Load Sample Data
-      const symbol = document.getElementById("symbol-select")?.value || "RELIANCE";
-      const data = await this.dataEngine.getHistoricalData(symbol);
-      this.chartEngine.setData(data);
+      // 4. Fetch & Load Initial Symbol Data
+      const symbolSelect = document.getElementById("symbol-select");
+      const symbol = symbolSelect ? symbolSelect.value : "RELIANCE";
+      
+      const historicalData = await this.dataEngine.getHistoricalData(symbol);
+      this.chartEngine.setData(historicalData);
 
-      // 5. Update UI Status Badge to Ready
+      // 5. Update Status Badge to Ready
       this.updateStatusBadge(true);
 
+      // Event listener for symbol selector changes
+      if (symbolSelect) {
+        symbolSelect.addEventListener("change", async (e) => {
+          const newSymbol = e.target.value;
+          const activeSheet = this.sheetManager.getActiveSheet();
+          
+          if (!activeSheet.locked) {
+            this.chartEngine.setSymbolAndInterval(newSymbol, "D");
+            const freshData = await this.dataEngine.getHistoricalData(newSymbol);
+            this.chartEngine.setData(freshData);
+          }
+        });
+      }
+
     } catch (err) {
-      console.error("[App] Application startup failed:", err);
+      console.error("[App] Workstation startup failed:", err);
       this.updateStatusBadge(false, err.message);
     }
+  }
+
+  onSheetChanged(sheet) {
+    console.log(`[App] Switched to ${sheet.name} (Chart ID: ${sheet.chartId})`);
+    // Load drawings and AFL study formulas registered for this Chart ID
+    const studies = this.studyRegistry.getStudiesForChart(sheet.chartId);
+    console.log(`[App] Active studies for Chart ID ${sheet.chartId}:`, studies);
   }
 
   updateStatusBadge(isReady, errorMsg = "") {
@@ -52,7 +75,6 @@ class WorkstationApp {
   }
 }
 
-// Bootstrap application on DOM load
 document.addEventListener("DOMContentLoaded", () => {
   const app = new WorkstationApp();
   app.start();
