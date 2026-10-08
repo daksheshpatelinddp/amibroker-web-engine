@@ -1,7 +1,7 @@
 /**
  * js/data-engine.js
  * AmiBroker Web Workstation - DuckDB-WASM & Tiered Parquet Data Engine
- * Features real-time download progress tracking & auto symbol extraction.
+ * Includes CORS protection, worker error handling, and tiered caching.
  */
 
 import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
@@ -22,30 +22,35 @@ class DataEngine {
   }
 
   /**
-   * Initialize DuckDB-WASM & start file downloading / indexing
+   * Initialize DuckDB-WASM instance & start file loading
    */
   async init() {
     try {
-      this.setLoaderProgress('Initializing DuckDB WASM Engine...', 10, 'Preparing memory...');
+      this.setLoaderProgress('Initializing DuckDB WASM Engine...', 10, 'Connecting to database worker...');
       this.updateStatus('Initializing DB...', 'amber');
 
       const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
       const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
 
-      const worker_url = URL.createObjectURL(
-        new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
-      );
+      // Create blob worker for bundle
+      const workerCode = `
+        importScripts("${bundle.mainWorker}");
+      `;
+      const blob = new Blob([workerCode], { type: 'text/javascript' });
+      const workerUrl = URL.createObjectURL(blob);
+      const worker = new Worker(workerUrl);
 
-      const worker = new Worker(worker_url);
       const logger = new duckdb.ConsoleLogger();
       this.db = new duckdb.AsyncDuckDB(logger, worker);
 
       await this.db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-      URL.revokeObjectURL(worker_url);
+      URL.revokeObjectURL(workerUrl);
 
       this.conn = await this.db.connect();
 
-      // Download Parquet files with live progress
+      this.setLoaderProgress('DuckDB Engine Ready', 20, 'Connecting to Cloudflare R2 Storage...');
+
+      // Load Parquet files with live progress
       await this.loadParquetFiles();
 
       // Extract symbols automatically from DuckDB cache
@@ -64,17 +69,25 @@ class DataEngine {
       }
     } catch (error) {
       console.error('DataEngine Initialization Error:', error);
-      this.setLoaderProgress('Failed to load dataset', 100, 'Check browser console / CORS connection.');
+      this.setLoaderProgress('Initialization Failed', 100, `Error: ${error.message || 'CORS / Worker Blocked'}`);
       this.updateStatus('Engine Failed', 'red');
     }
   }
 
   /**
-   * Fetch Parquet file with progress tracking
+   * Fetch Parquet file with stream progress tracking
    */
   async fetchWithProgress(url, progressStart, progressEnd, label) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    let response;
+    try {
+      response = await fetch(url, { mode: 'cors' });
+    } catch (netErr) {
+      throw new Error(`Network/CORS error fetching ${label}. Check R2 CORS settings.`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} when fetching ${label}`);
+    }
 
     const contentLength = response.headers.get('content-length');
     const totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
@@ -94,9 +107,10 @@ class DataEngine {
         const percent = Math.round(progressStart + ((loadedBytes / totalBytes) * (progressEnd - progressStart)));
         const loadedMB = (loadedBytes / (1024 * 1024)).toFixed(1);
         const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
-        this.setLoaderProgress(`Downloading ${label}... (${loadedMB}MB / ${totalMB}MB)`, percent, `Caching file in local CacheStorage...`);
+        this.setLoaderProgress(`Downloading ${label}... (${loadedMB}MB / ${totalMB}MB)`, percent, `Caching file locally...`);
       } else {
-        this.setLoaderProgress(`Downloading ${label}...`, progressStart, `Streaming data buffer...`);
+        const loadedMB = (loadedBytes / (1024 * 1024)).toFixed(1);
+        this.setLoaderProgress(`Downloading ${label}... (${loadedMB}MB)`, progressStart, `Streaming data buffer...`);
       }
     }
 
@@ -134,15 +148,21 @@ class DataEngine {
       let response = await staticCache.match(fileUrl);
 
       if (!response) {
-        response = await this.fetchWithProgress(fileUrl, pStart, pEnd, fileName);
-        await staticCache.put(fileUrl, response.clone());
+        try {
+          response = await this.fetchWithProgress(fileUrl, pStart, pEnd, fileName);
+          await staticCache.put(fileUrl, response.clone());
+        } catch (fetchErr) {
+          console.warn(`Could not download ${fileName}:`, fetchErr);
+        }
       } else {
         this.setLoaderProgress(`Loaded ${fileName} from CacheStorage`, pEnd, 'Using permanent offline cache');
       }
 
-      const buffer = new Uint8Array(await response.arrayBuffer());
-      await this.db.registerFileBuffer(fileName, buffer);
-      registeredFiles.push(`'${fileName}'`);
+      if (response) {
+        const buffer = new Uint8Array(await response.arrayBuffer());
+        await this.db.registerFileBuffer(fileName, buffer);
+        registeredFiles.push(`'${fileName}'`);
+      }
     }
 
     // 2. Load Active Current Year (2026) with Daily Check
@@ -181,7 +201,7 @@ class DataEngine {
       `;
       await this.conn.query(createViewQuery);
     } else {
-      throw new Error('No Parquet data files available');
+      throw new Error('No Parquet files could be loaded from R2 or local cache.');
     }
   }
 
