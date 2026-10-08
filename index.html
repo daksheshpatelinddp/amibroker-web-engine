@@ -34,14 +34,14 @@
           <input 
             type="text" 
             id="symbolSearchInput" 
-            placeholder="Search Symbol..." 
+            placeholder="Loading..." 
             autocomplete="off"
             class="w-36 bg-slate-800 text-slate-100 px-2 py-1 text-xs rounded border border-slate-700 focus:outline-none focus:border-sky-500 uppercase font-semibold tracking-wide placeholder-slate-500"
           />
           <!-- Dropdown Popup -->
           <div 
             id="symbolDropdown" 
-            class="hidden absolute top-full left-0 mt-1 w-52 max-h-64 bg-slate-900 border border-slate-700 rounded shadow-2xl overflow-y-auto z-50 divide-y divide-slate-800/50"
+            class="hidden absolute top-full left-0 mt-1 w-56 max-h-64 bg-slate-900 border border-slate-700 rounded shadow-2xl overflow-y-auto z-50 divide-y divide-slate-800/50"
           >
             <!-- Results populated dynamically -->
           </div>
@@ -82,7 +82,7 @@
 
       <div id="engineStatus" class="flex items-center space-x-1.5 text-[11px] text-amber-400 font-mono bg-slate-900/80 px-2 py-0.5 rounded border border-slate-800">
         <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-        <span>Initializing DB...</span>
+        <span>Initializing...</span>
       </div>
     </div>
   </header>
@@ -91,20 +91,55 @@
   <main class="flex-1 flex overflow-hidden min-h-0 relative">
     <!-- CHART STACK CONTAINER -->
     <div id="chartWorkspace" class="flex-1 flex flex-col min-h-0 bg-slate-950 relative overflow-hidden">
-      <!-- Multi-pane stacks will render here dynamically -->
+      
+      <!-- DATA DOWNLOAD & ENGINE LOADING OVERLAY -->
+      <div id="loaderOverlay" class="absolute inset-0 bg-slate-950/90 backdrop-blur-sm z-40 flex flex-col items-center justify-center space-y-4">
+        <div class="w-10 h-10 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+        <div class="text-center space-y-1">
+          <div id="loaderMessage" class="text-sm font-semibold text-slate-200">Initializing DuckDB Engine...</div>
+          <div id="loaderSubText" class="text-xs font-mono text-slate-400">Connecting to Cloudflare R2 Cache...</div>
+        </div>
+        <!-- Progress Bar Container -->
+        <div class="w-64 bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700">
+          <div id="loaderProgressBar" class="bg-sky-500 h-full w-0 transition-all duration-200"></div>
+        </div>
+      </div>
+
     </div>
   </main>
 
   <!-- BOTTOM WORKSTATION SHEET TAB BAR -->
   <footer class="h-8 bg-slate-900 border-t border-slate-800 flex items-center px-2 shrink-0 justify-between select-none">
     <div id="sheetTabBar" class="flex items-center space-x-1 overflow-x-auto no-scrollbar">
-      <!-- Sheet Tabs 1-10 rendered by sheet-manager.js -->
+      <!-- Sheet Tabs 1-10 -->
     </div>
     <div class="text-[10px] text-slate-500 font-mono px-2">
       Render Web Workstation v2.0
     </div>
   </footer>
 
-  <!-- AFL ENGINE MODAL (Placeholder for Phase 3) -->
+  <!-- AFL ENGINE MODAL -->
   <div id="aflModal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl w-full max-w-
+    <div class="bg-slate-900 border border-slate-700 rounded-lg shadow-2xl w-full max-w-3xl flex flex-col max-h-[85vh]">
+      <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+        <h3 class="font-semibold text-slate-200 text-sm flex items-center space-x-2">
+          <span>AFL Formula Editor</span>
+        </h3>
+        <button id="closeAFLBtn" class="text-slate-400 hover:text-slate-200">✕</button>
+      </div>
+      <div class="p-4 flex-1 flex flex-col space-y-3 min-h-0">
+        <textarea id="aflCodeInput" class="w-full flex-1 bg-slate-950 text-slate-100 font-mono text-xs p-3 rounded border border-slate-800 focus:outline-none focus:border-sky-500 resize-none" rows="10" placeholder="// Enter AFL Formula..."></textarea>
+      </div>
+      <div class="px-4 py-3 border-t border-slate-800 flex items-center justify-between bg-slate-900/50">
+        <span class="text-[11px] text-slate-500">Press Apply to execute formula on active pane.</span>
+        <div class="flex items-center space-x-2">
+          <button id="cancelAFLBtn" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-medium">Cancel</button>
+          <button id="applyAFLBtn" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded font-medium">Apply Indicator</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
