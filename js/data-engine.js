@@ -3,8 +3,6 @@
  * AmiBroker Web Workstation - Pure JS Parquet Engine via hyparquet & IndexedDB
  */
 
-import { parquetRead } from 'https://cdn.jsdelivr.net/npm/hyparquet@0.4.0/src/hyparquet.js';
-
 class DataEngine {
   constructor() {
     this.isInitialized = false;
@@ -17,7 +15,7 @@ class DataEngine {
       `${this.baseUrl}/2026.parquet`
     ];
 
-    this.cacheVersion = 'v7';
+    this.cacheVersion = 'v8';
     this.cacheDbName = 'hyparquet-stock-cache';
     this.cacheStore = 'files';
     this.currentYear = new Date().getFullYear();
@@ -94,8 +92,13 @@ class DataEngine {
    */
   async init() {
     try {
-      this.setLoaderProgress('Initializing Engine...', 10, 'Preparing hyparquet reader...');
+      this.setLoaderProgress('Initializing Engine...', 10, 'Locating hyparquet global reader...');
       this.updateStatus('Loading Data...', 'amber');
+
+      const hyparquet = window.hyparquet;
+      if (!hyparquet || typeof hyparquet.parquetRead !== 'function') {
+        throw new Error('window.hyparquet script tag failed to load from CDN.');
+      }
 
       const todayStr = new Date().toISOString().slice(0, 10);
       const totalFiles = this.parquetFiles.length;
@@ -116,7 +119,7 @@ class DataEngine {
         let buffer = await this.idbGet(cacheKey);
 
         if (buffer) {
-          this.setLoaderProgress(`Parsing ${filename} (cached)...`, progressEnd, 'Using local IndexedDB cache');
+          this.setLoaderProgress(`Parsing ${filename} (cached)...`, progressEnd, 'Using IndexedDB cache');
         } else {
           this.setLoaderProgress(`Downloading ${filename}...`, progressStart, `Fetching remote Parquet bytes...`);
           const resp = await fetch(url);
@@ -129,7 +132,7 @@ class DataEngine {
         }
 
         // Parse Parquet natively in Pure JS
-        await parquetRead({
+        await hyparquet.parquetRead({
           file: buffer,
           onRecord: (record) => {
             const rawSymbol = record.Symbol || record.symbol;
@@ -159,7 +162,6 @@ class DataEngine {
       for (const [sym, rows] of this.symbolMap.entries()) {
         if (rows.length >= 50) {
           validSymbols.push(sym);
-          // Sort candles chronologically
           rows.sort((a, b) => new Date(a.Date) - new Date(b.Date));
         }
       }
@@ -189,9 +191,6 @@ class DataEngine {
     }
   }
 
-  /**
-   * Bind Symbol Search Combobox
-   */
   setupComboboxUI() {
     const searchInput = document.getElementById('symbolSearchInput');
     const dropdown = document.getElementById('symbolDropdown');
@@ -252,9 +251,6 @@ class DataEngine {
     }
   }
 
-  /**
-   * Query OHLCV Candles for Active Symbol & Timeframe
-   */
   async getOHLCV(symbol, timeframe = '1D') {
     if (!this.isInitialized) return [];
 
@@ -274,7 +270,6 @@ class DataEngine {
       }));
     }
 
-    // Weekly / Monthly Aggregation
     const aggregated = [];
     let currentGroupKey = null;
     let currentCandle = null;
@@ -284,12 +279,10 @@ class DataEngine {
       let groupKey = '';
 
       if (timeframe === '1W') {
-        // Group by Year and Week Number
         const startOfYear = new Date(d.getFullYear(), 0, 1);
         const weekNum = Math.ceil((((d - startOfYear) / 86400000) + startOfYear.getDay() + 1) / 7);
         groupKey = `${d.getFullYear()}-W${weekNum}`;
       } else if (timeframe === '1M') {
-        // Group by Year and Month
         groupKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       }
 
