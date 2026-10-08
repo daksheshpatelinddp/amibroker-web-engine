@@ -1,3 +1,4 @@
+/* Custom CSS Resets & Chart Layout Rules */
 html, body {
   height: 100%;
   width: 100%;
@@ -7,7 +8,8 @@ html, body {
   touch-action: manipulation;
 }
 
-#chart-workspace, #pane-container {
+/* Ensure flexbox children shrink properly without collapsing chart canvas */
+#chart-workspace, #chart-container {
   display: flex;
   flex-direction: column;
   flex: 1 1 0%;
@@ -18,15 +20,11 @@ html, body {
   height: 100%;
 }
 
-.pane-wrapper {
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  width: 100%;
-  min-height: 120px;
-}
-
-/* Hide scrollbars for sheet tab bar */
+/* Scrollbar styling for sheet tabs */
 #sheet-bar::-webkit-scrollbar {
-  display: none;
+  height: 3px;
+}
+#sheet-bar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 2px;
 }
