@@ -112,6 +112,9 @@ export class DuckEngine {
     return res.toArray().map(r => String(r.s));
   }
 
+  // NOTE: the >= / <= range is deliberate. DuckDB skips whole row groups only for a single
+  // equality or a range filter; a plain IN (...) list makes it read the entire file.
+  // The IN list afterwards keeps only the exact names (X, X.NS, X.BO).
   _barsSql(files, symbol) {
     const c = this.col;
     const base = String(symbol).trim().toUpperCase().replace(/\.(NS|BO)$/, '');
@@ -125,7 +128,8 @@ export class DuckEngine {
              CAST(${qid(c.close)} AS DOUBLE) AS cl,
              ${vol} AS v
       FROM read_parquet(${this._fileList(files)})
-      WHERE ${qid(c.symbol)} IN (${names})
+      WHERE ${qid(c.symbol)} >= ${sqlStr(base)} AND ${qid(c.symbol)} <= ${sqlStr(base + '.NS')}
+        AND ${qid(c.symbol)} IN (${names})
       ORDER BY d`;
   }
 
