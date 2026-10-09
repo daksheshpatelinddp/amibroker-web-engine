@@ -1,146 +1,133 @@
-/**
- * ChartEngine - Handles Multi-Pane Chart Stack & Lightweight Charts v5 Integration
- */
-export class ChartEngine {
-  constructor(containerId) {
-    this.container = document.getElementById(containerId);
-    this.panes = new Map(); // Store pane instances: { id, chart, mainSeries, overlaySeries }
-    this.primaryPaneId = "pane-main-price";
-    this.symbol = "RELIANCE";
-    this.interval = "D";
-    this.syncingTime = false;
-  }
-
-  initChart() {
-    if (!this.container) return;
-    this.container.innerHTML = "";
-
-    // Safely retrieve TradingView Lightweight Charts global (v5 compatible)
-    const LWC = window.LightweightCharts;
-    if (!LWC) {
-      console.error("[ChartEngine] LightweightCharts library not found on window.");
-      return;
+class ChartEngine {
+    constructor() {
+        this.chart = null;
+        this.candlestickSeries = null;
+        this.container = null;
+        this.resizeObserver = null;
     }
 
-    // Build Main Price Pane
-    this.createPane(this.primaryPaneId, { heightRatio: 0.7, showTimeScale: true });
-  }
-
-  createPane(paneId, options = {}) {
-    const LWC = window.LightweightCharts;
-    const paneElement = document.createElement("div");
-    paneElement.id = paneId;
-    paneElement.className = "w-full min-h-0 relative border-b border-slate-800 flex-1";
-    this.container.appendChild(paneElement);
-
-    const chartOptions = {
-      layout: {
-        background: { color: "#020617" },
-        textColor: "#94a3b8",
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: "#1e293b" },
-        horzLines: { color: "#1e293b" },
-      },
-      crosshair: {
-        mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 1,
-      },
-      rightPriceScale: {
-        borderColor: "#334155",
-        scaleMargins: { top: 0.1, bottom: 0.1 },
-      },
-      timeScale: {
-        borderColor: "#334155",
-        visible: options.showTimeScale !== undefined ? options.showTimeScale : true,
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      autoSize: true,
-    };
-
-    const chart = LWC.createChart(paneElement, chartOptions);
-
-    // FIX FOR V5: Use LWC.CandlestickSeries inside chart.addSeries(...)
-    const CandlestickSeries = LWC.CandlestickSeries || "Candlestick";
-    const mainSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderVisible: false,
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
-    });
-
-    const paneObj = {
-      id: paneId,
-      element: paneElement,
-      chart,
-      mainSeries,
-      indicators: new Map(),
-    };
-
-    this.panes.set(paneId, paneObj);
-    this.setupResizeObserver(paneObj);
-    this.bindCrosshairSync(paneObj);
-
-    return paneObj;
-  }
-
-  setData(data) {
-    const primary = this.panes.get(this.primaryPaneId);
-    if (primary && primary.mainSeries) {
-      primary.mainSeries.setData(data);
-      primary.chart.timeScale().fitContent();
-    }
-  }
-
-  setupResizeObserver(paneObj) {
-    const resizeObserver = new ResizeObserver((entries) => {
-      if (!entries || entries.length === 0) return;
-      const { width, height } = entries[0].contentRect;
-      // autoSize handles resizing
-    });
-    resizeObserver.observe(paneObj.element);
-  }
-
-  bindCrosshairSync(targetPane) {
-    targetPane.chart.subscribeCrosshairMove((param) => {
-      if (!param || !param.time) return;
-      this.panes.forEach((pane) => {
-        if (pane.id !== targetPane.id && pane.chart) {
-          // Synchronize crosshair position across stacked panes
+    init() {
+        this.container = document.getElementById('main-chart-pane');
+        if (!this.container) {
+            console.error('Chart container #main-chart-pane not found.');
+            return;
         }
-      });
-    });
-  }
 
-  init() {
-    this.initChart();
-  }
+        // Clean container before creating instance
+        this.container.innerHTML = '';
 
-  // Accepts records from DataEngine: { date, open, high, low, close, volume }
-  renderCandlestickData(records) {
-    if (!this.panes.has(this.primaryPaneId)) this.initChart();
+        const width = this.container.clientWidth || window.innerWidth;
+        const height = this.container.clientHeight || (window.innerHeight - 80);
 
-    const seen = new Set();
-    const bars = [];
-    for (const r of records) {
-      const time = String(r.date || "").slice(0, 10); // 'YYYY-MM-DD'
-      if (!time || seen.has(time)) continue;           // LWC rejects duplicate times
-      if (!(r.close > 0)) continue;
-      seen.add(time);
-      bars.push({ time, open: r.open, high: r.high, low: r.low, close: r.close });
+        // Initialize TradingView Lightweight Charts v5
+        this.chart = LightweightCharts.createChart(this.container, {
+            width: width,
+            height: height,
+            layout: {
+                background: { type: 'solid', color: '#020617' },
+                textColor: '#94a3b8',
+            },
+            grid: {
+                vertLines: { color: '#1e293b' },
+                horzLines: { color: '#1e293b' },
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+            rightPriceScale: {
+                borderColor: '#1e293b',
+            },
+            timeScale: {
+                borderColor: '#1e293b',
+                timeVisible: true,
+                secondsVisible: false,
+            },
+        });
+
+        // Add Candlestick Series using v5 Series API
+        if (typeof this.chart.addSeries === 'function') {
+            this.candlestickSeries = this.chart.addSeries(LightweightCharts.CandlestickSeries, {
+                upColor: '#22c55e',
+                downColor: '#ef4444',
+                borderVisible: false,
+                wickUpColor: '#22c55e',
+                wickDownColor: '#ef4444',
+            });
+        } else {
+            this.candlestickSeries = this.chart.addCandlestickSeries({
+                upColor: '#22c55e',
+                downColor: '#ef4444',
+                borderVisible: false,
+                wickUpColor: '#22c55e',
+                wickDownColor: '#ef4444',
+            });
+        }
+
+        this.setupResizeObserver();
     }
-    bars.sort((a, b) => (a.time < b.time ? -1 : 1));   // LWC requires ascending order
-    this.setData(bars);
-  }
 
-  setSymbolAndInterval(symbol, interval) {
-    this.symbol = symbol;
-    this.interval = interval;
-    console.log(`[ChartEngine] Switched to Symbol: ${symbol}, Interval: ${interval}`);
-  }
+    setupResizeObserver() {
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+        }
+
+        this.resizeObserver = new ResizeObserver(entries => {
+            if (!entries || entries.length === 0 || !this.chart) return;
+            const entry = entries[0];
+            const width = Math.floor(entry.contentRect.width);
+            const height = Math.floor(entry.contentRect.height);
+
+            if (width > 0 && height > 0) {
+                this.chart.applyOptions({ width: width, height: height });
+            }
+        });
+
+        this.resizeObserver.observe(this.container);
+    }
+
+    renderCandlestickData(records) {
+        if (!this.chart) {
+            this.init();
+        }
+
+        if (!records || !Array.isArray(records) || records.length === 0) {
+            console.warn('No records provided to renderCandlestickData');
+            return;
+        }
+
+        // Format and sort price data for Lightweight Charts
+        const formattedData = records
+            .map(row => {
+                let timeVal = row.date;
+                if (typeof timeVal === 'string' && timeVal.includes('T')) {
+                    timeVal = timeVal.split('T')[0];
+                }
+                return {
+                    time: timeVal,
+                    open: Number(row.open),
+                    high: Number(row.high),
+                    low: Number(row.low),
+                    close: Number(row.close)
+                };
+            })
+            .filter(row => row.time && !isNaN(row.open) && !isNaN(row.close))
+            .sort((a, b) => new Date(a.time) - new Date(b.time));
+
+        // Deduplicate timestamps
+        const uniqueData = [];
+        const seenDates = new Set();
+        for (const item of formattedData) {
+            if (!seenDates.has(item.time)) {
+                seenDates.add(item.time);
+                uniqueData.push(item);
+            }
+        }
+
+        if (this.candlestickSeries) {
+            this.candlestickSeries.setData(uniqueData);
+            this.chart.timeScale().fitContent();
+        }
+    }
 }
 
-// app.js imports this singleton
-export const chartEngine = new ChartEngine("chart-container");
+export const chartEngine = new ChartEngine();

@@ -14,13 +14,15 @@ class Application {
         try {
             this.updateStatusBadge('Initializing Engine...', 'warning');
 
-            // Initialize IndexedDB Engine
+            // 1. Initialize IndexedDB Cache Engine
             await dataEngine.init();
 
-            // Initialize Charting & Sheet UI
+            // 2. Initialize Chart Engine
             if (chartEngine && typeof chartEngine.init === 'function') {
                 chartEngine.init();
             }
+
+            // 3. Initialize Sheet Manager
             if (sheetManager && typeof sheetManager.init === 'function') {
                 sheetManager.init();
             }
@@ -30,10 +32,10 @@ class Application {
 
             this.updateStatusBadge('Engine Ready', 'success');
 
-            // Load default symbol
+            // 4. Load initial stock chart
             await this.loadActiveSymbol(this.currentSymbol);
 
-            // Populate all ~3,000 symbols asynchronously into the search datalist
+            // 5. Populate search autocomplete async
             this.populateSymbolList();
 
         } catch (error) {
@@ -70,13 +72,13 @@ class Application {
         const statusBadges = document.querySelectorAll('.status-badge, #engine-status');
         statusBadges.forEach(badge => {
             if (badge) {
-                badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${state === 'success' ? 'bg-emerald-400' : 'bg-amber-400'} animate-pulse"></span> • ${text}`;
+                badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${state === 'success' ? 'bg-emerald-400' : 'bg-amber-400'} animate-pulse"></span> ${text}`;
                 if (state === 'success') {
-                    badge.className = 'status-badge text-[11px] font-medium text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-800/40 flex items-center gap-1.5';
+                    badge.className = 'status-badge text-[10px] font-medium text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/40 flex items-center gap-1';
                 } else if (state === 'error') {
-                    badge.className = 'status-badge text-[11px] font-medium text-red-400 bg-red-950/40 px-2 py-0.5 rounded border border-red-800/40 flex items-center gap-1.5';
+                    badge.className = 'status-badge text-[10px] font-medium text-red-400 bg-red-950/40 px-1.5 py-0.5 rounded border border-red-800/40 flex items-center gap-1';
                 } else {
-                    badge.className = 'status-badge text-[11px] font-medium text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40 flex items-center gap-1.5';
+                    badge.className = 'status-badge text-[10px] font-medium text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/40 flex items-center gap-1';
                 }
             }
         });
@@ -93,7 +95,6 @@ class Application {
                 }
             };
 
-            // Trigger when picking from datalist dropdown or pressing Enter
             symbolInput.addEventListener('change', triggerLoad);
             symbolInput.addEventListener('keydown', async (e) => {
                 if (e.key === 'Enter') {
