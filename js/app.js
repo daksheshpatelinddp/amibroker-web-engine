@@ -5,7 +5,6 @@ import { sheetManager } from './sheet-manager.js';
 class Application {
     constructor() {
         this.initialized = false;
-        this.currentSymbol = 'RELIANCE';
     }
 
     async init() {
@@ -14,15 +13,16 @@ class Application {
         try {
             this.updateStatusBadge('Initializing Engine...', 'warning');
 
-            // 1. Initialize IndexedDB Cache Engine
+            // Initialize IndexedDB Engine
             await dataEngine.init();
 
-            // 2. Initialize Chart Engine
+            // Initialize Charting & Sheet UI
             if (chartEngine && typeof chartEngine.init === 'function') {
                 chartEngine.init();
+            } else if (chartEngine && typeof chartEngine.initChart === 'function') {
+                chartEngine.initChart();
             }
 
-            // 3. Initialize Sheet Manager
             if (sheetManager && typeof sheetManager.init === 'function') {
                 sheetManager.init();
             }
@@ -30,102 +30,98 @@ class Application {
             this.setupUIListeners();
             this.initialized = true;
 
-            this.updateStatusBadge('Engine Ready', 'success');
+            this.updateStatusBadge('• Ready', 'success');
 
-            // 4. Load initial stock chart
-            await this.loadActiveSymbol(this.currentSymbol);
-
-            // 5. Populate search autocomplete async
-            this.populateSymbolList();
-
+            // Initial symbol load & populate symbol datalist from IndexedDB
+            await this.loadActiveSymbol('RELIANCE');
+            this.populateSymbolDatalist();
         } catch (error) {
             console.error('Failed to initialize AmiBroker Workstation:', error);
-            this.updateStatusBadge('Initialization Failed', 'error');
-        }
-    }
-
-    async populateSymbolList() {
-        try {
-            const datalist = document.getElementById('symbol-list');
-            if (!datalist) return;
-
-            const symbols = await dataEngine.getAllSymbols();
-            if (symbols && symbols.length > 0) {
-                datalist.innerHTML = '';
-                const fragment = document.createDocumentFragment();
-                
-                symbols.forEach(sym => {
-                    const opt = document.createElement('option');
-                    opt.value = sym;
-                    fragment.appendChild(opt);
-                });
-
-                datalist.appendChild(fragment);
-                console.log(`Populated search datalist with ${symbols.length} symbols.`);
-            }
-        } catch (e) {
-            console.error('Failed to populate symbol list:', e);
+            this.updateStatusBadge('• Init Error', 'error');
         }
     }
 
     updateStatusBadge(text, state) {
-        const statusBadges = document.querySelectorAll('.status-badge, #engine-status');
-        statusBadges.forEach(badge => {
-            if (badge) {
-                badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${state === 'success' ? 'bg-emerald-400' : 'bg-amber-400'} animate-pulse"></span> ${text}`;
-                if (state === 'success') {
-                    badge.className = 'status-badge text-[10px] font-medium text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/40 flex items-center gap-1';
-                } else if (state === 'error') {
-                    badge.className = 'status-badge text-[10px] font-medium text-red-400 bg-red-950/40 px-1.5 py-0.5 rounded border border-red-800/40 flex items-center gap-1';
-                } else {
-                    badge.className = 'status-badge text-[10px] font-medium text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/40 flex items-center gap-1';
-                }
+        const badge = document.getElementById('engine-status');
+        if (badge) {
+            badge.textContent = text;
+            if (state === 'success') {
+                badge.className = "text-xs px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/50 font-medium";
+            } else if (state === 'error') {
+                badge.className = "text-xs px-2 py-0.5 rounded bg-rose-950/80 text-rose-400 border border-rose-800/50 font-medium";
+            } else {
+                badge.className = "text-xs px-2 py-0.5 rounded bg-amber-950/80 text-amber-400 border border-amber-800/50 font-medium";
             }
-        });
+        }
     }
 
     setupUIListeners() {
-        const symbolInput = document.getElementById('symbol-input');
+        const symbolInput = document.getElementById('symbol-search-input');
         if (symbolInput) {
-            const triggerLoad = async () => {
-                const val = symbolInput.value.trim().toUpperCase();
-                if (val && val !== this.currentSymbol) {
-                    this.currentSymbol = val;
-                    await this.loadActiveSymbol(val);
+            symbolInput.addEventListener('change', async (e) => {
+                const symbol = e.target.value.trim().toUpperCase();
+                if (symbol) {
+                    await this.loadActiveSymbol(symbol);
                 }
-            };
+            });
 
-            symbolInput.addEventListener('change', triggerLoad);
             symbolInput.addEventListener('keydown', async (e) => {
                 if (e.key === 'Enter') {
-                    symbolInput.blur();
-                    await triggerLoad();
+                    const symbol = e.target.value.trim().toUpperCase();
+                    if (symbol) {
+                        await this.loadActiveSymbol(symbol);
+                        symbolInput.blur();
+                    }
                 }
             });
         }
     }
 
+    populateSymbolDatalist() {
+        const datalist = document.getElementById('symbols-datalist');
+        if (!datalist) return;
+
+        const symbols = dataEngine.getSymbolList();
+        if (symbols && symbols.length > 0) {
+            datalist.innerHTML = '';
+            symbols.forEach(sym => {
+                const opt = document.createElement('option');
+                opt.value = sym;
+                datalist.appendChild(opt);
+            });
+            console.log(`Populated search datalist with ${symbols.length} tickers.`);
+        }
+    }
+
     async loadActiveSymbol(symbol) {
         try {
-            const cacheStatusEl = document.getElementById('cache-status');
-            if (cacheStatusEl) cacheStatusEl.innerHTML = `<span>Loading ${symbol}...</span>`;
+            const footerStatus = document.getElementById('footer-cache-status');
+            if (footerStatus) footerStatus.innerHTML = `<span>Loading ${symbol}...</span>`;
 
             const data = await dataEngine.getStockData(symbol, 2023, 2026);
             if (data && data.length > 0) {
                 if (chartEngine && typeof chartEngine.renderCandlestickData === 'function') {
                     chartEngine.renderCandlestickData(data);
-                }
-                
-                if (cacheStatusEl) {
-                    cacheStatusEl.innerHTML = `<span>Cache: IndexedDB ✓ (${data.length} bars)</span>`;
+                } else if (chartEngine && typeof chartEngine.setData === 'function') {
+                    chartEngine.setData(data);
                 }
 
-                const lastUpdatedEl = document.getElementById('last-updated');
-                if (lastUpdatedEl && data[data.length - 1]) {
-                    lastUpdatedEl.textContent = `Updated: ${data[data.length - 1].date}`;
+                if (footerStatus) {
+                    footerStatus.innerHTML = `<span>Cache: IndexedDB ✓ (${data.length} bars)</span>`;
                 }
+
+                const lastRow = data[data.length - 1];
+                const updateTime = document.getElementById('footer-update-time');
+                if (updateTime && lastRow) {
+                    updateTime.textContent = `Updated: ${lastRow.date}`;
+                }
+
+                // Refresh dynamic symbol list after data load
+                this.populateSymbolDatalist();
             } else {
-                if (cacheStatusEl) cacheStatusEl.innerHTML = `<span class="text-amber-400">No data found for ${symbol}</span>`;
+                if (footerStatus) {
+                    footerStatus.innerHTML = `<span class="text-rose-400">No data found for ${symbol}</span>`;
+                }
             }
         } catch (err) {
             console.error(`Error loading symbol ${symbol}:`, err);

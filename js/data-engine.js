@@ -8,7 +8,7 @@ class DataEngine {
         this.storeName = 'parquet_years';
         this.db = null;
         this.memoryCache = new Map();
-        this.cachedSymbolList = null;
+        this.availableSymbols = new Set();
     }
 
     async init() {
@@ -52,7 +52,11 @@ class DataEngine {
             const request = store.get(year);
 
             request.onsuccess = () => {
-                resolve(request.result ? request.result.records : null);
+                const records = request.result ? request.result.records : null;
+                if (records) {
+                    this.extractSymbols(records);
+                }
+                resolve(records);
             };
             request.onerror = () => {
                 resolve(null);
@@ -72,6 +76,17 @@ class DataEngine {
         });
     }
 
+    extractSymbols(records) {
+        if (!records || !Array.isArray(records)) return;
+        for (let i = 0; i < records.length; i++) {
+            if (records[i].symbol) {
+                // Strip .NS or .BO suffix if present for clean search
+                const cleanSym = records[i].symbol.split('.')[0].toUpperCase();
+                this.availableSymbols.add(cleanSym);
+            }
+        }
+    }
+
     async fetchAndParseParquet(year) {
         const url = `${this.baseUrl}/${year}.parquet`;
         console.log(`Fetching Parquet file from R2: ${url}`);
@@ -89,13 +104,12 @@ class DataEngine {
                 parquetRead({
                     file: arrayBuffer,
                     onRowGroup: (rowGroup) => {
-                        if (rowGroup) {
-                            rows.push(...rowGroup);
-                        }
+                        if (rowGroup) rows.push(...rowGroup);
                     },
                     onComplete: (data) => {
                         const sourceData = (data && data.length > 0) ? data : rows;
                         const records = this.transformParquetData(sourceData);
+                        this.extractSymbols(records);
                         resolve(records);
                     }
                 });
@@ -138,7 +152,9 @@ class DataEngine {
         const yearInt = parseInt(year, 10);
 
         if (this.memoryCache.has(yearInt)) {
-            return this.memoryCache.get(yearInt);
+            const cached = this.memoryCache.get(yearInt);
+            this.extractSymbols(cached);
+            return cached;
         }
 
         let cachedRecords = await this.getCachedYear(yearInt);
@@ -167,36 +183,8 @@ class DataEngine {
         }
 
         this.memoryCache.set(yearInt, cachedRecords);
+        this.extractSymbols(cachedRecords);
         return cachedRecords;
-    }
-
-    /**
-     * Extracts all unique symbols across cached years without full download
-     */
-    async getAllSymbols() {
-        if (this.cachedSymbolList && this.cachedSymbolList.length > 0) {
-            return this.cachedSymbolList;
-        }
-
-        const symbolSet = new Set();
-        const currentYear = new Date().getFullYear();
-
-        // Check the most recent year first to get the active ticker list
-        try {
-            const latestData = await this.getYearData(currentYear);
-            if (latestData && latestData.length > 0) {
-                for (let i = 0; i < latestData.length; i++) {
-                    if (latestData[i].symbol) {
-                        symbolSet.add(latestData[i].symbol.toUpperCase());
-                    }
-                }
-            }
-        } catch (e) {
-            console.warn('Could not fetch current year for symbol list:', e);
-        }
-
-        this.cachedSymbolList = Array.from(symbolSet).sort();
-        return this.cachedSymbolList;
     }
 
     async getStockData(symbol, startYear = 2023, endYear = new Date().getFullYear()) {
@@ -206,7 +194,10 @@ class DataEngine {
         for (let y = startYear; y <= endYear; y++) {
             try {
                 const yearData = await this.getYearData(y);
-                const filtered = yearData.filter(row => row.symbol.toUpperCase() === targetSymbol);
+                const filtered = yearData.filter(row => {
+                    const sym = String(row.symbol).toUpperCase();
+                    return sym === targetSymbol || sym === `${targetSymbol}.NS` || sym === `${targetSymbol}.BO`;
+                });
                 combinedRecords.push(...filtered);
             } catch (e) {
                 console.error(`Error loading data for year ${y}:`, e);
@@ -215,6 +206,10 @@ class DataEngine {
 
         combinedRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
         return combinedRecords;
+    }
+
+    getSymbolList() {
+        return Array.from(this.availableSymbols).sort();
     }
 }
 
