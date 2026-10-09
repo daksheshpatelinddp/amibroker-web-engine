@@ -1,109 +1,355 @@
 /**
- * SheetManager - Multi-Sheet Workstation Manager with AmiBroker Link & Lock Controls
+ * SheetManager - Handles dynamic sheet creation, deletion, switching, 
+ * inline renaming, lock toggling, and link groups (Symbol/Interval).
  */
-export class SheetManager {
-  constructor(containerId, onSheetChange) {
-    this.container = document.getElementById(containerId);
-    this.onSheetChange = onSheetChange;
-    this.linkColors = ["#64748b", "#ef4444", "#22c55e", "#3b82f6", "#eab308"]; // Gray, Red, Green, Blue, Yellow
-    
-    // Initialize 10 AmiBroker Workstation Sheets
-    this.sheets = Array.from({ length: 10 }, (_, i) => ({
-      id: `sheet-${i + 1}`,
-      name: `Sheet ${i + 1}`,
-      active: i === 0,
-      locked: false,
-      symbolLinkIdx: 0,   // 0 = Unlinked (Gray)
-      intervalLinkIdx: 0, // 0 = Unlinked (Gray)
-      chartId: 1000 + i + 1,
-    }));
-  }
 
-  render() {
-    if (!this.container) return;
-    this.container.innerHTML = "";
-
-    const activeSheet = this.sheets.find((s) => s.active) || this.sheets[0];
-
-    // Left Controls: Sheet Lock, Symbol Link (S), Interval Link (I)
-    const controlGroup = document.createElement("div");
-    controlGroup.className = "flex items-center space-x-1 pr-3 border-r border-slate-800 shrink-0";
-
-    // Lock Toggle Button
-    const lockBtn = document.createElement("button");
-    lockBtn.className = `p-1 text-[11px] rounded hover:bg-slate-800 transition ${
-      activeSheet.locked ? "text-amber-400 font-bold" : "text-slate-500"
-    }`;
-    lockBtn.title = activeSheet.locked ? "Sheet Locked" : "Sheet Unlocked";
-    lockBtn.innerHTML = activeSheet.locked ? "🔒" : "🔓";
-    lockBtn.onclick = () => {
-      activeSheet.locked = !activeSheet.locked;
-      this.render();
-    };
-
-    // Symbol Link (S) Badge
-    const symbolLinkBtn = document.createElement("button");
-    symbolLinkBtn.className = "px-1.5 py-0.5 text-[10px] font-extrabold rounded text-slate-950 transition";
-    symbolLinkBtn.style.backgroundColor = this.linkColors[activeSheet.symbolLinkIdx];
-    symbolLinkBtn.textContent = "S";
-    symbolLinkBtn.title = "Symbol Link Group";
-    symbolLinkBtn.onclick = () => {
-      activeSheet.symbolLinkIdx = (activeSheet.symbolLinkIdx + 1) % this.linkColors.length;
-      this.render();
-    };
-
-    // Interval Link (I) Badge
-    const intervalLinkBtn = document.createElement("button");
-    intervalLinkBtn.className = "px-1.5 py-0.5 text-[10px] font-extrabold rounded text-slate-950 transition";
-    intervalLinkBtn.style.backgroundColor = this.linkColors[activeSheet.intervalLinkIdx];
-    intervalLinkBtn.textContent = "I";
-    intervalLinkBtn.title = "Interval Link Group";
-    intervalLinkBtn.onclick = () => {
-      activeSheet.intervalLinkIdx = (activeSheet.intervalLinkIdx + 1) % this.linkColors.length;
-      this.render();
-    };
-
-    controlGroup.appendChild(lockBtn);
-    controlGroup.appendChild(symbolLinkBtn);
-    controlGroup.appendChild(intervalLinkBtn);
-    this.container.appendChild(controlGroup);
-
-    // Sheet Tabs Scrollable Bar
-    const tabsWrapper = document.createElement("div");
-    tabsWrapper.className = "flex items-center space-x-1 overflow-x-auto shrink-0 flex-1 scrollbar-none";
-
-    this.sheets.forEach((sheet) => {
-      const tab = document.createElement("button");
-      tab.className = `px-3 py-1 text-xs font-medium rounded-t transition whitespace-nowrap ${
-        sheet.active
-          ? "bg-slate-800 text-sky-400 border-t-2 border-sky-400"
-          : "bg-slate-900/50 text-slate-400 hover:text-slate-200"
-      }`;
-      tab.textContent = sheet.name;
-      tab.onclick = () => this.selectSheet(sheet.id);
-      tabsWrapper.appendChild(tab);
-    });
-
-    this.container.appendChild(tabsWrapper);
-  }
-
-  init() {
-    this.render();
-  }
-
-  selectSheet(sheetId) {
-    this.sheets.forEach((s) => (s.active = s.id === sheetId));
-    this.render();
-    const current = this.sheets.find((s) => s.id === sheetId);
-    if (this.onSheetChange && current) {
-      this.onSheetChange(current);
+class SheetManager {
+    constructor() {
+        this.sheets = [];
+        this.activeSheetId = null;
+        this.nextSheetCounter = 1;
+        
+        this.linkColors = ['gray', 'red', 'green', 'blue', 'yellow'];
+        
+        this.onSheetChange = null; // Callback when active sheet switches or updates
+        
+        this.containerEl = null;
+        this.listEl = null;
     }
-  }
 
-  getActiveSheet() {
-    return this.sheets.find((s) => s.active) || this.sheets[0];
-  }
+    init() {
+        this.listEl = document.getElementById('sheet-tabs-list');
+        
+        // Load persisted state or construct defaults
+        const saved = this.loadState();
+        if (saved && saved.sheets && saved.sheets.length > 0) {
+            this.sheets = saved.sheets;
+            this.activeSheetId = saved.activeSheetId || this.sheets[0].id;
+            this.nextSheetCounter = saved.nextSheetCounter || (this.sheets.length + 1);
+        } else {
+            // Create default initial sheets
+            this.addSheet('Sheet 1', false);
+            this.addSheet('Sheet 2', false);
+            this.addSheet('Sheet 3', false);
+            this.activeSheetId = this.sheets[0].id;
+        }
+
+        this.bindEvents();
+        this.renderTabs();
+    }
+
+    bindEvents() {
+        const addBtn = document.getElementById('add-sheet-btn');
+        if (addBtn) {
+            addBtn.addEventListener('click', () => {
+                const newSheet = this.addSheet();
+                this.setActiveSheet(newSheet.id);
+            });
+        }
+
+        const lockBtn = document.getElementById('sheet-lock-btn');
+        if (lockBtn) {
+            lockBtn.addEventListener('click', () => this.toggleLock());
+        }
+
+        const symbolLinkBtn = document.getElementById('symbol-link-btn');
+        if (symbolLinkBtn) {
+            symbolLinkBtn.addEventListener('click', () => this.cycleSymbolLink());
+        }
+
+        const intervalLinkBtn = document.getElementById('interval-link-btn');
+        if (intervalLinkBtn) {
+            intervalLinkBtn.addEventListener('click', () => this.cycleIntervalLink());
+        }
+    }
+
+    addSheet(customName = null, triggerRender = true) {
+        const id = 'sheet_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
+        const name = customName || `Sheet ${this.nextSheetCounter++}`;
+        
+        const newSheet = {
+            id,
+            name,
+            symbol: 'RELIANCE',
+            interval: '1D',
+            isLocked: false,
+            symbolLinkGroup: 0,   // 0 = Gray (Unlinked), 1 = Red, 2 = Green, etc.
+            intervalLinkGroup: 0
+        };
+
+        this.sheets.push(newSheet);
+
+        if (triggerRender) {
+            this.saveState();
+            this.renderTabs();
+        }
+
+        return newSheet;
+    }
+
+    removeSheet(sheetId) {
+        if (this.sheets.length <= 1) {
+            alert('Cannot remove the last remaining sheet.');
+            return;
+        }
+
+        const index = this.sheets.findIndex(s => s.id === sheetId);
+        if (index === -1) return;
+
+        this.sheets.splice(index, 1);
+
+        // If removed active sheet, select adjacent sheet
+        if (this.activeSheetId === sheetId) {
+            const newIndex = Math.max(0, index - 1);
+            this.activeSheetId = this.sheets[newIndex].id;
+        }
+
+        this.saveState();
+        this.renderTabs();
+
+        if (this.onSheetChange) {
+            this.onSheetChange(this.getActiveSheet());
+        }
+    }
+
+    setActiveSheet(sheetId) {
+        const target = this.sheets.find(s => s.id === sheetId);
+        if (!target) return;
+
+        this.activeSheetId = sheetId;
+        this.saveState();
+        this.renderTabs();
+
+        if (this.onSheetChange) {
+            this.onSheetChange(target);
+        }
+    }
+
+    renameSheet(sheetId, newName) {
+        const trimmed = newName ? newName.trim() : '';
+        if (!trimmed) return;
+
+        const sheet = this.sheets.find(s => s.id === sheetId);
+        if (sheet) {
+            sheet.name = trimmed;
+            this.saveState();
+            this.renderTabs();
+        }
+    }
+
+    getActiveSheet() {
+        return this.sheets.find(s => s.id === this.activeSheetId) || this.sheets[0];
+    }
+
+    updateActiveSheetSymbol(symbol) {
+        const active = this.getActiveSheet();
+        if (!active || active.isLocked) return;
+
+        const linkGroup = active.symbolLinkGroup;
+        
+        // Update all sheets sharing same symbol link group if group > 0
+        if (linkGroup > 0) {
+            this.sheets.forEach(s => {
+                if (s.symbolLinkGroup === linkGroup && !s.isLocked) {
+                    s.symbol = symbol;
+                }
+            });
+        } else {
+            active.symbol = symbol;
+        }
+
+        this.saveState();
+    }
+
+    updateActiveSheetInterval(interval) {
+        const active = this.getActiveSheet();
+        if (!active || active.isLocked) return;
+
+        const linkGroup = active.intervalLinkGroup;
+
+        if (linkGroup > 0) {
+            this.sheets.forEach(s => {
+                if (s.intervalLinkGroup === linkGroup && !s.isLocked) {
+                    s.interval = interval;
+                }
+            });
+        } else {
+            active.interval = interval;
+        }
+
+        this.saveState();
+    }
+
+    toggleLock() {
+        const active = this.getActiveSheet();
+        if (!active) return;
+
+        active.isLocked = !active.isLocked;
+        this.saveState();
+        this.updateHeaderControls();
+    }
+
+    cycleSymbolLink() {
+        const active = this.getActiveSheet();
+        if (!active) return;
+
+        active.symbolLinkGroup = (active.symbolLinkGroup + 1) % this.linkColors.length;
+        this.saveState();
+        this.updateHeaderControls();
+    }
+
+    cycleIntervalLink() {
+        const active = this.getActiveSheet();
+        if (!active) return;
+
+        active.intervalLinkGroup = (active.intervalLinkGroup + 1) % this.linkColors.length;
+        this.saveState();
+        this.updateHeaderControls();
+    }
+
+    renderTabs() {
+        if (!this.listEl) return;
+
+        this.listEl.innerHTML = '';
+
+        this.sheets.forEach(sheet => {
+            const isActive = sheet.id === this.activeSheetId;
+
+            const tab = document.createElement('div');
+            tab.className = `group relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border-b-2 cursor-pointer transition-all ${
+                isActive 
+                    ? 'bg-slate-800/90 text-indigo-400 border-indigo-500 rounded-t-sm' 
+                    : 'text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-800/40'
+            }`;
+
+            // Name display span
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'select-none truncate max-w-[100px]';
+            nameSpan.textContent = sheet.name;
+
+            // Double click / long press inline editor
+            tab.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                this.enableInlineRename(tab, sheet);
+            });
+
+            tab.addEventListener('click', (e) => {
+                if (sheet.id !== this.activeSheetId) {
+                    this.setActiveSheet(sheet.id);
+                }
+            });
+
+            tab.appendChild(nameSpan);
+
+            // Delete button (visible on tab or hover)
+            if (this.sheets.length > 1) {
+                const delBtn = document.createElement('button');
+                delBtn.className = 'text-slate-500 hover:text-red-400 ml-1 rounded p-0.5 leading-none transition-colors opacity-70 group-hover:opacity-100';
+                delBtn.innerHTML = '×';
+                delBtn.title = 'Remove Sheet';
+
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.removeSheet(sheet.id);
+                });
+
+                tab.appendChild(delBtn);
+            }
+
+            this.listEl.appendChild(tab);
+        });
+
+        this.updateHeaderControls();
+    }
+
+    enableInlineRename(tabEl, sheet) {
+        tabEl.innerHTML = '';
+        
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = sheet.name;
+        input.className = 'bg-slate-950 text-indigo-300 text-xs px-1 py-0.5 rounded border border-indigo-500 focus:outline-none w-20';
+
+        const save = () => {
+            this.renameSheet(sheet.id, input.value);
+        };
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                save();
+            } else if (e.key === 'Escape') {
+                this.renderTabs();
+            }
+        });
+
+        input.addEventListener('blur', save);
+
+        tabEl.appendChild(input);
+        input.focus();
+        input.select();
+    }
+
+    updateHeaderControls() {
+        const active = this.getActiveSheet();
+        if (!active) return;
+
+        // Symbol input
+        const symbolInput = document.getElementById('symbol-search-input');
+        if (symbolInput && document.activeElement !== symbolInput) {
+            symbolInput.value = active.symbol;
+        }
+
+        // Interval select
+        const intervalSelect = document.getElementById('interval-select');
+        if (intervalSelect) {
+            intervalSelect.value = active.interval;
+        }
+
+        // Lock icon
+        const lockIcon = document.getElementById('lock-icon');
+        if (lockIcon) {
+            lockIcon.textContent = active.isLocked ? '🔒' : '🔓';
+        }
+
+        // Link group buttons color styling
+        const symbolLinkBtn = document.getElementById('symbol-link-btn');
+        if (symbolLinkBtn) {
+            symbolLinkBtn.style.color = this.getLinkColorHex(active.symbolLinkGroup);
+        }
+
+        const intervalLinkBtn = document.getElementById('interval-link-btn');
+        if (intervalLinkBtn) {
+            intervalLinkBtn.style.color = this.getLinkColorHex(active.intervalLinkGroup);
+        }
+    }
+
+    getLinkColorHex(groupIndex) {
+        const colors = ['#94a3b8', '#f87171', '#4ade80', '#60a5fa', '#facc15'];
+        return colors[groupIndex] || colors[0];
+    }
+
+    saveState() {
+        try {
+            const state = {
+                sheets: this.sheets,
+                activeSheetId: this.activeSheetId,
+                nextSheetCounter: this.nextSheetCounter
+            };
+            localStorage.setItem('amibroker_sheet_manager_v2', JSON.stringify(state));
+        } catch (e) {
+            console.warn('[SheetManager] State save failed:', e);
+        }
+    }
+
+    loadState() {
+        try {
+            const raw = localStorage.getItem('amibroker_sheet_manager_v2');
+            return raw ? JSON.parse(raw) : null;
+        } catch (e) {
+            return null;
+        }
+    }
 }
 
-// app.js imports this singleton
-export const sheetManager = new SheetManager("sheet-bar");
+export const sheetManager = new SheetManager();
+export default SheetManager;
