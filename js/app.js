@@ -11,16 +11,18 @@ class Application {
         if (this.initialized) return;
 
         try {
-            this.updateStatusBadge('Initializing Engine...', 'warning');
+            this.updateStatusBadge('• Initializing...', 'warning');
 
-            // Initialize IndexedDB Engine
+            // 1. Initialize IndexedDB Cache Storage
             await dataEngine.init();
 
-            // Initialize Charting & Sheet UI
-            if (chartEngine && typeof chartEngine.init === 'function') {
-                chartEngine.init();
-            } else if (chartEngine && typeof chartEngine.initChart === 'function') {
-                chartEngine.initChart();
+            // 2. Safely initialize Charting & Sheet UI
+            if (chartEngine) {
+                if (typeof chartEngine.init === 'function') {
+                    chartEngine.init();
+                } else if (typeof chartEngine.initChart === 'function') {
+                    chartEngine.initChart();
+                }
             }
 
             if (sheetManager && typeof sheetManager.init === 'function') {
@@ -32,7 +34,7 @@ class Application {
 
             this.updateStatusBadge('• Ready', 'success');
 
-            // Initial symbol load & populate symbol datalist from IndexedDB
+            // 3. Load initial symbol RELIANCE & populate search datalist
             await this.loadActiveSymbol('RELIANCE');
             this.populateSymbolDatalist();
         } catch (error) {
@@ -89,7 +91,7 @@ class Application {
                 opt.value = sym;
                 datalist.appendChild(opt);
             });
-            console.log(`Populated search datalist with ${symbols.length} tickers.`);
+            console.log(`Populated datalist with ${symbols.length} tickers.`);
         }
     }
 
@@ -100,10 +102,12 @@ class Application {
 
             const data = await dataEngine.getStockData(symbol, 2023, 2026);
             if (data && data.length > 0) {
-                if (chartEngine && typeof chartEngine.renderCandlestickData === 'function') {
-                    chartEngine.renderCandlestickData(data);
-                } else if (chartEngine && typeof chartEngine.setData === 'function') {
-                    chartEngine.setData(data);
+                if (chartEngine) {
+                    if (typeof chartEngine.setData === 'function') {
+                        chartEngine.setData(data);
+                    } else if (typeof chartEngine.renderCandlestickData === 'function') {
+                        chartEngine.renderCandlestickData(data);
+                    }
                 }
 
                 if (footerStatus) {
@@ -116,7 +120,6 @@ class Application {
                     updateTime.textContent = `Updated: ${lastRow.date}`;
                 }
 
-                // Refresh dynamic symbol list after data load
                 this.populateSymbolDatalist();
             } else {
                 if (footerStatus) {

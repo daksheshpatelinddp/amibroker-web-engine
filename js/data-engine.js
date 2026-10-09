@@ -1,4 +1,4 @@
-import { parquetRead } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.4.0/+esm';
+import { parquetReadObjects } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.4.0/+esm';
 
 class DataEngine {
     constructor() {
@@ -80,8 +80,7 @@ class DataEngine {
         if (!records || !Array.isArray(records)) return;
         for (let i = 0; i < records.length; i++) {
             if (records[i].symbol) {
-                // Strip .NS or .BO suffix if present for clean search
-                const cleanSym = records[i].symbol.split('.')[0].toUpperCase();
+                const cleanSym = String(records[i].symbol).split('.')[0].toUpperCase();
                 this.availableSymbols.add(cleanSym);
             }
         }
@@ -98,46 +97,33 @@ class DataEngine {
         
         const arrayBuffer = await response.arrayBuffer();
         
-        return new Promise((resolve, reject) => {
-            try {
-                const rows = [];
-                parquetRead({
-                    file: arrayBuffer,
-                    onRowGroup: (rowGroup) => {
-                        if (rowGroup) rows.push(...rowGroup);
-                    },
-                    onComplete: (data) => {
-                        const sourceData = (data && data.length > 0) ? data : rows;
-                        const records = this.transformParquetData(sourceData);
-                        this.extractSymbols(records);
-                        resolve(records);
-                    }
-                });
-            } catch (err) {
-                console.error(`Error parsing ${year}.parquet:`, err);
-                reject(err);
-            }
-        });
+        try {
+            // Using parquetReadObjects which is stable in hyparquet 1.4.0
+            const rawObjects = await parquetReadObjects({ file: arrayBuffer });
+            const records = this.transformParquetData(rawObjects);
+            this.extractSymbols(records);
+            return records;
+        } catch (err) {
+            console.error(`Error parsing ${year}.parquet:`, err);
+            throw err;
+        }
     }
 
     transformParquetData(data) {
         if (!data || !Array.isArray(data) || data.length === 0) return [];
         
         return data.map(row => {
-            if (Array.isArray(row)) {
-                return {
-                    symbol: String(row[0] || ''),
-                    date: String(row[1] || ''),
-                    open: Number(row[2] || 0),
-                    high: Number(row[3] || 0),
-                    low: Number(row[4] || 0),
-                    close: Number(row[5] || 0),
-                    volume: Number(row[6] || 0)
-                };
+            // Normalize Date string YYYY-MM-DD
+            let dateStr = row.date || row.Date || row.time || row.Timestamp || '';
+            if (dateStr instanceof Date) {
+                dateStr = dateStr.toISOString().split('T')[0];
+            } else {
+                dateStr = String(dateStr).split('T')[0];
             }
+
             return {
                 symbol: String(row.symbol || row.Symbol || row.ticker || row.Ticker || ''),
-                date: String(row.date || row.Date || row.time || row.Timestamp || ''),
+                date: dateStr,
                 open: Number(row.open || row.Open || 0),
                 high: Number(row.high || row.High || 0),
                 low: Number(row.low || row.Low || 0),
@@ -204,8 +190,19 @@ class DataEngine {
             }
         }
 
-        combinedRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
-        return combinedRecords;
+        // Deduplicate and sort chronologically
+        const seenDates = new Set();
+        const uniqueRecords = [];
+
+        for (const row of combinedRecords) {
+            if (row.date && !seenDates.has(row.date)) {
+                seenDates.add(row.date);
+                uniqueRecords.push(row);
+            }
+        }
+
+        uniqueRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
+        return uniqueRecords;
     }
 
     getSymbolList() {
