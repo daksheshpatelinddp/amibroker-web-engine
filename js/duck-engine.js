@@ -46,7 +46,8 @@ export class DuckEngine {
 
     await this._registerYears();
     await this._detectColumns();
-    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    this.initSeconds = (performance.now() - t0) / 1000;
+    const secs = this.initSeconds.toFixed(1);
     this.onProgress(`DuckDB ready in ${secs}s (${this.files.length} yearly files)`);
     return true;
   }

@@ -46,20 +46,23 @@ class Application {
         this.duck.onProgress = (m) => this.setCacheText(m);
         const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('DuckDB start timed out (60s)')), 60000));
         this.duckReady = Promise.race([this.duck.init(), timeout])
-            .then(() => {
-                this.duck.getSymbols().then((list) => {
-                    if (list.length) {
-                        this.symbols = list;
-                        try { localStorage.setItem('symbol_list', JSON.stringify(list)); } catch (e) {}
-                    }
-                }).catch((e) => console.warn('Symbol list failed', e));
-                return true;
-            })
+            .then(() => true)
             .catch((e) => {
                 console.error('DuckDB unavailable:', e);
                 this.duckError = e.message || String(e);
                 return false;
             });
+    }
+
+    loadSymbolListOnce() {
+        if (this.symbolsRequested) return;
+        this.symbolsRequested = true;
+        this.duck.getSymbols().then((list) => {
+            if (list.length) {
+                this.symbols = list;
+                try { localStorage.setItem('symbol_list', JSON.stringify(list)); } catch (e) {}
+            }
+        }).catch((e) => console.warn('Symbol list failed', e));
     }
 
     setStatus(text, state) {
@@ -150,6 +153,11 @@ class Application {
                 try {
                     data = await this.duck.getBars(symbol);
                     source = 'DuckDB';
+                    const q = (this.duck.lastQuerySeconds || 0).toFixed(1);
+                    note = this.firstDuckLoad === undefined
+                        ? ` (engine start ${(this.duck.initSeconds || 0).toFixed(1)}s, query ${q}s)`
+                        : ` (query ${q}s)`;
+                    this.firstDuckLoad = false;
                 } catch (e) {
                     console.error('DuckDB query failed:', e);
                     note = ` | DuckDB error: ${e.message}`;
@@ -176,6 +184,7 @@ class Application {
             chartEngine.renderCandlestickData(data);
             const secs = ((performance.now() - t0) / 1000).toFixed(1);
             this.setCacheText(`${source}: ${data.length} bars in ${secs}s${note}`);
+            if (source === 'DuckDB') this.loadSymbolListOnce();
             const ts = document.getElementById('data-timestamp');
             if (ts) ts.textContent = `Updated: ${data[data.length - 1].date}`;
         } catch (err) {
