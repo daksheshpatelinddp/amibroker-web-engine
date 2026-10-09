@@ -57,20 +57,26 @@ export class DuckEngine {
     const years = [];
     for (let y = this.cfg.firstYear; y <= thisYear; y++) years.push(y);
 
-    // find which yearly files really exist
-    const exists = await Promise.all(years.map(async (y) => {
+    // HEAD each yearly file (never from cache) to learn if it exists and which version it is.
+    // The version goes into the URL, so a re-uploaded file is never read from an old cached copy.
+    const infos = await Promise.all(years.map(async (y) => {
       try {
-        const r = await fetch(`${this.cfg.baseUrl}/${y}.parquet`, { method: 'HEAD' });
-        return r.ok;
-      } catch (e) { return null; } // null = could not check
+        const r = await fetch(`${this.cfg.baseUrl}/${y}.parquet`, { method: 'HEAD', cache: 'no-store' });
+        if (!r.ok) return { y, ok: false };
+        const raw = r.headers.get('etag') || r.headers.get('last-modified') || r.headers.get('content-length') || '';
+        const token = String(raw).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40);
+        return { y, ok: true, token };
+      } catch (e) { return { y, ok: null, token: '' }; } // could not check
     }));
-    let usable = years.filter((_, i) => exists[i] === true);
-    if (usable.length === 0 && exists.every(v => v === null)) usable = years; // HEAD blocked: try all
 
-    for (const y of usable) {
-      const name = `${this.cfg.id}_${y}.parquet`;
+    let usable = infos.filter(i => i.ok === true);
+    if (usable.length === 0 && infos.every(i => i.ok === null)) usable = infos; // HEAD blocked: try all
+
+    for (const i of usable) {
+      const name = `${this.cfg.id}_${i.y}.parquet`;
+      const v = i.token || String(Date.now());
       await this.db.registerFileURL(
-        name, `${this.cfg.baseUrl}/${y}.parquet`, duckdb.DuckDBDataProtocol.HTTP, false
+        name, `${this.cfg.baseUrl}/${i.y}.parquet?v=${v}`, duckdb.DuckDBDataProtocol.HTTP, false
       );
       this.files.push(name);
     }

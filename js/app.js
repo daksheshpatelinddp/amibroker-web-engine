@@ -68,6 +68,29 @@ class Application {
         }).catch((e) => console.warn('Symbol list failed', e));
     }
 
+    // Shows a readable, selectable error box (no console needed on a phone)
+    showDiag(text) {
+        let box = document.getElementById('diag-box');
+        if (!text) { if (box) box.remove(); return; }
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'diag-box';
+            box.className = 'fixed left-2 right-2 bottom-8 z-50 bg-slate-900 border border-amber-500/60 rounded p-2 text-[10px] text-amber-200 select-text max-h-56 overflow-auto';
+            document.body.appendChild(box);
+        }
+        box.innerHTML = '';
+        const close = document.createElement('button');
+        close.textContent = '\u00D7 close';
+        close.className = 'float-right px-2 text-slate-300';
+        close.onclick = () => box.remove();
+        const pre = document.createElement('div');
+        pre.style.whiteSpace = 'pre-wrap';
+        pre.style.wordBreak = 'break-word';
+        pre.textContent = text.replace(/ \|\| /g, '\n');
+        box.appendChild(close);
+        box.appendChild(pre);
+    }
+
     setStatus(text, state) {
         const badge = document.getElementById('status-badge');
         if (!badge) return;
@@ -151,7 +174,7 @@ class Application {
         try {
             const t0 = performance.now();
             this.setCacheText(`Loading ${symbol}...`);
-            let data = null, source = '', note = '';
+            let data = null, source = '', note = '', problem = '';
 
             if (this.duckReady && await this.duckReady) {
                 try {
@@ -162,13 +185,15 @@ class Application {
                         ? ` (engine start ${(this.duck.initSeconds || 0).toFixed(1)}s, query ${q}s)`
                         : ` (query ${q}s)`;
                     this.firstDuckLoad = false;
-                    if (this.duck.lastNote) note += ` | ${this.duck.lastNote}`;
+                    if (this.duck.lastNote) { note += ` | ${this.duck.lastNote}`; problem = this.duck.lastNote; }
                 } catch (e) {
                     console.error('DuckDB query failed:', e);
                     note = ` | DuckDB error: ${e.message}`;
+                    problem = `DuckDB error: ${e.message}`;
                 }
             } else if (this.duckError) {
                 note = ` | DuckDB off: ${this.duckError}`;
+                problem = `DuckDB off: ${this.duckError}`;
             }
 
             if (!data) {
@@ -187,6 +212,7 @@ class Application {
                 return;
             }
             chartEngine.renderCandlestickData(data);
+            this.showDiag(problem);
             const secs = ((performance.now() - t0) / 1000).toFixed(1);
             this.setCacheText(`${source}: ${data.length} bars in ${secs}s${note}`);
             if (source === 'DuckDB') this.loadSymbolListOnce();
