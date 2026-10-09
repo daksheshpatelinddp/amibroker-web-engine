@@ -12,33 +12,33 @@
 <body class="bg-slate-950 text-slate-100 flex flex-col h-screen overflow-hidden text-xs">
 
     <!-- Top Navigation Header -->
-    <header class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0">
-        <div class="flex items-center gap-3">
-            <span class="font-bold text-slate-200 text-sm tracking-wide">AmiBroker Web</span>
-            <span id="engine-status" class="status-badge text-[11px] font-medium text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40 flex items-center gap-1">
-                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Initializing Engine...
+    <header class="h-12 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0 gap-2">
+        <div class="flex items-center gap-2 shrink-0">
+            <span class="font-bold text-slate-200 text-xs sm:text-sm tracking-wide">AmiBroker Web</span>
+            <span id="engine-status" class="status-badge text-[10px] font-medium text-amber-400 bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/40 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Ready
             </span>
         </div>
 
         <!-- Symbol Search Input & Autocomplete Datalist -->
-        <div class="flex items-center gap-2">
-            <div class="relative">
+        <div class="flex items-center gap-2 grow justify-end max-w-xs">
+            <div class="relative w-full">
                 <input 
                     type="text" 
                     id="symbol-input" 
                     list="symbol-list" 
-                    placeholder="Search Symbol (e.g. RELIANCE, TCS)..." 
+                    placeholder="Search Symbol..." 
                     value="RELIANCE"
                     autocomplete="off"
-                    class="bg-slate-950 border border-slate-700 text-slate-100 px-2.5 py-1 rounded text-xs font-semibold focus:outline-none focus:border-blue-500 w-44 uppercase placeholder:normal-case placeholder:text-slate-500 placeholder:font-normal"
+                    class="bg-slate-950 border border-slate-700 text-slate-100 px-2 py-1 rounded text-xs font-semibold focus:outline-none focus:border-blue-500 w-full uppercase placeholder:normal-case placeholder:text-slate-500"
                 />
                 <datalist id="symbol-list">
-                    <!-- Automatically populated from IndexedDB with ~3,000 symbols -->
+                    <!-- Automatically populated from IndexedDB -->
                 </datalist>
             </div>
 
             <!-- Timeframe Interval Selector -->
-            <select id="interval-select" class="bg-slate-950 border border-slate-700 text-slate-200 px-2 py-1 rounded text-xs font-medium focus:outline-none focus:border-blue-500">
+            <select id="interval-select" class="bg-slate-950 border border-slate-700 text-slate-200 px-1.5 py-1 rounded text-xs font-medium focus:outline-none focus:border-blue-500 shrink-0">
                 <option value="1D" selected>1 Day</option>
                 <option value="1W">1 Week</option>
                 <option value="1M">1 Month</option>
@@ -48,34 +48,34 @@
 
     <!-- Workstation Control Toolbar & Sheets Bar -->
     <div class="h-9 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between px-2 shrink-0 select-none">
-        <div class="flex items-center gap-1 overflow-x-auto no-scrollbar">
+        <div class="flex items-center gap-1 overflow-x-auto no-scrollbar w-full">
             <!-- Sheet Lock Toggle -->
-            <button id="lock-toggle-btn" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200" title="Lock Sheet Settings">
+            <button id="lock-toggle-btn" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 shrink-0" title="Lock Sheet Settings">
                 <span id="lock-icon">🔒</span>
             </button>
 
             <!-- Link Group Selector: Symbol (S) -->
-            <button id="symbol-link-btn" class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500" title="Symbol Link Group">
+            <button id="symbol-link-btn" class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500 shrink-0" title="Symbol Link Group">
                 S
             </button>
 
             <!-- Link Group Selector: Interval (I) -->
-            <button id="interval-link-btn" class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500" title="Interval Link Group">
+            <button id="interval-link-btn" class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500 shrink-0" title="Interval Link Group">
                 I
             </button>
 
-            <div class="h-4 w-[1px] bg-slate-800 mx-1"></div>
+            <div class="h-4 w-[1px] bg-slate-800 mx-1 shrink-0"></div>
 
             <!-- 10 Workstation Sheets Navigation Bar -->
-            <div id="sheets-container" class="flex items-center gap-1">
+            <div id="sheets-container" class="flex items-center gap-1 overflow-x-auto no-scrollbar">
                 <!-- Dynamically populated Sheet 1 to Sheet 10 by sheet-manager.js -->
             </div>
         </div>
     </div>
 
     <!-- Main Charting & Sub-pane Stacking Container -->
-    <main id="chart-workspace" class="flex-1 bg-slate-950 relative w-full h-full overflow-hidden">
-        <div id="main-chart-pane" class="w-full h-full"></div>
+    <main id="chart-workspace" class="flex-1 bg-slate-950 relative w-full h-full overflow-hidden min-h-0">
+        <div id="main-chart-pane" class="w-full h-full absolute inset-0"></div>
     </main>
 
     <!-- Footer Cache & Bar Counter Status Bar -->
