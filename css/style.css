@@ -9,9 +9,7 @@ html, body {
 }
 
 /* Ensure flexbox children shrink properly without collapsing chart canvas */
-#chart-workspace, 
-#chart-workspace-container, 
-#chart-container {
+#chart-workspace, #chart-container {
   display: flex;
   flex-direction: column;
   flex: 1 1 0%;
@@ -20,26 +18,13 @@ html, body {
   position: relative;
   width: 100%;
   height: 100%;
-  touch-action: none;
 }
 
-/* Custom horizontal scrollbar for sheet tabs */
-#sheet-tabs-container::-webkit-scrollbar,
+/* Scrollbar styling for sheet tabs */
 #sheet-bar::-webkit-scrollbar {
   height: 3px;
 }
-
-#sheet-tabs-container::-webkit-scrollbar-thumb,
 #sheet-bar::-webkit-scrollbar-thumb {
   background: #334155;
   border-radius: 2px;
-}
-
-/* Utility class to hide scrollbars on header/tab containers */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
 }
