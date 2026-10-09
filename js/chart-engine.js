@@ -117,9 +117,33 @@ export class ChartEngine {
     });
   }
 
+  init() {
+    this.initChart();
+  }
+
+  // Accepts records from DataEngine: { date, open, high, low, close, volume }
+  renderCandlestickData(records) {
+    if (!this.panes.has(this.primaryPaneId)) this.initChart();
+
+    const seen = new Set();
+    const bars = [];
+    for (const r of records) {
+      const time = String(r.date || "").slice(0, 10); // 'YYYY-MM-DD'
+      if (!time || seen.has(time)) continue;           // LWC rejects duplicate times
+      if (!(r.close > 0)) continue;
+      seen.add(time);
+      bars.push({ time, open: r.open, high: r.high, low: r.low, close: r.close });
+    }
+    bars.sort((a, b) => (a.time < b.time ? -1 : 1));   // LWC requires ascending order
+    this.setData(bars);
+  }
+
   setSymbolAndInterval(symbol, interval) {
     this.symbol = symbol;
     this.interval = interval;
     console.log(`[ChartEngine] Switched to Symbol: ${symbol}, Interval: ${interval}`);
   }
 }
+
+// app.js imports this singleton
+export const chartEngine = new ChartEngine("chart-container");

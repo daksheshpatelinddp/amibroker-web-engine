@@ -1,4 +1,4 @@
-import { parquetRead } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.4.0/+esm';
+import { parquetReadObjects } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.4.0/+esm';
 
 class DataEngine {
     constructor() {
@@ -74,63 +74,42 @@ class DataEngine {
     async fetchAndParseParquet(year) {
         const url = `${this.baseUrl}/${year}.parquet`;
         console.log(`Fetching Parquet file from R2: ${url}`);
-        
-        const response = await fetch(url);
+
+        const response = await fetch(url, { mode: 'cors' });
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status} for ${url}`);
         }
-        
         const arrayBuffer = await response.arrayBuffer();
-        
-        return new Promise((resolve, reject) => {
-            try {
-                const rows = [];
-                parquetRead({
-                    file: arrayBuffer,
-                    onRowGroup: (rowGroup) => {
-                        // Gather raw row arrays/objects
-                        if (rowGroup) {
-                            rows.push(...rowGroup);
-                        }
-                    },
-                    onComplete: (data) => {
-                        const sourceData = (data && data.length > 0) ? data : rows;
-                        const records = this.transformParquetData(sourceData);
-                        resolve(records);
-                    }
-                });
-            } catch (err) {
-                console.error(`Error parsing ${year}.parquet:`, err);
-                reject(err);
-            }
-        });
+        console.log(`Downloaded ${year}.parquet (${(arrayBuffer.byteLength / 1048576).toFixed(2)} MB)`);
+
+        // parquetRead is async: errors reject the returned promise, so we must await it.
+        // parquetReadObjects resolves with an array of row objects { colName: value }.
+        const rows = await parquetReadObjects({ file: arrayBuffer });
+        console.log(`Parsed ${rows.length} rows from ${year}.parquet. Sample:`, rows[0]);
+        return this.transformParquetData(rows);
+    }
+
+    toDateString(v) {
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        if (typeof v === 'bigint') v = Number(v);
+        if (typeof v === 'number') {
+            const ms = v < 1e11 ? v * 1000 : v; // seconds or milliseconds
+            return new Date(ms).toISOString().slice(0, 10);
+        }
+        return String(v ?? '').slice(0, 10);
     }
 
     transformParquetData(data) {
-        if (!data || !Array.isArray(data) || data.length === 0) return [];
-        
-        return data.map(row => {
-            if (Array.isArray(row)) {
-                return {
-                    symbol: String(row[0] || ''),
-                    date: String(row[1] || ''),
-                    open: Number(row[2] || 0),
-                    high: Number(row[3] || 0),
-                    low: Number(row[4] || 0),
-                    close: Number(row[5] || 0),
-                    volume: Number(row[6] || 0)
-                };
-            }
-            return {
-                symbol: String(row.symbol || row.Symbol || row.ticker || row.Ticker || ''),
-                date: String(row.date || row.Date || row.time || row.Timestamp || ''),
-                open: Number(row.open || row.Open || 0),
-                high: Number(row.high || row.High || 0),
-                low: Number(row.low || row.Low || 0),
-                close: Number(row.close || row.Close || 0),
-                volume: Number(row.volume || row.Volume || 0)
-            };
-        });
+        if (!Array.isArray(data) || data.length === 0) return [];
+        return data.map(row => ({
+            symbol: String(row.symbol ?? row.Symbol ?? row.ticker ?? row.Ticker ?? ''),
+            date: this.toDateString(row.date ?? row.Date ?? row.time ?? row.Timestamp),
+            open: Number(row.open ?? row.Open ?? 0),
+            high: Number(row.high ?? row.High ?? 0),
+            low: Number(row.low ?? row.Low ?? 0),
+            close: Number(row.close ?? row.Close ?? 0),
+            volume: Number(row.volume ?? row.Volume ?? 0)
+        }));
     }
 
     async getYearData(year) {
@@ -171,13 +150,14 @@ class DataEngine {
     }
 
     async getStockData(symbol, startYear = 2023, endYear = new Date().getFullYear()) {
-        const targetSymbol = symbol.trim().toUpperCase();
+        const strip = (x) => x.toUpperCase().replace(/\.(NS|BO)$/, '');
+        const targetSymbol = strip(symbol.trim());
         let combinedRecords = [];
 
         for (let y = startYear; y <= endYear; y++) {
             try {
                 const yearData = await this.getYearData(y);
-                const filtered = yearData.filter(row => row.symbol.toUpperCase() === targetSymbol);
+                const filtered = yearData.filter(row => strip(row.symbol) === targetSymbol);
                 combinedRecords.push(...filtered);
             } catch (e) {
                 console.error(`Error loading data for year ${y}:`, e);

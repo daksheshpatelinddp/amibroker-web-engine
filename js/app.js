@@ -9,78 +9,70 @@ class Application {
 
     async init() {
         if (this.initialized) return;
+        this.setStatus('Initializing Engine...', 'warning');
+
+        // UI first: a chart/sheet problem must never block data loading
+        try { chartEngine.init(); } catch (e) { console.error('Chart init failed:', e); }
+        try { sheetManager.init(); } catch (e) { console.error('Sheet init failed:', e); }
+        this.setupUIListeners();
 
         try {
-            this.updateStatusBadge('Initializing Engine...', 'warning');
-
-            // Initialize IndexedDB
-            await dataEngine.init();
-
-            // Initialize Charting & Sheet UI
-            if (chartEngine && typeof chartEngine.init === 'function') {
-                chartEngine.init();
-            }
-            if (sheetManager && typeof sheetManager.init === 'function') {
-                sheetManager.init();
-            }
-
-            this.setupUIListeners();
+            await dataEngine.init(); // IndexedDB
             this.initialized = true;
-
-            this.updateStatusBadge('Engine Ready', 'success');
-
-            // Load default symbol
-            await this.loadActiveSymbol('RELIANCE');
-        } catch (error) {
-            console.error('Failed to initialize AmiBroker Workstation:', error);
-            this.updateStatusBadge('Initialization Failed', 'error');
+            this.setStatus('Engine Ready', 'success');
+        } catch (e) {
+            console.error('IndexedDB init failed:', e);
+            this.setStatus('Initialization Failed', 'error');
+            return;
         }
+
+        await this.loadActiveSymbol('RELIANCE');
     }
 
-    updateStatusBadge(text, state) {
-        const statusBadges = document.querySelectorAll('.status-badge, #engine-status, header span');
-        statusBadges.forEach(badge => {
-            if (badge && badge.textContent.includes('Engine')) {
-                badge.textContent = `• ${text}`;
-                if (state === 'success') {
-                    badge.style.color = '#22c55e';
-                } else if (state === 'error') {
-                    badge.style.color = '#ef4444';
-                } else {
-                    badge.style.color = '#eab308';
-                }
-            }
-        });
+    setStatus(text, state) {
+        const badge = document.getElementById('status-badge');
+        if (!badge) return;
+        badge.textContent = `\u25CF ${text}`;
+        badge.style.color = state === 'success' ? '#22c55e' : state === 'error' ? '#ef4444' : '#eab308';
+    }
+
+    setCacheText(text) {
+        const el = document.getElementById('cache-status');
+        if (el) el.textContent = text;
     }
 
     setupUIListeners() {
-        const symbolInput = document.getElementById('symbol-input') || document.querySelector('select');
-        if (symbolInput) {
-            symbolInput.addEventListener('change', async (e) => {
-                const symbol = e.target.value.trim().toUpperCase();
-                if (symbol) {
-                    await this.loadActiveSymbol(symbol);
-                }
-            });
+        const select = document.getElementById('symbol-select');
+        if (select) {
+            select.addEventListener('change', (e) => this.loadActiveSymbol(e.target.value));
         }
     }
 
     async loadActiveSymbol(symbol) {
         try {
-            const data = await dataEngine.getStockData(symbol, 2023, 2026);
-            if (data && data.length > 0) {
-                if (chartEngine && typeof chartEngine.renderCandlestickData === 'function') {
-                    chartEngine.renderCandlestickData(data);
-                }
+            this.setCacheText(`Loading ${symbol}...`);
+            const data = await dataEngine.getStockData(symbol, 2023, new Date().getFullYear());
+            console.log(`${symbol}: ${data.length} rows`);
+            if (data.length === 0) {
+                this.setCacheText(`No rows for ${symbol} - check symbol names in console`);
+                return;
             }
+            chartEngine.renderCandlestickData(data);
+            this.setCacheText(`Cache: IndexedDB \u2713 (${data.length} bars)`);
+            const ts = document.getElementById('data-timestamp');
+            if (ts) ts.textContent = `Updated: ${data[data.length - 1].date}`;
         } catch (err) {
             console.error(`Error loading symbol ${symbol}:`, err);
+            this.setCacheText('Load failed - see console');
         }
     }
 }
 
 export const app = new Application();
 
-document.addEventListener('DOMContentLoaded', () => {
+// Module scripts are deferred, so the DOM is usually ready already
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => app.init());
+} else {
     app.init();
-});
+}

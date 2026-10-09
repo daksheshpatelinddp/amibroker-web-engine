@@ -87,6 +87,10 @@ export class SheetManager {
     this.container.appendChild(tabsWrapper);
   }
 
+  init() {
+    this.render();
+  }
+
   selectSheet(sheetId) {
     this.sheets.forEach((s) => (s.active = s.id === sheetId));
     this.render();
@@ -100,3 +104,6 @@ export class SheetManager {
     return this.sheets.find((s) => s.active) || this.sheets[0];
   }
 }
+
+// app.js imports this singleton
+export const sheetManager = new SheetManager("sheet-bar");
