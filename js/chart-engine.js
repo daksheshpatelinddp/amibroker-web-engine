@@ -56,8 +56,7 @@ export class ChartEngine {
         timeVisible: true,
         secondsVisible: false,
       },
-      width: paneElement.clientWidth || this.container.clientWidth || 800,
-      height: paneElement.clientHeight || 300,
+      autoSize: true,
     };
 
     const chart = LWC.createChart(paneElement, chartOptions);
@@ -99,9 +98,7 @@ export class ChartEngine {
     const resizeObserver = new ResizeObserver((entries) => {
       if (!entries || entries.length === 0) return;
       const { width, height } = entries[0].contentRect;
-      if (paneObj.chart && width > 0 && height > 0) {
-        paneObj.chart.applyOptions({ width, height });
-      }
+      // autoSize handles resizing
     });
     resizeObserver.observe(paneObj.element);
   }

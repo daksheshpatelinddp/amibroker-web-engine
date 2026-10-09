@@ -8,6 +8,7 @@ class DataEngine {
         this.storeName = 'parquet_years';
         this.db = null;
         this.memoryCache = new Map();
+        this.onProgress = () => {};
     }
 
     async init() {
@@ -73,19 +74,24 @@ class DataEngine {
 
     async fetchAndParseParquet(year) {
         const url = `${this.baseUrl}/${year}.parquet`;
-        console.log(`Fetching Parquet file from R2: ${url}`);
-
-        const response = await fetch(url, { mode: 'cors' });
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status} for ${url}`);
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 90000); // 90s: turn silent hangs into errors
+        let arrayBuffer;
+        try {
+            this.onProgress(`${year}: downloading...`);
+            const response = await fetch(url, { mode: 'cors', signal: ctrl.signal });
+            if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+            arrayBuffer = await response.arrayBuffer();
+        } finally {
+            clearTimeout(timer);
         }
-        const arrayBuffer = await response.arrayBuffer();
-        console.log(`Downloaded ${year}.parquet (${(arrayBuffer.byteLength / 1048576).toFixed(2)} MB)`);
+        const mb = (arrayBuffer.byteLength / 1048576).toFixed(1);
+        this.onProgress(`${year}: downloaded ${mb} MB, parsing...`);
+        await new Promise(r => setTimeout(r, 30)); // let the UI repaint before heavy parsing
 
-        // parquetRead is async: errors reject the returned promise, so we must await it.
-        // parquetReadObjects resolves with an array of row objects { colName: value }.
         const rows = await parquetReadObjects({ file: arrayBuffer });
         console.log(`Parsed ${rows.length} rows from ${year}.parquet. Sample:`, rows[0]);
+        this.onProgress(`${year}: ${rows.length} rows parsed`);
         return this.transformParquetData(rows);
     }
 
@@ -131,7 +137,7 @@ class DataEngine {
                 try {
                     console.log(`Revalidating current year (${yearInt}) for date: ${today}`);
                     cachedRecords = await this.fetchAndParseParquet(yearInt);
-                    await this.setCachedYear(yearInt, cachedRecords);
+                    try { await this.setCachedYear(yearInt, cachedRecords); } catch (e) { console.warn('IDB write failed', e); }
                     localStorage.setItem(lastCheckedKey, today);
                 } catch (err) {
                     console.warn(`Fallback to local cache for ${yearInt}:`, err);
@@ -141,7 +147,7 @@ class DataEngine {
         } else {
             if (!cachedRecords) {
                 cachedRecords = await this.fetchAndParseParquet(yearInt);
-                await this.setCachedYear(yearInt, cachedRecords);
+                try { await this.setCachedYear(yearInt, cachedRecords); } catch (e) { console.warn('IDB write failed', e); }
             }
         }
 
@@ -149,23 +155,24 @@ class DataEngine {
         return cachedRecords;
     }
 
-    async getStockData(symbol, startYear = 2023, endYear = new Date().getFullYear()) {
+    async getStockData(symbol, startYear = 2023, endYear = new Date().getFullYear(), onYear = null) {
         const strip = (x) => x.toUpperCase().replace(/\.(NS|BO)$/, '');
         const targetSymbol = strip(symbol.trim());
-        let combinedRecords = [];
+        let combined = [];
 
         for (let y = startYear; y <= endYear; y++) {
             try {
                 const yearData = await this.getYearData(y);
-                const filtered = yearData.filter(row => strip(row.symbol) === targetSymbol);
-                combinedRecords.push(...filtered);
+                combined.push(...yearData.filter(row => strip(row.symbol) === targetSymbol));
+                this.onProgress(`${y}: ready (${combined.length} bars so far)`);
+                if (onYear) onYear(combined.slice()); // draw as each year arrives
             } catch (e) {
                 console.error(`Error loading data for year ${y}:`, e);
+                this.onProgress(`${y}: FAILED - ${e.message}`);
             }
         }
-
-        combinedRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
-        return combinedRecords;
+        combined.sort((a, b) => (a.date < b.date ? -1 : 1));
+        return combined;
     }
 }
 

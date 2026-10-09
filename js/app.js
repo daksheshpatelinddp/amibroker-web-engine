@@ -10,6 +10,10 @@ class Application {
     async init() {
         if (this.initialized) return;
         this.setStatus('Initializing Engine...', 'warning');
+        dataEngine.onProgress = (m) => this.setCacheText(m);
+        // On a phone there is no console: surface any error in the footer
+        window.addEventListener('error', (e) => this.setCacheText('ERR: ' + e.message));
+        window.addEventListener('unhandledrejection', (e) => this.setCacheText('ERR: ' + (e.reason && e.reason.message || e.reason)));
 
         // UI first: a chart/sheet problem must never block data loading
         try { chartEngine.init(); } catch (e) { console.error('Chart init failed:', e); }
@@ -51,10 +55,13 @@ class Application {
     async loadActiveSymbol(symbol) {
         try {
             this.setCacheText(`Loading ${symbol}...`);
-            const data = await dataEngine.getStockData(symbol, 2023, new Date().getFullYear());
+            const data = await dataEngine.getStockData(
+                symbol, 2023, new Date().getFullYear(),
+                (partial) => { if (partial.length) chartEngine.renderCandlestickData(partial); }
+            );
             console.log(`${symbol}: ${data.length} rows`);
             if (data.length === 0) {
-                this.setCacheText(`No rows for ${symbol} - check symbol names in console`);
+                this.setCacheText(`No rows for ${symbol} in any year (check symbol column values)`);
                 return;
             }
             chartEngine.renderCandlestickData(data);
