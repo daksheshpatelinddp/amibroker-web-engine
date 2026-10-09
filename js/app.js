@@ -23,6 +23,9 @@ class Application {
         try { chartEngine.init(); } catch (e) { console.error('Chart init failed:', e); }
         try { sheetManager.init(); } catch (e) { console.error('Sheet init failed:', e); }
         this.setupUIListeners();
+        // Tap the footer message to read the whole text (useful for errors)
+        const footerMsg = document.getElementById('cache-status');
+        if (footerMsg) footerMsg.addEventListener('click', () => alert(this.fullStatus || ''));
 
         try {
             await dataEngine.init(); // IndexedDB
@@ -73,6 +76,7 @@ class Application {
     }
 
     setCacheText(text) {
+        this.fullStatus = text;
         const el = document.getElementById('cache-status');
         if (el) el.textContent = text;
     }
@@ -158,6 +162,7 @@ class Application {
                         ? ` (engine start ${(this.duck.initSeconds || 0).toFixed(1)}s, query ${q}s)`
                         : ` (query ${q}s)`;
                     this.firstDuckLoad = false;
+                    if (this.duck.lastNote) note += ` | ${this.duck.lastNote}`;
                 } catch (e) {
                     console.error('DuckDB query failed:', e);
                     note = ` | DuckDB error: ${e.message}`;

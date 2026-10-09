@@ -106,30 +106,56 @@ export class DuckEngine {
     return res.toArray().map(r => String(r.s));
   }
 
-  // Full daily history of one symbol across all yearly files
-  async getBars(symbol) {
-    await this.init();
-    const t0 = performance.now();
+  _barsSql(files, symbol) {
     const c = this.col;
     const base = String(symbol).trim().toUpperCase().replace(/\.(NS|BO)$/, '');
     const names = [base, `${base}.NS`, `${base}.BO`].map(sqlStr).join(', ');
     const vol = c.volume ? `CAST(${qid(c.volume)} AS DOUBLE)` : '0';
-
-    const sql = `
+    return `
       SELECT strftime(CAST(${qid(c.date)} AS DATE), '%Y-%m-%d') AS d,
              CAST(${qid(c.open)}  AS DOUBLE) AS o,
              CAST(${qid(c.high)}  AS DOUBLE) AS h,
              CAST(${qid(c.low)}   AS DOUBLE) AS l,
              CAST(${qid(c.close)} AS DOUBLE) AS cl,
              ${vol} AS v
-      FROM read_parquet(${this._fileList()})
+      FROM read_parquet(${this._fileList(files)})
       WHERE ${qid(c.symbol)} IN (${names})
       ORDER BY d`;
-    const res = await this.conn.query(sql);
-    const rows = res.toArray().map(r => ({
+  }
+
+  async _run(files, symbol) {
+    const base = String(symbol).trim().toUpperCase().replace(/\.(NS|BO)$/, '');
+    const res = await this.conn.query(this._barsSql(files, symbol));
+    return res.toArray().map(r => ({
       symbol: base, date: String(r.d),
       open: Number(r.o), high: Number(r.h), low: Number(r.l), close: Number(r.cl), volume: Number(r.v),
     }));
+  }
+
+  // Full daily history of one symbol across all yearly files.
+  // If the one-shot query fails, query file by file so we learn which year breaks and still draw the rest.
+  async getBars(symbol) {
+    await this.init();
+    const t0 = performance.now();
+    this.lastNote = '';
+    let rows;
+    try {
+      rows = await this._run(this.files, symbol);
+    } catch (e) {
+      const combinedErr = (e && e.message) ? e.message : String(e);
+      console.error('Combined query failed:', e);
+      const parts = [], failed = [];
+      for (const f of this.files) {
+        const label = f.replace(/^[^_]*_/, '').replace('.parquet', '');
+        try { parts.push(await this._run([f], symbol)); }
+        catch (err) { failed.push(`${label}: ${(err && err.message) || err}`); }
+      }
+      if (parts.length === 0) throw new Error(`all years failed. First: ${failed[0]}`);
+      rows = parts.flat().sort((a, b) => (a.date < b.date ? -1 : 1));
+      this.lastNote = failed.length
+        ? `PARTIAL DATA - failed: ${failed.join(' || ')}`
+        : `combined query failed (${combinedErr}) - merged per file instead`;
+    }
     this.lastQuerySeconds = (performance.now() - t0) / 1000;
     return rows;
   }
