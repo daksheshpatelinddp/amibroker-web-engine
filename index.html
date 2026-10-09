@@ -1,74 +1,94 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>AmiBroker Web Workstation</title>
-
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#f0f9ff',
-              500: '#0284c7',
-              600: '#0284c7',
-              900: '#0c4a6e',
-            }
-          }
-        }
-      }
-    }
-  </script>
-
-  <!-- TradingView Lightweight Charts CDN -->
-  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-
-  <link rel="stylesheet" href="css/style.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AmiBroker Web Workstation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/style.css">
+    <!-- TradingView Lightweight Charts v5 -->
+    <script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
-<body class="h-full flex flex-col overflow-hidden text-xs antialiased select-none">
-  <!-- Top Navigation / Status Header -->
-  <header class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0">
-    <div class="flex items-center space-x-3">
-      <span class="font-bold text-slate-200 tracking-wide">AmiBroker Web</span>
-      <span id="status-badge" class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-        ● Initializing Engine...
-      </span>
-    </div>
-    <div class="flex items-center space-x-2" id="header-controls">
-      <!-- Timeframe / Symbol Selectors -->
-      <select id="symbol-select" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs outline-none">
-        <option value="RELIANCE">RELIANCE</option>
-        <option value="TCS">TCS</option>
-        <option value="INFY">INFY</option>
-      </select>
-    </div>
-  </header>
+<body class="bg-slate-950 text-slate-100 flex flex-col h-screen overflow-hidden text-xs">
 
-  <!-- Main Workstation Canvas Area -->
-  <main class="flex-1 flex flex-col min-h-0 relative">
-    <!-- Workstation Sheet Tabs -->
-    <div id="sheet-bar" class="h-8 bg-slate-900/80 border-b border-slate-800 flex items-center px-2 space-x-1 overflow-x-auto shrink-0">
-      <!-- Sheet Tabs injected by SheetManager -->
+    <!-- Top Navigation Header -->
+    <header class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0">
+        <div class="flex items-center gap-3">
+            <span class="font-bold text-slate-200 text-sm tracking-wide">AmiBroker Web</span>
+            <span id="engine-status" class="status-badge text-[11px] font-medium text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/40 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span> Initializing Engine...
+            </span>
+        </div>
+
+        <!-- Symbol Search Input & Autocomplete Datalist -->
+        <div class="flex items-center gap-2">
+            <div class="relative">
+                <input 
+                    type="text" 
+                    id="symbol-input" 
+                    list="symbol-list" 
+                    placeholder="Search Symbol (e.g. RELIANCE, TCS)..." 
+                    value="RELIANCE"
+                    autocomplete="off"
+                    class="bg-slate-950 border border-slate-700 text-slate-100 px-2.5 py-1 rounded text-xs font-semibold focus:outline-none focus:border-blue-500 w-44 uppercase placeholder:normal-case placeholder:text-slate-500 placeholder:font-normal"
+                />
+                <datalist id="symbol-list">
+                    <!-- Automatically populated from IndexedDB with ~3,000 symbols -->
+                </datalist>
+            </div>
+
+            <!-- Timeframe Interval Selector -->
+            <select id="interval-select" class="bg-slate-950 border border-slate-700 text-slate-200 px-2 py-1 rounded text-xs font-medium focus:outline-none focus:border-blue-500">
+                <option value="1D" selected>1 Day</option>
+                <option value="1W">1 Week</option>
+                <option value="1M">1 Month</option>
+            </select>
+        </div>
+    </header>
+
+    <!-- Workstation Control Toolbar & Sheets Bar -->
+    <div class="h-9 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between px-2 shrink-0 select-none">
+        <div class="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            <!-- Sheet Lock Toggle -->
+            <button id="lock-toggle-btn" class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200" title="Lock Sheet Settings">
+                <span id="lock-icon">🔒</span>
+            </button>
+
+            <!-- Link Group Selector: Symbol (S) -->
+            <button id="symbol-link-btn" class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500" title="Symbol Link Group">
+                S
+            </button>
+
+            <!-- Link Group Selector: Interval (I) -->
+            <button id="interval-link-btn" class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500" title="Interval Link Group">
+                I
+            </button>
+
+            <div class="h-4 w-[1px] bg-slate-800 mx-1"></div>
+
+            <!-- 10 Workstation Sheets Navigation Bar -->
+            <div id="sheets-container" class="flex items-center gap-1">
+                <!-- Dynamically populated Sheet 1 to Sheet 10 by sheet-manager.js -->
+            </div>
+        </div>
     </div>
 
-    <!-- Multi-pane Chart Stack -->
-    <div id="chart-workspace" class="flex-1 min-h-0 w-full relative bg-slate-950 flex flex-col">
-      <div id="chart-container" class="w-full h-full min-h-0 flex-1"></div>
-    </div>
-  </main>
+    <!-- Main Charting & Sub-pane Stacking Container -->
+    <main id="chart-workspace" class="flex-1 bg-slate-950 relative w-full h-full overflow-hidden">
+        <div id="main-chart-pane" class="w-full h-full"></div>
+    </main>
 
-  <!-- Footer / System Info -->
-  <footer class="h-6 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-3 text-[10px] text-slate-400 shrink-0">
-    <span id="cache-status">Cache: Checking...</span>
-    <span id="data-timestamp">Updated: --</span>
-  </footer>
+    <!-- Footer Cache & Bar Counter Status Bar -->
+    <footer class="h-6 bg-slate-900 border-t border-slate-800 px-3 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
+        <div id="cache-status" class="flex items-center gap-2">
+            <span>Cache: Checking...</span>
+        </div>
+        <div id="last-updated" class="text-slate-500">
+            Updated: --
+        </div>
+    </footer>
 
-  <!-- Application Entry Point -->
-  <script type="module" src="js/app.js"></script>
+    <!-- App Module Scripts -->
+    <script type="module" src="js/app.js"></script>
 </body>
 </html>
