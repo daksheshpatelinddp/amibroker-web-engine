@@ -1,10 +1,14 @@
 import { dataEngine } from './data-engine.js';
 import { chartEngine } from './chart-engine.js';
 import { sheetManager } from './sheet-manager.js';
+import { DuckEngine } from './duck-engine.js';
+import { DATABASES, ACTIVE_DB } from './config.js';
 
 class Application {
     constructor() {
         this.initialized = false;
+        this.symbols = [];
+        try { this.symbols = JSON.parse(localStorage.getItem('symbol_list') || '[]'); } catch (e) {}
     }
 
     async init() {
@@ -30,7 +34,32 @@ class Application {
             return;
         }
 
+        this.startDuck();
+        const box = document.getElementById('symbol-input');
+        if (box) box.value = 'RELIANCE';
         await this.loadActiveSymbol('RELIANCE');
+    }
+
+    // DuckDB loads in the background; if it fails or is too slow we fall back to the old engine
+    startDuck() {
+        this.duck = new DuckEngine(DATABASES[ACTIVE_DB]);
+        this.duck.onProgress = (m) => this.setCacheText(m);
+        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('DuckDB start timed out (60s)')), 60000));
+        this.duckReady = Promise.race([this.duck.init(), timeout])
+            .then(() => {
+                this.duck.getSymbols().then((list) => {
+                    if (list.length) {
+                        this.symbols = list;
+                        try { localStorage.setItem('symbol_list', JSON.stringify(list)); } catch (e) {}
+                    }
+                }).catch((e) => console.warn('Symbol list failed', e));
+                return true;
+            })
+            .catch((e) => {
+                console.error('DuckDB unavailable:', e);
+                this.duckError = e.message || String(e);
+                return false;
+            });
     }
 
     setStatus(text, state) {
@@ -46,31 +75,112 @@ class Application {
     }
 
     setupUIListeners() {
-        const select = document.getElementById('symbol-select');
-        if (select) {
-            select.addEventListener('change', (e) => this.loadActiveSymbol(e.target.value));
+        const input = document.getElementById('symbol-input');
+        const list = document.getElementById('symbol-suggest');
+        if (!input || !list) return;
+
+        const hide = () => list.classList.add('hidden');
+
+        const choose = (sym) => {
+            input.value = sym;
+            input.blur();
+            hide();
+            this.loadActiveSymbol(sym);
+        };
+
+        const showMatches = () => {
+            const q = input.value.trim().toUpperCase();
+            if (!q || this.symbols.length === 0) { hide(); return; }
+            const starts = [], contains = [];
+            for (const sym of this.symbols) {
+                const u = sym.toUpperCase();
+                if (u.startsWith(q)) starts.push(sym);
+                else if (u.includes(q)) contains.push(sym);
+                if (starts.length >= 50) break;
+            }
+            const matches = starts.concat(contains).slice(0, 50);
+            list.innerHTML = '';
+            if (matches.length === 0) {
+                const li = document.createElement('li');
+                li.className = 'px-3 py-2 text-slate-500';
+                li.textContent = 'No match';
+                list.appendChild(li);
+            } else {
+                for (const sym of matches) {
+                    const li = document.createElement('li');
+                    li.className = 'px-3 py-2 text-slate-200 border-b border-slate-700/50 active:bg-slate-700';
+                    li.textContent = sym;
+                    // pointerdown fires before the input blurs, so the tap is never lost
+                    li.addEventListener('pointerdown', (e) => { e.preventDefault(); choose(sym); });
+                    list.appendChild(li);
+                }
+            }
+            list.classList.remove('hidden');
+        };
+
+        input.addEventListener('input', showMatches);
+        input.addEventListener('focus', () => { input.select(); showMatches(); });
+        input.addEventListener('blur', () => setTimeout(hide, 150));
+        input.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            const q = input.value.trim().toUpperCase();
+            if (!q) return;
+            // exact match first, otherwise first suggestion, otherwise try as typed
+            const exact = this.symbols.find(s => s.toUpperCase() === q);
+            const first = this.symbols.find(s => s.toUpperCase().startsWith(q));
+            choose(exact || first || q);
+        });
+    }
+
+    refreshSymbolList() {
+        const all = dataEngine.getAllSymbols();
+        if (all.length > 0) {
+            this.symbols = all;
+            try { localStorage.setItem('symbol_list', JSON.stringify(all)); } catch (e) {}
         }
     }
 
     async loadActiveSymbol(symbol) {
         try {
+            const t0 = performance.now();
             this.setCacheText(`Loading ${symbol}...`);
-            const data = await dataEngine.getStockData(
-                symbol, 2023, new Date().getFullYear(),
-                (partial) => { if (partial.length) chartEngine.renderCandlestickData(partial); }
-            );
-            console.log(`${symbol}: ${data.length} rows`);
+            let data = null, source = '', note = '';
+
+            if (this.duckReady && await this.duckReady) {
+                try {
+                    data = await this.duck.getBars(symbol);
+                    source = 'DuckDB';
+                } catch (e) {
+                    console.error('DuckDB query failed:', e);
+                    note = ` | DuckDB error: ${e.message}`;
+                }
+            } else if (this.duckError) {
+                note = ` | DuckDB off: ${this.duckError}`;
+            }
+
+            if (!data) {
+                data = await dataEngine.getStockData(
+                    symbol, 2023, new Date().getFullYear(),
+                    (partial) => { if (partial.length) chartEngine.renderCandlestickData(partial); }
+                );
+                source = 'hyparquet';
+                this.refreshSymbolList();
+            }
+
+            const box = document.getElementById('symbol-input');
+            if (box && document.activeElement !== box) box.value = symbol;
             if (data.length === 0) {
-                this.setCacheText(`No rows for ${symbol} in any year (check symbol column values)`);
+                this.setCacheText(`No rows for ${symbol} (${source})${note}`);
                 return;
             }
             chartEngine.renderCandlestickData(data);
-            this.setCacheText(`Cache: IndexedDB \u2713 (${data.length} bars)`);
+            const secs = ((performance.now() - t0) / 1000).toFixed(1);
+            this.setCacheText(`${source}: ${data.length} bars in ${secs}s${note}`);
             const ts = document.getElementById('data-timestamp');
             if (ts) ts.textContent = `Updated: ${data[data.length - 1].date}`;
         } catch (err) {
             console.error(`Error loading symbol ${symbol}:`, err);
-            this.setCacheText('Load failed - see console');
+            this.setCacheText('Load failed: ' + (err.message || err));
         }
     }
 }

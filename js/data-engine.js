@@ -155,6 +155,14 @@ class DataEngine {
         return cachedRecords;
     }
 
+    getAllSymbols() {
+        const set = new Set();
+        for (const recs of this.memoryCache.values()) {
+            for (const r of recs) if (r.symbol) set.add(r.symbol);
+        }
+        return [...set].sort();
+    }
+
     async getStockData(symbol, startYear = 2023, endYear = new Date().getFullYear(), onYear = null) {
         const strip = (x) => x.toUpperCase().replace(/\.(NS|BO)$/, '');
         const targetSymbol = strip(symbol.trim());
