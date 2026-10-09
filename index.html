@@ -1,89 +1,75 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AmiBroker Web Workstation</title>
-    
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="css/style.css">
-    
-    <!-- TradingView Lightweight Charts v5 -->
-    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AmiBroker Web Workstation</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- TradingView Lightweight Charts v5 -->
+  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 flex flex-col h-screen overflow-hidden select-none">
 
-    <!-- TOP HEADER / TOOLBAR -->
-    <header class="bg-slate-900 border-b border-slate-800 px-3 py-2 flex items-center justify-between gap-2 z-10 shrink-0">
-        <div class="flex items-center gap-3">
-            <span class="font-bold text-slate-100 text-sm tracking-wide">AmiBroker Web</span>
-            <span id="engine-status-badge" class="px-2 py-0.5 rounded text-xs bg-amber-500/20 text-amber-400 font-medium">Initializing...</span>
+  <!-- TOP BAR (PRESERVED EXACT ORIGINAL LAYOUT) -->
+  <header class="bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex flex-col gap-1 z-10 shrink-0">
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2">
+        <span class="font-bold text-slate-100 text-xs sm:text-sm tracking-wide">AmiBroker Web</span>
+        <span id="engine-status" class="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 font-medium">Initializing...</span>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <div class="relative">
+          <input type="text" id="symbol-input" value="RELIANCE" 
+                 class="bg-slate-800 border border-slate-700 text-slate-100 text-xs font-semibold px-2 py-1 rounded w-28 focus:outline-none focus:border-indigo-500 uppercase tracking-wider">
         </div>
 
-        <!-- Symbol & Controls Area -->
-        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar">
-            <!-- Active Symbol Display & Input -->
-            <div class="relative">
-                <input type="text" id="symbol-search-input" value="RELIANCE" 
-                       class="bg-slate-800 border border-slate-700 text-slate-100 text-xs font-semibold px-2.5 py-1 rounded w-32 focus:outline-none focus:border-indigo-500 uppercase tracking-wider">
-            </div>
+        <select id="interval-select" class="bg-slate-800 border border-slate-700 text-slate-100 text-xs px-1.5 py-1 rounded focus:outline-none focus:border-indigo-500">
+          <option value="1D" selected>Daily</option>
+          <option value="1W">Weekly</option>
+          <option value="1M">Monthly</option>
+        </select>
+      </div>
+    </div>
 
-            <!-- Interval Selector -->
-            <select id="interval-select" class="bg-slate-800 border border-slate-700 text-slate-100 text-xs px-2 py-1 rounded focus:outline-none focus:border-indigo-500">
-                <option value="1D" selected>Daily (1D)</option>
-                <option value="1W">Weekly (1W)</option>
-                <option value="1M">Monthly (1M)</option>
-            </select>
+    <div class="flex items-center justify-between gap-2">
+      <!-- Controls -->
+      <div class="flex items-center gap-1">
+        <button id="btn-lock" title="Toggle Lock" class="px-1.5 py-0.5 rounded bg-slate-800 text-xs">🔓</button>
+        <button id="btn-sym-link" title="Symbol Link Group" class="px-1.5 py-0.5 rounded text-xs font-bold bg-slate-800 text-slate-300">S</button>
+        <button id="btn-int-link" title="Interval Link Group" class="px-1.5 py-0.5 rounded text-xs font-bold bg-slate-800 text-slate-300">I</button>
+      </div>
 
-            <div class="h-4 w-px bg-slate-800 mx-1"></div>
+      <div class="flex items-center gap-1">
+        <button id="btn-fit" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] px-2 py-0.5 rounded border border-slate-700">Fit</button>
+        <button id="btn-latest" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] px-2 py-0.5 rounded border border-slate-700">Latest</button>
+      </div>
+    </div>
+  </header>
 
-            <!-- Lock & Link Controls -->
-            <div class="flex items-center gap-1">
-                <button id="sheet-lock-btn" title="Toggle Sheet Lock" class="p-1 rounded hover:bg-slate-800 text-slate-400 text-xs transition-colors">
-                    <span id="lock-icon">🔓</span>
-                </button>
-                <button id="symbol-link-btn" title="Symbol Link Group" class="px-1.5 py-0.5 rounded text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors">
-                    S
-                </button>
-                <button id="interval-link-btn" title="Interval Link Group" class="px-1.5 py-0.5 rounded text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors">
-                    I
-                </button>
-            </div>
+  <!-- CHART WORKSPACE CONTAINER -->
+  <main class="flex-1 relative bg-slate-950 overflow-hidden" id="chart-workspace">
+    <div id="chart-container" class="absolute inset-0 w-full h-full"></div>
+  </main>
 
-            <div class="h-4 w-px bg-slate-800 mx-1"></div>
+  <!-- BOTTOM BAR: SHEET TABS (BELOW CHART) + STATUS BAR -->
+  <footer class="bg-slate-900 border-t border-slate-800 flex flex-col shrink-0 z-10">
+    
+    <!-- Dynamic Sheet Tabs Container -->
+    <div id="sheet-bar" class="flex items-center px-2 py-1 bg-slate-900 overflow-x-auto no-scrollbar border-b border-slate-800/60">
+      <div id="sheet-tabs-list" class="flex items-center gap-1"></div>
+      <button id="btn-add-sheet" title="Add Sheet" class="px-2 py-0.5 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded font-bold text-sm ml-1">+</button>
+    </div>
 
-            <!-- Fit & Range Helpers -->
-            <button id="fit-chart-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded border border-slate-700">Fit</button>
-            <button id="latest-chart-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded border border-slate-700">Latest</button>
-        </div>
-    </header>
+    <!-- STATUS BAR (PRESERVED ORIGINAL ID) -->
+    <div id="status-bar" class="px-2 py-0.5 text-[10px] text-slate-400 bg-slate-950 truncate font-mono">
+      Initializing system...
+    </div>
+  </footer>
 
-    <!-- MAIN CHART AREA -->
-    <main class="flex-1 relative bg-slate-950 overflow-hidden" id="chart-workspace-container">
-        <div id="chart-container" class="absolute inset-0 w-full h-full"></div>
-    </main>
-
-    <!-- BOTTOM SHEET TABS BAR (BELOW CHART) -->
-    <footer class="bg-slate-900 border-t border-slate-800 flex flex-col shrink-0 z-10">
-        <div class="flex items-center px-2 pt-1 border-b border-slate-800/80 bg-slate-900 overflow-x-auto no-scrollbar" id="sheet-tabs-container">
-            <!-- Dynamic Sheet Tabs Render Here -->
-            <div id="sheet-tabs-list" class="flex items-center gap-1"></div>
-            
-            <!-- Add Sheet Button -->
-            <button id="add-sheet-btn" title="Add New Sheet" class="px-2 py-1 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded transition-colors text-sm font-bold ml-1 mb-1">
-                +
-            </button>
-        </div>
-
-        <!-- STATUS BAR -->
-        <div class="px-3 py-1 flex items-center justify-between text-[11px] text-slate-400 bg-slate-950">
-            <div id="status-message" class="truncate">Ready</div>
-            <div id="data-info" class="shrink-0 text-slate-500 font-mono">OHLCV Engine</div>
-        </div>
-    </footer>
-
-    <!-- ES Module App Entry Point -->
-    <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
