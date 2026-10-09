@@ -24,6 +24,10 @@ class Application {
         try { chartEngine.init(); } catch (e) { console.error('Chart init failed:', e); }
         try { sheetManager.init(); } catch (e) { console.error('Sheet init failed:', e); }
         this.setupUIListeners();
+        const btnFit = document.getElementById('btn-fit');
+        if (btnFit) btnFit.addEventListener('click', () => chartEngine.fitAll());
+        const btnLatest = document.getElementById('btn-latest');
+        if (btnLatest) btnLatest.addEventListener('click', () => chartEngine.goLatest());
         // Tap the footer message to read the whole text (useful for errors)
         const footerMsg = document.getElementById('cache-status');
         if (footerMsg) footerMsg.addEventListener('click', () => alert(this.fullStatus || ''));

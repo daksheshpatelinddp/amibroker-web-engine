@@ -116,37 +116,63 @@ export class RangeEngine {
   }
 
   // ---- per symbol-year cache in IndexedDB (re-opening a symbol needs no network) ----
+  // Any problem here (closed connection, cleared browser data, no storage) is treated as
+  // "not cached" and never stops a chart from loading.
   _openIdb() {
     if (this.idb) return this.idb;
     this.idb = new Promise((resolve) => {
-      if (typeof indexedDB === 'undefined') return resolve(null);
-      const req = indexedDB.open(`amibroker_bars_${this.cfg.id}`, 1);
-      req.onupgradeneeded = () => req.result.createObjectStore('bars', { keyPath: 'key' });
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
+      try {
+        if (typeof indexedDB === 'undefined') return resolve(null);
+        const req = indexedDB.open(`amibroker_bars_${this.cfg.id}`, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('bars', { keyPath: 'key' });
+        req.onsuccess = () => {
+          const db = req.result;
+          db.onclose = () => { this.idb = null; };                    // browser closed it: reopen next time
+          db.onversionchange = () => { db.close(); this.idb = null; };
+          resolve(db);
+        };
+        req.onerror = () => resolve(null);
+        req.onblocked = () => resolve(null);
+      } catch (e) { resolve(null); }
     });
     return this.idb;
   }
 
   async _cacheGet(key) {
-    const db = await this._openIdb();
-    if (!db) return null;
-    return new Promise((resolve) => {
-      const r = db.transaction('bars', 'readonly').objectStore('bars').get(key);
-      r.onsuccess = () => resolve(r.result || null);
-      r.onerror = () => resolve(null);
-    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const db = await this._openIdb();
+        if (!db) return null;
+        return await new Promise((resolve) => {
+          const tx = db.transaction('bars', 'readonly');
+          const r = tx.objectStore('bars').get(key);
+          r.onsuccess = () => resolve(r.result || null);
+          r.onerror = () => resolve(null);
+          tx.onabort = () => resolve(null);
+        });
+      } catch (e) {
+        this.idb = null; // connection was closing: open a fresh one and try once more
+      }
+    }
+    return null;
   }
 
   async _cachePut(rec) {
-    const db = await this._openIdb();
-    if (!db) return;
-    return new Promise((resolve) => {
-      const tx = db.transaction('bars', 'readwrite');
-      tx.objectStore('bars').put(rec);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => resolve();
-    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const db = await this._openIdb();
+        if (!db) return;
+        return await new Promise((resolve) => {
+          const tx = db.transaction('bars', 'readwrite');
+          tx.objectStore('bars').put(rec);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+          tx.onabort = () => resolve();
+        });
+      } catch (e) {
+        this.idb = null;
+      }
+    }
   }
 
   _pack(rows) {

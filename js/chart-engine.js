@@ -135,6 +135,26 @@ export class ChartEngine {
     this.setData(bars);
   }
 
+  // Show the whole history again (also re-enables automatic price scaling after pinch/drag)
+  fitAll() {
+    this.panes.forEach((pane) => {
+      try {
+        pane.chart.priceScale('right').applyOptions({ autoScale: true });
+        pane.chart.timeScale().fitContent();
+      } catch (e) { console.warn('fitAll failed', e); }
+    });
+  }
+
+  // Jump to the newest bars
+  goLatest() {
+    this.panes.forEach((pane) => {
+      try {
+        pane.chart.priceScale('right').applyOptions({ autoScale: true });
+        pane.chart.timeScale().scrollToRealTime();
+      } catch (e) { console.warn('goLatest failed', e); }
+    });
+  }
+
   setSymbolAndInterval(symbol, interval) {
     this.symbol = symbol;
     this.interval = interval;
