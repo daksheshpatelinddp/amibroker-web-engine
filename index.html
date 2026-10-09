@@ -40,12 +40,14 @@
       </span>
     </div>
     <div class="flex items-center space-x-2" id="header-controls">
-      <!-- Timeframe / Symbol Selectors -->
-      <select id="symbol-select" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs outline-none">
-        <option value="RELIANCE">RELIANCE</option>
-        <option value="TCS">TCS</option>
-        <option value="INFY">INFY</option>
-      </select>
+      <!-- Symbol search -->
+<div class="relative">
+        <input id="symbol-input" type="search" inputmode="text" autocomplete="off" autocorrect="off" spellcheck="false"
+               autocapitalize="characters" placeholder="Search symbol..."
+               class="select-text w-40 bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs outline-none focus:border-sky-500 uppercase" />
+        <ul id="symbol-suggest"
+            class="hidden absolute right-0 mt-1 w-56 max-h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded shadow-xl z-50"></ul>
+      </div>
     </div>
   </header>
 
@@ -64,8 +66,8 @@
 
   <!-- Footer / System Info -->
   <footer class="h-6 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-3 text-[10px] text-slate-400 shrink-0">
-    <span id="cache-status">Cache: Checking...</span>
-    <span id="data-timestamp">Updated: --</span>
+    <span id="cache-status" class="truncate min-w-0 flex-1 mr-2">Starting...</span>
+    <span id="data-timestamp" class="shrink-0">Updated: --</span>
   </footer>
 
   <!-- Application Entry Point -->
