@@ -2,6 +2,7 @@ import { dataEngine } from './data-engine.js';
 import { chartEngine } from './chart-engine.js';
 import { sheetManager } from './sheet-manager.js';
 import { DuckEngine } from './duck-engine.js';
+import { RangeEngine } from './range-engine.js';
 import { DATABASES, ACTIVE_DB } from './config.js';
 
 class Application {
@@ -37,35 +38,43 @@ class Application {
             return;
         }
 
-        this.startDuck();
+        this.startRange();
         const box = document.getElementById('symbol-input');
         if (box) box.value = 'RELIANCE';
         await this.loadActiveSymbol('RELIANCE');
     }
 
-    // DuckDB loads in the background; if it fails or is too slow we fall back to the old engine
-    startDuck() {
-        this.duck = new DuckEngine(DATABASES[ACTIVE_DB]);
-        this.duck.onProgress = (m) => this.setCacheText(m);
-        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('DuckDB start timed out (60s)')), 60000));
-        this.duckReady = Promise.race([this.duck.init(), timeout])
-            .then(() => true)
-            .catch((e) => {
-                console.error('DuckDB unavailable:', e);
-                this.duckError = e.message || String(e);
-                return false;
-            });
+    // Main engine: reads one symbol with parallel range requests (fast, small download)
+    startRange() {
+        this.range = new RangeEngine(DATABASES[ACTIVE_DB]);
+        this.range.onProgress = (m) => this.setCacheText(m);
+        this.rangeReady = this.range.init().then(() => true).catch((e) => {
+            console.error('Range engine unavailable:', e);
+            this.rangeError = e.message || String(e);
+            return false;
+        });
     }
 
-    loadSymbolListOnce() {
+    // Backup engine (DuckDB-WASM): only started if the main engine fails
+    ensureDuck() {
+        if (!this.duckReady) {
+            this.duck = new DuckEngine(DATABASES[ACTIVE_DB]);
+            this.duck.onProgress = (m) => this.setCacheText(m);
+            const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('DuckDB start timed out (60s)')), 60000));
+            this.duckReady = Promise.race([this.duck.init(), timeout]).then(() => true);
+        }
+        return this.duckReady;
+    }
+
+    loadSymbolListOnce(engine) {
         if (this.symbolsRequested) return;
         this.symbolsRequested = true;
-        this.duck.getSymbols().then((list) => {
+        engine.getSymbols().then((list) => {
             if (list.length) {
                 this.symbols = list;
                 try { localStorage.setItem('symbol_list', JSON.stringify(list)); } catch (e) {}
             }
-        }).catch((e) => console.warn('Symbol list failed', e));
+        }).catch((e) => { this.symbolsRequested = false; console.warn('Symbol list failed', e); });
     }
 
     // Shows a readable, selectable error box (no console needed on a phone)
@@ -174,28 +183,41 @@ class Application {
         try {
             const t0 = performance.now();
             this.setCacheText(`Loading ${symbol}...`);
-            let data = null, source = '', note = '', problem = '';
+            let data = null, source = '', note = '';
+            const problems = [];
 
-            if (this.duckReady && await this.duckReady) {
+            // 1) main engine: parallel range requests
+            if (this.rangeReady && await this.rangeReady) {
                 try {
-                    data = await this.duck.getBars(symbol);
-                    source = 'DuckDB';
-                    const q = (this.duck.lastQuerySeconds || 0).toFixed(1);
-                    note = this.firstDuckLoad === undefined
-                        ? ` (engine start ${(this.duck.initSeconds || 0).toFixed(1)}s, query ${q}s)`
-                        : ` (query ${q}s)`;
-                    this.firstDuckLoad = false;
-                    if (this.duck.lastNote) { note += ` | ${this.duck.lastNote}`; problem = this.duck.lastNote; }
+                    data = await this.range.getBars(symbol);
+                    source = 'Range';
+                    const st = this.range.lastStats;
+                    note = ` (${st.years - st.cached} of ${st.years} years from network, ${st.cached} cached, ${st.requests} requests, ${(st.bytes / 1048576).toFixed(1)} MB)`;
+                    this.loadSymbolListOnce(this.range);
                 } catch (e) {
-                    console.error('DuckDB query failed:', e);
-                    note = ` | DuckDB error: ${e.message}`;
-                    problem = `DuckDB error: ${e.message}`;
+                    console.error('Range engine failed:', e);
+                    problems.push(`Range engine: ${e.message || e}`);
                 }
-            } else if (this.duckError) {
-                note = ` | DuckDB off: ${this.duckError}`;
-                problem = `DuckDB off: ${this.duckError}`;
+            } else if (this.rangeError) {
+                problems.push(`Range engine off: ${this.rangeError}`);
             }
 
+            // 2) backup: DuckDB
+            if (!data) {
+                try {
+                    await this.ensureDuck();
+                    data = await this.duck.getBars(symbol);
+                    source = 'DuckDB';
+                    if (this.duck.lastNote) problems.push(this.duck.lastNote);
+                    this.loadSymbolListOnce(this.duck);
+                } catch (e) {
+                    console.error('DuckDB failed:', e);
+                    problems.push(`DuckDB: ${e.message || e}`);
+                    data = null;
+                }
+            }
+
+            // 3) last resort: download whole files with hyparquet (slow)
             if (!data) {
                 data = await dataEngine.getStockData(
                     symbol, 2023, new Date().getFullYear(),
@@ -207,15 +229,16 @@ class Application {
 
             const box = document.getElementById('symbol-input');
             if (box && document.activeElement !== box) box.value = symbol;
+            if (problems.length) note += ` | ${problems.join(' || ')}`;
             if (data.length === 0) {
                 this.setCacheText(`No rows for ${symbol} (${source})${note}`);
+                this.showDiag(problems.join(' || '));
                 return;
             }
             chartEngine.renderCandlestickData(data);
-            this.showDiag(problem);
+            this.showDiag(problems.join(' || '));
             const secs = ((performance.now() - t0) / 1000).toFixed(1);
             this.setCacheText(`${source}: ${data.length} bars in ${secs}s${note}`);
-            if (source === 'DuckDB') this.loadSymbolListOnce();
             const ts = document.getElementById('data-timestamp');
             if (ts) ts.textContent = `Updated: ${data[data.length - 1].date}`;
         } catch (err) {
