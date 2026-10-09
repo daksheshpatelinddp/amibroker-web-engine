@@ -8,7 +8,7 @@ class DataEngine {
         this.storeName = 'parquet_years';
         this.db = null;
         this.memoryCache = new Map();
-        this.availableSymbols = new Set();
+        this.onProgress = () => {};
     }
 
     async init() {
@@ -52,11 +52,7 @@ class DataEngine {
             const request = store.get(year);
 
             request.onsuccess = () => {
-                const records = request.result ? request.result.records : null;
-                if (records) {
-                    this.extractSymbols(records);
-                }
-                resolve(records);
+                resolve(request.result ? request.result.records : null);
             };
             request.onerror = () => {
                 resolve(null);
@@ -76,61 +72,50 @@ class DataEngine {
         });
     }
 
-    extractSymbols(records) {
-        if (!records || !Array.isArray(records)) return;
-        for (let i = 0; i < records.length; i++) {
-            if (records[i].symbol) {
-                const cleanSym = String(records[i].symbol).split('.')[0].toUpperCase();
-                this.availableSymbols.add(cleanSym);
-            }
-        }
-    }
-
     async fetchAndParseParquet(year) {
         const url = `${this.baseUrl}/${year}.parquet`;
-        console.log(`Fetching Parquet file from R2: ${url}`);
-        
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status} for ${url}`);
-        }
-        
-        const arrayBuffer = await response.arrayBuffer();
-        
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 90000); // 90s: turn silent hangs into errors
+        let arrayBuffer;
         try {
-            // Using parquetReadObjects which is stable in hyparquet 1.4.0
-            const rawObjects = await parquetReadObjects({ file: arrayBuffer });
-            const records = this.transformParquetData(rawObjects);
-            this.extractSymbols(records);
-            return records;
-        } catch (err) {
-            console.error(`Error parsing ${year}.parquet:`, err);
-            throw err;
+            this.onProgress(`${year}: downloading...`);
+            const response = await fetch(url, { mode: 'cors', signal: ctrl.signal });
+            if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+            arrayBuffer = await response.arrayBuffer();
+        } finally {
+            clearTimeout(timer);
         }
+        const mb = (arrayBuffer.byteLength / 1048576).toFixed(1);
+        this.onProgress(`${year}: downloaded ${mb} MB, parsing...`);
+        await new Promise(r => setTimeout(r, 30)); // let the UI repaint before heavy parsing
+
+        const rows = await parquetReadObjects({ file: arrayBuffer });
+        console.log(`Parsed ${rows.length} rows from ${year}.parquet. Sample:`, rows[0]);
+        this.onProgress(`${year}: ${rows.length} rows parsed`);
+        return this.transformParquetData(rows);
+    }
+
+    toDateString(v) {
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        if (typeof v === 'bigint') v = Number(v);
+        if (typeof v === 'number') {
+            const ms = v < 1e11 ? v * 1000 : v; // seconds or milliseconds
+            return new Date(ms).toISOString().slice(0, 10);
+        }
+        return String(v ?? '').slice(0, 10);
     }
 
     transformParquetData(data) {
-        if (!data || !Array.isArray(data) || data.length === 0) return [];
-        
-        return data.map(row => {
-            // Normalize Date string YYYY-MM-DD
-            let dateStr = row.date || row.Date || row.time || row.Timestamp || '';
-            if (dateStr instanceof Date) {
-                dateStr = dateStr.toISOString().split('T')[0];
-            } else {
-                dateStr = String(dateStr).split('T')[0];
-            }
-
-            return {
-                symbol: String(row.symbol || row.Symbol || row.ticker || row.Ticker || ''),
-                date: dateStr,
-                open: Number(row.open || row.Open || 0),
-                high: Number(row.high || row.High || 0),
-                low: Number(row.low || row.Low || 0),
-                close: Number(row.close || row.Close || 0),
-                volume: Number(row.volume || row.Volume || 0)
-            };
-        });
+        if (!Array.isArray(data) || data.length === 0) return [];
+        return data.map(row => ({
+            symbol: String(row.symbol ?? row.Symbol ?? row.ticker ?? row.Ticker ?? ''),
+            date: this.toDateString(row.date ?? row.Date ?? row.time ?? row.Timestamp),
+            open: Number(row.open ?? row.Open ?? 0),
+            high: Number(row.high ?? row.High ?? 0),
+            low: Number(row.low ?? row.Low ?? 0),
+            close: Number(row.close ?? row.Close ?? 0),
+            volume: Number(row.volume ?? row.Volume ?? 0)
+        }));
     }
 
     async getYearData(year) {
@@ -138,9 +123,7 @@ class DataEngine {
         const yearInt = parseInt(year, 10);
 
         if (this.memoryCache.has(yearInt)) {
-            const cached = this.memoryCache.get(yearInt);
-            this.extractSymbols(cached);
-            return cached;
+            return this.memoryCache.get(yearInt);
         }
 
         let cachedRecords = await this.getCachedYear(yearInt);
@@ -154,7 +137,7 @@ class DataEngine {
                 try {
                     console.log(`Revalidating current year (${yearInt}) for date: ${today}`);
                     cachedRecords = await this.fetchAndParseParquet(yearInt);
-                    await this.setCachedYear(yearInt, cachedRecords);
+                    try { await this.setCachedYear(yearInt, cachedRecords); } catch (e) { console.warn('IDB write failed', e); }
                     localStorage.setItem(lastCheckedKey, today);
                 } catch (err) {
                     console.warn(`Fallback to local cache for ${yearInt}:`, err);
@@ -164,49 +147,32 @@ class DataEngine {
         } else {
             if (!cachedRecords) {
                 cachedRecords = await this.fetchAndParseParquet(yearInt);
-                await this.setCachedYear(yearInt, cachedRecords);
+                try { await this.setCachedYear(yearInt, cachedRecords); } catch (e) { console.warn('IDB write failed', e); }
             }
         }
 
         this.memoryCache.set(yearInt, cachedRecords);
-        this.extractSymbols(cachedRecords);
         return cachedRecords;
     }
 
-    async getStockData(symbol, startYear = 2023, endYear = new Date().getFullYear()) {
-        const targetSymbol = symbol.trim().toUpperCase();
-        let combinedRecords = [];
+    async getStockData(symbol, startYear = 2023, endYear = new Date().getFullYear(), onYear = null) {
+        const strip = (x) => x.toUpperCase().replace(/\.(NS|BO)$/, '');
+        const targetSymbol = strip(symbol.trim());
+        let combined = [];
 
         for (let y = startYear; y <= endYear; y++) {
             try {
                 const yearData = await this.getYearData(y);
-                const filtered = yearData.filter(row => {
-                    const sym = String(row.symbol).toUpperCase();
-                    return sym === targetSymbol || sym === `${targetSymbol}.NS` || sym === `${targetSymbol}.BO`;
-                });
-                combinedRecords.push(...filtered);
+                combined.push(...yearData.filter(row => strip(row.symbol) === targetSymbol));
+                this.onProgress(`${y}: ready (${combined.length} bars so far)`);
+                if (onYear) onYear(combined.slice()); // draw as each year arrives
             } catch (e) {
                 console.error(`Error loading data for year ${y}:`, e);
+                this.onProgress(`${y}: FAILED - ${e.message}`);
             }
         }
-
-        // Deduplicate and sort chronologically
-        const seenDates = new Set();
-        const uniqueRecords = [];
-
-        for (const row of combinedRecords) {
-            if (row.date && !seenDates.has(row.date)) {
-                seenDates.add(row.date);
-                uniqueRecords.push(row);
-            }
-        }
-
-        uniqueRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
-        return uniqueRecords;
-    }
-
-    getSymbolList() {
-        return Array.from(this.availableSymbols).sort();
+        combined.sort((a, b) => (a.date < b.date ? -1 : 1));
+        return combined;
     }
 }
 
