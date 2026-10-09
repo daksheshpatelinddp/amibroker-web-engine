@@ -1,4 +1,4 @@
-import { parquetReadObjects } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.4.0/+esm';
+import { parquetRead } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.4.0/+esm';
 
 class DataEngine {
     constructor() {
@@ -8,7 +8,7 @@ class DataEngine {
         this.storeName = 'parquet_years';
         this.db = null;
         this.memoryCache = new Map();
-        this.onProgress = () => {};
+        this.cachedSymbolList = null;
     }
 
     async init() {
@@ -74,48 +74,63 @@ class DataEngine {
 
     async fetchAndParseParquet(year) {
         const url = `${this.baseUrl}/${year}.parquet`;
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 90000); // 90s: turn silent hangs into errors
-        let arrayBuffer;
-        try {
-            this.onProgress(`${year}: downloading...`);
-            const response = await fetch(url, { mode: 'cors', signal: ctrl.signal });
-            if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-            arrayBuffer = await response.arrayBuffer();
-        } finally {
-            clearTimeout(timer);
+        console.log(`Fetching Parquet file from R2: ${url}`);
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status} for ${url}`);
         }
-        const mb = (arrayBuffer.byteLength / 1048576).toFixed(1);
-        this.onProgress(`${year}: downloaded ${mb} MB, parsing...`);
-        await new Promise(r => setTimeout(r, 30)); // let the UI repaint before heavy parsing
-
-        const rows = await parquetReadObjects({ file: arrayBuffer });
-        console.log(`Parsed ${rows.length} rows from ${year}.parquet. Sample:`, rows[0]);
-        this.onProgress(`${year}: ${rows.length} rows parsed`);
-        return this.transformParquetData(rows);
-    }
-
-    toDateString(v) {
-        if (v instanceof Date) return v.toISOString().slice(0, 10);
-        if (typeof v === 'bigint') v = Number(v);
-        if (typeof v === 'number') {
-            const ms = v < 1e11 ? v * 1000 : v; // seconds or milliseconds
-            return new Date(ms).toISOString().slice(0, 10);
-        }
-        return String(v ?? '').slice(0, 10);
+        
+        const arrayBuffer = await response.arrayBuffer();
+        
+        return new Promise((resolve, reject) => {
+            try {
+                const rows = [];
+                parquetRead({
+                    file: arrayBuffer,
+                    onRowGroup: (rowGroup) => {
+                        if (rowGroup) {
+                            rows.push(...rowGroup);
+                        }
+                    },
+                    onComplete: (data) => {
+                        const sourceData = (data && data.length > 0) ? data : rows;
+                        const records = this.transformParquetData(sourceData);
+                        resolve(records);
+                    }
+                });
+            } catch (err) {
+                console.error(`Error parsing ${year}.parquet:`, err);
+                reject(err);
+            }
+        });
     }
 
     transformParquetData(data) {
-        if (!Array.isArray(data) || data.length === 0) return [];
-        return data.map(row => ({
-            symbol: String(row.symbol ?? row.Symbol ?? row.ticker ?? row.Ticker ?? ''),
-            date: this.toDateString(row.date ?? row.Date ?? row.time ?? row.Timestamp),
-            open: Number(row.open ?? row.Open ?? 0),
-            high: Number(row.high ?? row.High ?? 0),
-            low: Number(row.low ?? row.Low ?? 0),
-            close: Number(row.close ?? row.Close ?? 0),
-            volume: Number(row.volume ?? row.Volume ?? 0)
-        }));
+        if (!data || !Array.isArray(data) || data.length === 0) return [];
+        
+        return data.map(row => {
+            if (Array.isArray(row)) {
+                return {
+                    symbol: String(row[0] || ''),
+                    date: String(row[1] || ''),
+                    open: Number(row[2] || 0),
+                    high: Number(row[3] || 0),
+                    low: Number(row[4] || 0),
+                    close: Number(row[5] || 0),
+                    volume: Number(row[6] || 0)
+                };
+            }
+            return {
+                symbol: String(row.symbol || row.Symbol || row.ticker || row.Ticker || ''),
+                date: String(row.date || row.Date || row.time || row.Timestamp || ''),
+                open: Number(row.open || row.Open || 0),
+                high: Number(row.high || row.High || 0),
+                low: Number(row.low || row.Low || 0),
+                close: Number(row.close || row.Close || 0),
+                volume: Number(row.volume || row.Volume || 0)
+            };
+        });
     }
 
     async getYearData(year) {
@@ -137,7 +152,7 @@ class DataEngine {
                 try {
                     console.log(`Revalidating current year (${yearInt}) for date: ${today}`);
                     cachedRecords = await this.fetchAndParseParquet(yearInt);
-                    try { await this.setCachedYear(yearInt, cachedRecords); } catch (e) { console.warn('IDB write failed', e); }
+                    await this.setCachedYear(yearInt, cachedRecords);
                     localStorage.setItem(lastCheckedKey, today);
                 } catch (err) {
                     console.warn(`Fallback to local cache for ${yearInt}:`, err);
@@ -147,7 +162,7 @@ class DataEngine {
         } else {
             if (!cachedRecords) {
                 cachedRecords = await this.fetchAndParseParquet(yearInt);
-                try { await this.setCachedYear(yearInt, cachedRecords); } catch (e) { console.warn('IDB write failed', e); }
+                await this.setCachedYear(yearInt, cachedRecords);
             }
         }
 
@@ -155,24 +170,51 @@ class DataEngine {
         return cachedRecords;
     }
 
-    async getStockData(symbol, startYear = 2023, endYear = new Date().getFullYear(), onYear = null) {
-        const strip = (x) => x.toUpperCase().replace(/\.(NS|BO)$/, '');
-        const targetSymbol = strip(symbol.trim());
-        let combined = [];
+    /**
+     * Extracts all unique symbols across cached years without full download
+     */
+    async getAllSymbols() {
+        if (this.cachedSymbolList && this.cachedSymbolList.length > 0) {
+            return this.cachedSymbolList;
+        }
+
+        const symbolSet = new Set();
+        const currentYear = new Date().getFullYear();
+
+        // Check the most recent year first to get the active ticker list
+        try {
+            const latestData = await this.getYearData(currentYear);
+            if (latestData && latestData.length > 0) {
+                for (let i = 0; i < latestData.length; i++) {
+                    if (latestData[i].symbol) {
+                        symbolSet.add(latestData[i].symbol.toUpperCase());
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Could not fetch current year for symbol list:', e);
+        }
+
+        this.cachedSymbolList = Array.from(symbolSet).sort();
+        return this.cachedSymbolList;
+    }
+
+    async getStockData(symbol, startYear = 2023, endYear = new Date().getFullYear()) {
+        const targetSymbol = symbol.trim().toUpperCase();
+        let combinedRecords = [];
 
         for (let y = startYear; y <= endYear; y++) {
             try {
                 const yearData = await this.getYearData(y);
-                combined.push(...yearData.filter(row => strip(row.symbol) === targetSymbol));
-                this.onProgress(`${y}: ready (${combined.length} bars so far)`);
-                if (onYear) onYear(combined.slice()); // draw as each year arrives
+                const filtered = yearData.filter(row => row.symbol.toUpperCase() === targetSymbol);
+                combinedRecords.push(...filtered);
             } catch (e) {
                 console.error(`Error loading data for year ${y}:`, e);
-                this.onProgress(`${y}: FAILED - ${e.message}`);
             }
         }
-        combined.sort((a, b) => (a.date < b.date ? -1 : 1));
-        return combined;
+
+        combinedRecords.sort((a, b) => new Date(a.date) - new Date(b.date));
+        return combinedRecords;
     }
 }
 
