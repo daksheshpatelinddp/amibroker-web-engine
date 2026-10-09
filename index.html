@@ -1,80 +1,89 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>AmiBroker Web Workstation</title>
-
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#f0f9ff',
-              500: '#0284c7',
-              600: '#0284c7',
-              900: '#0c4a6e',
-            }
-          }
-        }
-      }
-    }
-  </script>
-
-  <!-- TradingView Lightweight Charts CDN -->
-  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-
-  <link rel="stylesheet" href="css/style.css" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AmiBroker Web Workstation</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/style.css">
+    
+    <!-- TradingView Lightweight Charts v5 -->
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
-<body class="h-full flex flex-col overflow-hidden text-xs antialiased select-none">
-  <!-- Top Navigation / Status Header -->
-  <header class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0">
-    <div class="flex items-center space-x-3">
-      <span class="font-bold text-slate-200 tracking-wide">AmiBroker Web</span>
-      <span id="status-badge" class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-        ● Initializing Engine...
-      </span>
-    </div>
-    <div class="flex items-center space-x-2" id="header-controls">
-      <!-- Symbol search -->
-<div class="relative">
-        <input id="symbol-input" type="search" inputmode="text" autocomplete="off" autocorrect="off" spellcheck="false"
-               autocapitalize="characters" placeholder="Search symbol..."
-               class="select-text w-40 bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs outline-none focus:border-sky-500 uppercase" />
-        <ul id="symbol-suggest"
-            class="hidden absolute right-0 mt-1 w-56 max-h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded shadow-xl z-50"></ul>
-      </div>
-    </div>
-  </header>
+<body class="bg-slate-950 text-slate-100 flex flex-col h-screen overflow-hidden select-none">
 
-  <!-- Main Workstation Canvas Area -->
-  <main class="flex-1 flex flex-col min-h-0 relative">
-    <!-- Workstation Sheet Tabs -->
-    <div id="sheet-bar" class="h-8 bg-slate-900/80 border-b border-slate-800 flex items-center px-2 space-x-1 overflow-x-auto shrink-0">
-      <!-- Sheet Tabs injected by SheetManager -->
-    </div>
+    <!-- TOP HEADER / TOOLBAR -->
+    <header class="bg-slate-900 border-b border-slate-800 px-3 py-2 flex items-center justify-between gap-2 z-10 shrink-0">
+        <div class="flex items-center gap-3">
+            <span class="font-bold text-slate-100 text-sm tracking-wide">AmiBroker Web</span>
+            <span id="engine-status-badge" class="px-2 py-0.5 rounded text-xs bg-amber-500/20 text-amber-400 font-medium">Initializing...</span>
+        </div>
 
-    <!-- Multi-pane Chart Stack -->
-    <div id="chart-workspace" class="flex-1 min-h-0 w-full relative bg-slate-950 flex flex-col">
-      <div id="chart-container" class="w-full h-full min-h-0 flex-1"></div>
-      <div class="absolute left-2 top-2 z-20 flex space-x-1">
-        <button id="btn-fit" class="px-2 py-1 rounded bg-slate-800/90 border border-slate-700 text-slate-200 text-[11px]">Fit</button>
-        <button id="btn-latest" class="px-2 py-1 rounded bg-slate-800/90 border border-slate-700 text-slate-200 text-[11px]">Latest</button>
-      </div>
-    </div>
-  </main>
+        <!-- Symbol & Controls Area -->
+        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <!-- Active Symbol Display & Input -->
+            <div class="relative">
+                <input type="text" id="symbol-search-input" value="RELIANCE" 
+                       class="bg-slate-800 border border-slate-700 text-slate-100 text-xs font-semibold px-2.5 py-1 rounded w-32 focus:outline-none focus:border-indigo-500 uppercase tracking-wider">
+            </div>
 
-  <!-- Footer / System Info -->
-  <footer class="h-6 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-3 text-[10px] text-slate-400 shrink-0">
-    <span id="cache-status" class="truncate min-w-0 flex-1 mr-2">Starting...</span>
-    <span id="data-timestamp" class="shrink-0">Updated: --</span>
-  </footer>
+            <!-- Interval Selector -->
+            <select id="interval-select" class="bg-slate-800 border border-slate-700 text-slate-100 text-xs px-2 py-1 rounded focus:outline-none focus:border-indigo-500">
+                <option value="1D" selected>Daily (1D)</option>
+                <option value="1W">Weekly (1W)</option>
+                <option value="1M">Monthly (1M)</option>
+            </select>
 
-  <!-- Application Entry Point -->
-  <script type="module" src="js/app.js"></script>
+            <div class="h-4 w-px bg-slate-800 mx-1"></div>
+
+            <!-- Lock & Link Controls -->
+            <div class="flex items-center gap-1">
+                <button id="sheet-lock-btn" title="Toggle Sheet Lock" class="p-1 rounded hover:bg-slate-800 text-slate-400 text-xs transition-colors">
+                    <span id="lock-icon">🔓</span>
+                </button>
+                <button id="symbol-link-btn" title="Symbol Link Group" class="px-1.5 py-0.5 rounded text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors">
+                    S
+                </button>
+                <button id="interval-link-btn" title="Interval Link Group" class="px-1.5 py-0.5 rounded text-xs font-bold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors">
+                    I
+                </button>
+            </div>
+
+            <div class="h-4 w-px bg-slate-800 mx-1"></div>
+
+            <!-- Fit & Range Helpers -->
+            <button id="fit-chart-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded border border-slate-700">Fit</button>
+            <button id="latest-chart-btn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded border border-slate-700">Latest</button>
+        </div>
+    </header>
+
+    <!-- MAIN CHART AREA -->
+    <main class="flex-1 relative bg-slate-950 overflow-hidden" id="chart-workspace-container">
+        <div id="chart-container" class="absolute inset-0 w-full h-full"></div>
+    </main>
+
+    <!-- BOTTOM SHEET TABS BAR (BELOW CHART) -->
+    <footer class="bg-slate-900 border-t border-slate-800 flex flex-col shrink-0 z-10">
+        <div class="flex items-center px-2 pt-1 border-b border-slate-800/80 bg-slate-900 overflow-x-auto no-scrollbar" id="sheet-tabs-container">
+            <!-- Dynamic Sheet Tabs Render Here -->
+            <div id="sheet-tabs-list" class="flex items-center gap-1"></div>
+            
+            <!-- Add Sheet Button -->
+            <button id="add-sheet-btn" title="Add New Sheet" class="px-2 py-1 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded transition-colors text-sm font-bold ml-1 mb-1">
+                +
+            </button>
+        </div>
+
+        <!-- STATUS BAR -->
+        <div class="px-3 py-1 flex items-center justify-between text-[11px] text-slate-400 bg-slate-950">
+            <div id="status-message" class="truncate">Ready</div>
+            <div id="data-info" class="shrink-0 text-slate-500 font-mono">OHLCV Engine</div>
+        </div>
+    </footer>
+
+    <!-- ES Module App Entry Point -->
+    <script type="module" src="js/app.js"></script>
 </body>
 </html>
