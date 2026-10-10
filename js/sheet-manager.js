@@ -15,12 +15,15 @@ class SheetManager {
     if (this.addBtn) {
       this.addBtn.addEventListener('click', () => this.addSheet());
     }
-    // Initialize default sheet
-    this.addSheet();
+    // Initialize default sheets if none exist
+    if (this.sheets.length === 0) {
+      this.addSheet("Sheet 1");
+      this.addSheet("Sheet 2");
+    }
   }
 
   addSheet(name = null) {
-    const id = 'sheet_' + Date.now() + Math.random().toString(36.substring(2, 5));
+    const id = 'sheet_' + Date.now() + Math.random().toString(36).substring(2, 5);
     const sheetName = name || `Sheet ${this.sheetCounter++}`;
     
     const sheet = {
@@ -83,7 +86,7 @@ class SheetManager {
       const tab = document.createElement('div');
       tab.className = `sheet-tab ${sheet.id === this.activeSheetId ? 'active' : ''}`;
       
-      const titleSpan = document.exit ? null : document.createElement('span');
+      const titleSpan = document.createElement('span');
       titleSpan.textContent = sheet.name;
       tab.appendChild(titleSpan);
 
