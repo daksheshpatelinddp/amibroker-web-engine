@@ -3,70 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AmiBroker Web Workstation</title>
-  
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>AmiBroker Web</title>
   <link rel="stylesheet" href="css/style.css">
-  
-  <!-- TradingView Lightweight Charts v5 -->
-  <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
-<body class="bg-slate-950 text-slate-100 flex flex-col h-screen overflow-hidden select-none">
-
-  <!-- TOP BAR -->
-  <header class="bg-slate-900 border-b border-slate-800 px-2 py-1.5 flex flex-col gap-1 z-10 shrink-0">
-    <div class="flex items-center justify-between gap-2">
-      <div class="flex items-center gap-2">
-        <span class="font-bold text-slate-100 text-xs sm:text-sm tracking-wide">AmiBroker Web</span>
-        <span id="engine-status" class="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 font-medium">Initializing...</span>
-      </div>
-
-      <div class="flex items-center gap-1.5">
-        <div class="relative">
-          <input type="text" id="symbol-input" value="RELIANCE" 
-                 class="bg-slate-800 border border-slate-700 text-slate-100 text-xs font-semibold px-2 py-1 rounded w-28 focus:outline-none focus:border-indigo-500 uppercase tracking-wider">
-        </div>
-
-        <select id="interval-select" class="bg-slate-800 border border-slate-700 text-slate-100 text-xs px-1.5 py-1 rounded focus:outline-none focus:border-indigo-500">
-          <option value="1D" selected>Daily</option>
-          <option value="1W">Weekly</option>
-          <option value="1M">Monthly</option>
-        </select>
-      </div>
+<body>
+  <!-- Top Control Bar (Header with Symbol Name) -->
+  <div id="top-bar" class="top-bar">
+    <div class="symbol-header-container">
+      <span id="active-symbol-header" class="symbol-header">RELIANCE</span>
+      <span id="engine-status" class="status-badge">Engine Ready</span>
     </div>
-
-    <div class="flex items-center justify-between gap-2">
-      <div class="flex items-center gap-1">
-        <button id="btn-lock" title="Toggle Lock" class="px-1.5 py-0.5 rounded bg-slate-800 text-xs">🔓</button>
-        <button id="btn-sym-link" title="Symbol Link Group" class="px-1.5 py-0.5 rounded text-xs font-bold bg-slate-800 text-slate-300">S</button>
-        <button id="btn-int-link" title="Interval Link Group" class="px-1.5 py-0.5 rounded text-xs font-bold bg-slate-800 text-slate-300">I</button>
-      </div>
-
-      <div class="flex items-center gap-1">
-        <button id="btn-fit" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] px-2 py-0.5 rounded border border-slate-700">Fit</button>
-        <button id="btn-latest" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] px-2 py-0.5 rounded border border-slate-700">Latest</button>
-      </div>
+    <div class="top-controls">
+      <button id="btn-fit" class="btn">Fit</button>
+      <button id="btn-latest" class="btn">Latest</button>
     </div>
-  </header>
+  </div>
 
-  <!-- CHART WORKSPACE -->
-  <main class="flex-1 relative bg-slate-950 overflow-hidden" id="chart-workspace">
-    <div id="chart-container" class="absolute inset-0 w-full h-full"></div>
-  </main>
+  <!-- Main Chart Area -->
+  <div id="chart-container" class="chart-container"></div>
 
-  <!-- BOTTOM BAR: DYNAMIC SHEET TABS BELOW CHART + STATUS BAR -->
-  <footer class="bg-slate-900 border-t border-slate-800 flex flex-col shrink-0 z-10">
-    
-    <div id="sheet-bar" class="flex items-center px-2 py-1 bg-slate-900 overflow-x-auto no-scrollbar border-b border-slate-800/60">
-      <div id="sheet-tabs-list" class="flex items-center gap-1"></div>
-      <button id="btn-add-sheet" title="Add Sheet" class="px-2 py-0.5 text-slate-400 hover:text-slate-100 hover:bg-slate-800 rounded font-bold text-sm ml-1">+</button>
-    </div>
+  <!-- Bottom Sheet Tabs Bar -->
+  <div id="bottom-sheet-bar" class="sheet-bar">
+    <div id="sheets-list" class="sheets-list"></div>
+    <button id="add-sheet-btn" class="add-sheet-btn" title="Add Sheet">+</button>
+  </div>
 
-    <div id="status-bar" class="px-2 py-0.5 text-[10px] text-slate-400 bg-slate-950 truncate font-mono">
-      Initializing system...
-    </div>
-  </footer>
-
-  <script type="module" src="js/app.js"></script>
+  <!-- Scripts -->
+  <script src="js/sheet-manager.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
