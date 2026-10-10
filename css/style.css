@@ -1,30 +1,199 @@
-/* Custom CSS Resets & Chart Layout Rules */
-html, body {
-  height: 100%;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
-  touch-action: manipulation;
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #131722;
+    color: #d1d4dc;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
 }
 
-/* Ensure flexbox children shrink properly without collapsing chart canvas */
-#chart-workspace, #chart-container {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 0%;
-  min-height: 0;
-  min-width: 0;
-  position: relative;
-  width: 100%;
-  height: 100%;
+#app-container {
+    display: flex;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
 }
 
-/* Scrollbar styling for sheet tabs */
-#sheet-bar::-webkit-scrollbar {
-  height: 3px;
+/* Symbol Header Banner Top */
+.app-header {
+    height: 50px;
+    background-color: #1e222d;
+    border-bottom: 1px solid #2a2e39;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
 }
-#sheet-bar::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 2px;
+
+.symbol-info-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    font-size: 14px;
+}
+
+.symbol-highlight {
+    font-size: 18px;
+    font-weight: bold;
+    color: #2962ff;
+    margin-right: 8px;
+}
+
+.exchange-tag {
+    background: #2a2e39;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #909399;
+}
+
+.symbol-quick-metrics {
+    display: flex;
+    gap: 16px;
+    color: #909399;
+}
+
+.symbol-quick-metrics strong {
+    color: #d1d4dc;
+}
+
+.symbol-search-box input {
+    background: #131722;
+    border: 1px solid #2a2e39;
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 4px;
+    outline: none;
+}
+
+/* Main Workspace */
+.workspace-main {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+.chart-viewport {
+    width: 100%;
+    height: 100%;
+}
+
+/* Pane Toolbars */
+.pane-toolbar {
+    height: 28px;
+    background: #181c27;
+    border-bottom: 1px solid #2a2e39;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    font-size: 12px;
+    color: #909399;
+    z-index: 10;
+    position: relative;
+}
+
+.pane-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.pane-actions button {
+    background: #2a2e39;
+    border: none;
+    color: #d1d4dc;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.pane-actions button:hover {
+    background: #2962ff;
+    color: #fff;
+}
+
+/* Sheet Tabs Footer positioned Below Chart */
+.sheet-footer {
+    height: 40px;
+    background-color: #1e222d;
+    border-top: 1px solid #2a2e39;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+}
+
+.sheet-tabs-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    width: 100%;
+}
+
+.sheet-tab {
+    background: #131722;
+    border: 1px solid #2a2e39;
+    color: #909399;
+    padding: 6px 14px;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+    transition: all 0.2s;
+}
+
+.sheet-tab.active {
+    background: #1e222d;
+    color: #2962ff;
+    border-bottom-color: #1e222d;
+    font-weight: 600;
+}
+
+.sheet-tab:hover {
+    color: #fff;
+}
+
+.sheet-close-btn {
+    background: transparent;
+    border: none;
+    color: #909399;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+}
+
+.sheet-close-btn:hover {
+    color: #ef5350;
+}
+
+.sheet-rename-input {
+    background: #131722;
+    border: 1px solid #2962ff;
+    color: #fff;
+    padding: 2px 4px;
+    font-size: 13px;
+    width: 80px;
+    outline: none;
+    border-radius: 2px;
+}
+
+.sheet-add-btn {
+    background: #2a2e39;
+    border: 1px dashed #5c6bc0;
+    color: #8c9eff;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.sheet-add-btn:hover {
+    background: #363c4e;
+    color: #fff;
 }
