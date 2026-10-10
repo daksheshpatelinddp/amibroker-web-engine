@@ -1,166 +1,154 @@
 /**
- * ChartEngine - Handles Multi-Pane Chart Stack & Lightweight Charts v5 Integration
+ * chart-engine.js
+ * Multi-Pane Chart Rendering Engine with Indicator Overlays
  */
+
 export class ChartEngine {
-  constructor(containerId) {
-    this.container = document.getElementById(containerId);
-    this.panes = new Map(); // Store pane instances: { id, chart, mainSeries, overlaySeries }
-    this.primaryPaneId = "pane-main-price";
-    this.symbol = "RELIANCE";
-    this.interval = "D";
-    this.syncingTime = false;
-  }
-
-  initChart() {
-    if (!this.container) return;
-    this.container.innerHTML = "";
-
-    // Safely retrieve TradingView Lightweight Charts global (v5 compatible)
-    const LWC = window.LightweightCharts;
-    if (!LWC) {
-      console.error("[ChartEngine] LightweightCharts library not found on window.");
-      return;
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.charts = [];
     }
 
-    // Build Main Price Pane
-    this.createPane(this.primaryPaneId, { heightRatio: 0.7, showTimeScale: true });
-  }
+    renderSheet(sheetData, dataRecords) {
+        if (!this.container) return;
+        this.container.innerHTML = '';
+        this.charts = [];
 
-  createPane(paneId, options = {}) {
-    const LWC = window.LightweightCharts;
-    const paneElement = document.createElement("div");
-    paneElement.id = paneId;
-    paneElement.className = "w-full min-h-0 relative border-b border-slate-800 flex-1";
-    this.container.appendChild(paneElement);
+        // Wrapper container for multi-panes
+        const wrapper = document.createElement('div');
+        wrapper.className = 'chart-panes-wrapper';
+        wrapper.style.display = 'flex';
+        wrapper.style.flexDirection = 'column';
+        wrapper.style.width = '100%';
+        wrapper.style.height = '100%';
 
-    const chartOptions = {
-      layout: {
-        background: { color: "#020617" },
-        textColor: "#94a3b8",
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: "#1e293b" },
-        horzLines: { color: "#1e293b" },
-      },
-      crosshair: {
-        mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 1,
-      },
-      rightPriceScale: {
-        borderColor: "#334155",
-        scaleMargins: { top: 0.1, bottom: 0.1 },
-      },
-      timeScale: {
-        borderColor: "#334155",
-        visible: options.showTimeScale !== undefined ? options.showTimeScale : true,
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      autoSize: true,
-    };
+        sheetData.panes.forEach((pane, idx) => {
+            const paneContainer = document.createElement('div');
+            paneContainer.className = 'chart-pane';
+            paneContainer.style.height = pane.height || `${100 / sheetData.panes.length}%`;
+            paneContainer.style.position = 'relative';
+            paneContainer.style.flex = '1';
+            paneContainer.style.borderBottom = '1px solid #2a2e39';
 
-    const chart = LWC.createChart(paneElement, chartOptions);
+            // Pane Header Controls (Add indicator / Remove pane)
+            const toolbar = document.createElement('div');
+            toolbar.className = 'pane-toolbar';
+            toolbar.innerHTML = `
+                <span class="pane-title">${pane.type.toUpperCase()} ${pane.subType ? '('+pane.subType+')' : ''}</span>
+                <div class="pane-actions">
+                    <button class="add-overlay-btn" title="Add Moving Average / Indicator">+ MA</button>
+                    ${sheetData.panes.length > 1 ? `<button class="remove-pane-btn" title="Remove Pane">&times;</button>` : ''}
+                </div>
+            `;
 
-    // FIX FOR V5: Use LWC.CandlestickSeries inside chart.addSeries(...)
-    const CandlestickSeries = LWC.CandlestickSeries || "Candlestick";
-    const mainSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderVisible: false,
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
-    });
+            toolbar.querySelector('.add-overlay-btn').onclick = () => {
+                const period = prompt("Enter MA Period (e.g., 20 or 50):", "20");
+                if (period) {
+                    window.app.sheetManager.addOverlayToPane(pane.id, { type: 'SMA', period: parseInt(period), color: '#2196f3' });
+                }
+            };
 
-    const paneObj = {
-      id: paneId,
-      element: paneElement,
-      chart,
-      mainSeries,
-      indicators: new Map(),
-    };
+            const removeBtn = toolbar.querySelector('.remove-pane-btn');
+            if (removeBtn) {
+                removeBtn.onclick = () => {
+                    window.app.sheetManager.removePaneFromActiveSheet(pane.id);
+                };
+            }
 
-    this.panes.set(paneId, paneObj);
-    this.setupResizeObserver(paneObj);
-    this.bindCrosshairSync(paneObj);
+            paneContainer.appendChild(toolbar);
 
-    return paneObj;
-  }
+            const chartCanvasArea = document.createElement('div');
+            chartCanvasArea.className = 'pane-canvas';
+            chartCanvasArea.style.width = '100%';
+            chartCanvasArea.style.height = 'calc(100% - 28px)';
+            paneContainer.appendChild(chartCanvasArea);
 
-  setData(data) {
-    const primary = this.panes.get(this.primaryPaneId);
-    if (primary && primary.mainSeries) {
-      primary.mainSeries.setData(data);
-      primary.chart.timeScale().fitContent();
+            wrapper.appendChild(paneContainer);
+
+            // Initialize Lightweight Charts instance for pane
+            this.renderPaneContent(chartCanvasArea, pane, dataRecords);
+        });
+
+        this.container.appendChild(wrapper);
     }
-  }
 
-  setupResizeObserver(paneObj) {
-    const resizeObserver = new ResizeObserver((entries) => {
-      if (!entries || entries.length === 0) return;
-      const { width, height } = entries[0].contentRect;
-      // autoSize handles resizing
-    });
-    resizeObserver.observe(paneObj.element);
-  }
-
-  bindCrosshairSync(targetPane) {
-    targetPane.chart.subscribeCrosshairMove((param) => {
-      if (!param || !param.time) return;
-      this.panes.forEach((pane) => {
-        if (pane.id !== targetPane.id && pane.chart) {
-          // Synchronize crosshair position across stacked panes
+    renderPaneContent(container, pane, dataRecords) {
+        if (typeof LightweightCharts === 'undefined') {
+            container.innerHTML = '<div style="color: #fff; padding: 20px;">LightweightCharts library loading...</div>';
+            return;
         }
-      });
-    });
-  }
 
-  init() {
-    this.initChart();
-  }
+        const chart = LightweightCharts.createChart(container, {
+            layout: { background: { color: '#131722' }, textColor: '#d1d4dc' },
+            grid: { vertLines: { color: '#1f293d' }, horzLines: { color: '#1f293d' } },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            timeScale: { borderColor: '#2a2e39' },
+            rightPriceScale: { borderColor: '#2a2e39' }
+        });
 
-  // Accepts records from DataEngine: { date, open, high, low, close, volume }
-  renderCandlestickData(records) {
-    if (!this.panes.has(this.primaryPaneId)) this.initChart();
+        if (pane.type === 'candlestick') {
+            const series = chart.addCandlestickSeries({
+                upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+            });
+            series.setData(dataRecords.map(d => ({ time: d.date, open: d.open, high: d.high, low: d.low, close: d.close })));
 
-    const seen = new Set();
-    const bars = [];
-    for (const r of records) {
-      const time = String(r.date || "").slice(0, 10); // 'YYYY-MM-DD'
-      if (!time || seen.has(time)) continue;           // LWC rejects duplicate times
-      if (!(r.close > 0)) continue;
-      seen.add(time);
-      bars.push({ time, open: r.open, high: r.high, low: r.low, close: r.close });
+            // Render overlays (e.g. SMA) on price pane
+            if (pane.indicators) {
+                pane.indicators.forEach(ind => {
+                    if (ind.type === 'SMA') {
+                        const smaData = this.calculateSMA(dataRecords, ind.period);
+                        const lineSeries = chart.addLineSeries({ color: ind.color || '#2962ff', lineWidth: 2 });
+                        lineSeries.setData(smaData);
+                    }
+                });
+            }
+        } else if (pane.type === 'volume') {
+            const series = chart.addHistogramSeries({
+                color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: ''
+            });
+            series.setData(dataRecords.map(d => ({ time: d.date, value: d.volume, color: d.close >= d.open ? '#26a69a' : '#ef5350' })));
+
+            // Overlay MA on Volume
+            if (pane.indicators) {
+                pane.indicators.forEach(ind => {
+                    if (ind.type === 'SMA') {
+                        const smaVol = this.calculateSMA(dataRecords.map(d => ({ date: d.date, close: d.volume })), ind.period);
+                        const lineSeries = chart.addLineSeries({ color: ind.color || '#ff9800', lineWidth: 2 });
+                        lineSeries.setData(smaVol);
+                    }
+                });
+            }
+        } else if (pane.type === 'delivery') {
+            const series = chart.addHistogramSeries({
+                color: '#ab47bc', priceScaleId: ''
+            });
+            series.setData(dataRecords.map(d => ({ time: d.date, value: d.delivery || d.volume * 0.4 })));
+
+            if (pane.indicators) {
+                pane.indicators.forEach(ind => {
+                    if (ind.type === 'SMA') {
+                        const smaDel = this.calculateSMA(dataRecords.map(d => ({ date: d.date, close: d.delivery || d.volume * 0.4 })), ind.period);
+                        const lineSeries = chart.addLineSeries({ color: ind.color || '#00bcd4', lineWidth: 2 });
+                        lineSeries.setData(smaDel);
+                    }
+                });
+            }
+        }
+
+        chart.timeScale().fitContent();
+        this.charts.push(chart);
     }
-    bars.sort((a, b) => (a.time < b.time ? -1 : 1));   // LWC requires ascending order
-    this.setData(bars);
-  }
 
-  // Show the whole history again (also re-enables automatic price scaling after pinch/drag)
-  fitAll() {
-    this.panes.forEach((pane) => {
-      try {
-        pane.chart.priceScale('right').applyOptions({ autoScale: true });
-        pane.chart.timeScale().fitContent();
-      } catch (e) { console.warn('fitAll failed', e); }
-    });
-  }
-
-  // Jump to the newest bars
-  goLatest() {
-    this.panes.forEach((pane) => {
-      try {
-        pane.chart.priceScale('right').applyOptions({ autoScale: true });
-        pane.chart.timeScale().scrollToRealTime();
-      } catch (e) { console.warn('goLatest failed', e); }
-    });
-  }
-
-  setSymbolAndInterval(symbol, interval) {
-    this.symbol = symbol;
-    this.interval = interval;
-    console.log(`[ChartEngine] Switched to Symbol: ${symbol}, Interval: ${interval}`);
-  }
+    calculateSMA(data, period) {
+        let result = [];
+        for (let i = 0; i < data.length; i++) {
+            if (i < period - 1) continue;
+            let sum = 0;
+            for (let j = 0; j < period; j++) {
+                sum += data[i - j].close;
+            }
+            result.push({ time: data[i].date, value: sum / period });
+        }
+        return result;
+    }
 }
-
-// app.js imports this singleton
-export const chartEngine = new ChartEngine("chart-container");
