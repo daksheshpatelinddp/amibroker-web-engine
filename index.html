@@ -7,11 +7,13 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <!-- Top Control Bar (Header with Symbol Name) -->
+  <!-- Top Control Bar (Symbol Header + Fit/Latest Controls) -->
   <div id="top-bar" class="top-bar">
-    <div class="symbol-header-container">
-      <span id="active-symbol-header" class="symbol-header">RELIANCE</span>
-      <span id="engine-status" class="status-badge">Engine Ready</span>
+    <div class="top-left-group">
+      <div class="brand-title">AmiBroker Web</div>
+      <div id="engine-status" class="status-badge">Engine Ready</div>
+      <!-- Inserted Symbol Header Name -->
+      <div id="active-symbol-header" class="symbol-header">RELIANCE</div>
     </div>
     <div class="top-controls">
       <button id="btn-fit" class="btn">Fit</button>
@@ -19,13 +21,29 @@
     </div>
   </div>
 
-  <!-- Main Chart Area -->
-  <div id="chart-container" class="chart-container"></div>
+  <!-- Main Workspace Area -->
+  <div class="workspace">
+    <!-- Left Toolbar (Lock, Studies, Drawing Tools, etc.) -->
+    <div id="left-toolbar" class="left-toolbar">
+      <button id="tool-lock" class="tool-btn" title="Lock">🔒</button>
+      <button id="tool-studies" class="tool-btn" title="Studies">📊</button>
+      <button id="tool-indicators" class="tool-btn" title="Indicators">📈</button>
+    </div>
 
-  <!-- Bottom Sheet Tabs Bar -->
+    <!-- Chart Canvas Container -->
+    <div id="chart-container" class="chart-container"></div>
+  </div>
+
+  <!-- Bottom Sheet Tabs Bar (Dynamic Add, Remove, Double-click Rename) -->
   <div id="bottom-sheet-bar" class="sheet-bar">
     <div id="sheets-list" class="sheets-list"></div>
     <button id="add-sheet-btn" class="add-sheet-btn" title="Add Sheet">+</button>
+  </div>
+
+  <!-- Bottom Range / Status Bar -->
+  <div id="status-bar" class="status-bar">
+    <span id="range-info">Range: 927 bars in 0.1s (0 of 4 years from network, 4 cached, 0...)</span>
+    <span id="update-info">Updated: 2026-10-07</span>
   </div>
 
   <!-- Scripts -->
