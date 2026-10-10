@@ -1,6 +1,6 @@
 /**
  * SheetManager - Handles dynamic sheet tabs placed below chart,
- * sheet creation, removal, inline double-tap/click renaming, and Link Groups.
+ * sheet creation, removal, inline renaming, and Link Groups with robust error safety.
  */
 
 class SheetManager {
@@ -8,25 +8,36 @@ class SheetManager {
         this.sheets = [];
         this.activeSheetId = null;
         this.nextSheetCounter = 1;
-        this.linkColors = ['#94a3b8', '#f87171', '#4ade80', '#60a5fa', '#facc15']; // Gray, Red, Green, Blue, Yellow
+        this.linkColors = ['#94a3b8', '#f87171', '#4ade80', '#60a5fa', '#facc15'];
         this.onSheetChange = null;
     }
 
     init() {
-        const saved = this.loadState();
-        if (saved && saved.sheets && saved.sheets.length > 0) {
-            this.sheets = saved.sheets;
-            this.activeSheetId = saved.activeSheetId || this.sheets[0].id;
-            this.nextSheetCounter = saved.nextSheetCounter || (this.sheets.length + 1);
-        } else {
-            this.addSheet('Sheet 1', false);
-            this.addSheet('Sheet 2', false);
-            this.addSheet('Sheet 3', false);
-            this.activeSheetId = this.sheets[0].id;
-        }
+        try {
+            const saved = this.loadState();
+            if (saved && saved.sheets && saved.sheets.length > 0) {
+                this.sheets = saved.sheets;
+                this.activeSheetId = saved.activeSheetId || this.sheets[0].id;
+                this.nextSheetCounter = saved.nextSheetCounter || (this.sheets.length + 1);
+            } else {
+                this.addSheet('Sheet 1', false);
+                this.addSheet('Sheet 2', false);
+                this.addSheet('Sheet 3', false);
+                this.activeSheetId = this.sheets[0].id;
+            }
 
-        this.bindEvents();
-        this.renderTabs();
+            this.bindEvents();
+            this.renderTabs();
+            console.log('[SheetManager] Initialized successfully.');
+        } catch (e) {
+            console.error('[SheetManager] Initialization error:', e);
+            // Fallback so app never freezes
+            if (this.sheets.length === 0) {
+                this.addSheet('Sheet 1', false);
+                this.activeSheetId = this.sheets[0].id;
+            }
+            this.renderTabs();
+        }
     }
 
     bindEvents() {
@@ -198,7 +209,7 @@ class SheetManager {
             const isActive = sheet.id === this.activeSheetId;
 
             const tab = document.createElement('div');
-            tab.className = `flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border cursor-pointer transition-all ${
+            tab.className = `flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded border cursor-pointer transition-all shrink-0 ${
                 isActive 
                     ? 'bg-indigo-900/40 text-indigo-300 border-indigo-500' 
                     : 'bg-slate-800/60 text-slate-400 hover:text-slate-200 border-slate-700/60'
