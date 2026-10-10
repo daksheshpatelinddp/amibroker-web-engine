@@ -1,34 +1,80 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AmiBroker Web - Quantitative Charting & Backtester</title>
-    <link rel="stylesheet" href="css/style.css">
-    <!-- Lightweight Charts Library -->
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>AmiBroker Web Workstation</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              500: '#0284c7',
+              600: '#0284c7',
+              900: '#0c4a6e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- TradingView Lightweight Charts CDN -->
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+  <link rel="stylesheet" href="css/style.css" />
 </head>
-<body>
-    <div id="app-container">
-        <!-- Top Area: Inserted Symbol Name as Header / Ticker Info Banner -->
-        <header id="symbol-header" class="app-header">
-            <!-- Dynamically injected by App controller -->
-        </header>
+<body class="h-full flex flex-col overflow-hidden text-xs antialiased select-none">
+  <!-- Top Navigation / Status Header -->
+  <header class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0">
+    <div class="flex items-center space-x-3">
+      <span class="font-bold text-slate-200 tracking-wide">AmiBroker Web</span>
+      <span id="status-badge" class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+        ● Initializing Engine...
+      </span>
+    </div>
+    <div class="flex items-center space-x-2" id="header-controls">
+      <!-- Symbol search -->
+<div class="relative">
+        <input id="symbol-input" type="search" inputmode="text" autocomplete="off" autocorrect="off" spellcheck="false"
+               autocapitalize="characters" placeholder="Search symbol..."
+               class="select-text w-40 bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs outline-none focus:border-sky-500 uppercase" />
+        <ul id="symbol-suggest"
+            class="hidden absolute right-0 mt-1 w-56 max-h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded shadow-xl z-50"></ul>
+      </div>
+    </div>
+  </header>
 
-        <!-- Main Workspace: Charts Area -->
-        <main class="workspace-main">
-            <div id="chart-container" class="chart-viewport"></div>
-        </main>
-
-        <!-- Sheets Tab Bar positioned BELOW the chart area -->
-        <footer id="sheet-tabs-footer" class="sheet-footer">
-            <div id="sheet-tabs-container" class="sheet-tabs-bar">
-                <!-- Dynamic sheet tabs inserted here -->
-            </div>
-        </footer>
+  <!-- Main Workstation Canvas Area -->
+  <main class="flex-1 flex flex-col min-h-0 relative">
+    <!-- Workstation Sheet Tabs -->
+    <div id="sheet-bar" class="h-8 bg-slate-900/80 border-b border-slate-800 flex items-center px-2 space-x-1 overflow-x-auto shrink-0">
+      <!-- Sheet Tabs injected by SheetManager -->
     </div>
 
-    <!-- Application Entry Point -->
-    <script type="module" src="js/app.js"></script>
+    <!-- Multi-pane Chart Stack -->
+    <div id="chart-workspace" class="flex-1 min-h-0 w-full relative bg-slate-950 flex flex-col">
+      <div id="chart-container" class="w-full h-full min-h-0 flex-1"></div>
+      <div class="absolute left-2 top-2 z-20 flex space-x-1">
+        <button id="btn-fit" class="px-2 py-1 rounded bg-slate-800/90 border border-slate-700 text-slate-200 text-[11px]">Fit</button>
+        <button id="btn-latest" class="px-2 py-1 rounded bg-slate-800/90 border border-slate-700 text-slate-200 text-[11px]">Latest</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer / System Info -->
+  <footer class="h-6 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-3 text-[10px] text-slate-400 shrink-0">
+    <span id="cache-status" class="truncate min-w-0 flex-1 mr-2">Starting...</span>
+    <span id="data-timestamp" class="shrink-0">Updated: --</span>
+  </footer>
+
+  <!-- Application Entry Point -->
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
