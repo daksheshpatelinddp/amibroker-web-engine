@@ -10,7 +10,7 @@ export class SheetManager {
         this.activeSheetId = null;
         this.nextSheetIndex = 1;
         
-        // Initialize with default sheets (e.g., 2 starting sheets)
+        // Initialize with default sheets
         this.initDefaultSheets();
     }
 
@@ -21,7 +21,7 @@ export class SheetManager {
     }
 
     addSheet(name = null) {
-        const id = 'sheet_' + Date.now() + '_' + Math.random().toString(36.substring(2, 7));
+        const id = 'sheet_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
         const sheetName = name || `Sheet ${this.nextSheetIndex++}`;
         
         const newSheet = {

@@ -1,92 +1,149 @@
 /**
- * app.js
- * Core Application Controller for AmiBroker Web
+ * chart-engine.js
+ * Multi-Pane Chart Rendering Engine with Indicator Overlays
  */
 
-import { SheetManager } from './sheet-manager.js';
-import { ChartEngine } from './chart-engine.js';
-import { DataEngine } from './data-engine.js';
-
-export class App {
-    constructor() {
-        this.currentSymbol = 'RELIANCE';
-        this.dataEngine = new DataEngine();
-        this.chartEngine = new ChartEngine('chart-container');
-        this.sheetManager = new SheetManager(this);
-        
-        window.app = this; // Global access for UI callbacks
-        this.init();
+export class ChartEngine {
+    constructor(containerId) {
+        this.container = document.getElementById(containerId);
+        this.charts = [];
     }
 
-    async init() {
-        await this.dataEngine.init();
-        this.renderSymbolHeader();
-        
-        const activeSheet = this.sheetManager.getActiveSheet();
-        this.renderActiveSheet(activeSheet);
-    }
+    renderSheet(sheetData, dataRecords) {
+        if (!this.container) return;
+        this.container.innerHTML = '';
+        this.charts = [];
 
-    renderSymbolHeader() {
-        const headerEl = document.getElementById('symbol-header');
-        if (!headerEl) return;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'chart-panes-wrapper';
+        wrapper.style.display = 'flex';
+        wrapper.style.flexDirection = 'column';
+        wrapper.style.width = '100%';
+        wrapper.style.height = '100%';
 
-        headerEl.innerHTML = `
-            <div class="symbol-info-banner">
-                <div class="symbol-title-group">
-                    <span id="active-symbol-name" class="symbol-highlight">${this.currentSymbol}</span>
-                    <span class="exchange-tag">NSE / BSE</span>
-                </div>
-                <div class="symbol-quick-metrics">
-                    <span>O: <strong id="m-open">--</strong></span>
-                    <span>H: <strong id="m-high">--</strong></span>
-                    <span>L: <strong id="m-low">--</strong></span>
-                    <span>C: <strong id="m-close">--</strong></span>
-                    <span>Vol: <strong id="m-vol">--</strong></span>
-                </div>
-                <div class="symbol-search-box">
-                    <input type="text" id="symbol-search-input" placeholder="Search Symbol (e.g. TCS, INFY)..." />
-                </div>
-            </div>
-        `;
+        sheetData.panes.forEach((pane) => {
+            const paneContainer = document.createElement('div');
+            paneContainer.className = 'chart-pane';
+            paneContainer.style.height = pane.height || `${100 / sheetData.panes.length}%`;
+            paneContainer.style.position = 'relative';
+            paneContainer.style.flex = '1';
+            paneContainer.style.borderBottom = '1px solid #2a2e39';
 
-        const searchInput = headerEl.querySelector('#symbol-search-input');
-        searchInput.addEventListener('change', (e) => {
-            this.changeSymbol(e.target.value.toUpperCase());
+            const toolbar = document.createElement('div');
+            toolbar.className = 'pane-toolbar';
+            toolbar.innerHTML = `
+                <span class="pane-title">${pane.type.toUpperCase()} ${pane.subType ? '('+pane.subType+')' : ''}</span>
+                <div class="pane-actions">
+                    <button class="add-overlay-btn" title="Add Moving Average / Indicator">+ MA</button>
+                    ${sheetData.panes.length > 1 ? `<button class="remove-pane-btn" title="Remove Pane">&times;</button>` : ''}
+                </div>
+            `;
+
+            toolbar.querySelector('.add-overlay-btn').onclick = () => {
+                const period = prompt("Enter MA Period (e.g., 20 or 50):", "20");
+                if (period) {
+                    window.app.sheetManager.addOverlayToPane(pane.id, { type: 'SMA', period: parseInt(period), color: '#2196f3' });
+                }
+            };
+
+            const removeBtn = toolbar.querySelector('.remove-pane-btn');
+            if (removeBtn) {
+                removeBtn.onclick = () => {
+                    window.app.sheetManager.removePaneFromActiveSheet(pane.id);
+                };
+            }
+
+            paneContainer.appendChild(toolbar);
+
+            const chartCanvasArea = document.createElement('div');
+            chartCanvasArea.className = 'pane-canvas';
+            chartCanvasArea.style.width = '100%';
+            chartCanvasArea.style.height = 'calc(100% - 28px)';
+            paneContainer.appendChild(chartCanvasArea);
+
+            wrapper.appendChild(paneContainer);
+
+            this.renderPaneContent(chartCanvasArea, pane, dataRecords);
         });
+
+        this.container.appendChild(wrapper);
     }
 
-    async changeSymbol(symbol) {
-        this.currentSymbol = symbol;
-        const symEl = document.getElementById('active-symbol-name');
-        if (symEl) symEl.textContent = symbol;
+    renderPaneContent(container, pane, dataRecords) {
+        if (typeof LightweightCharts === 'undefined' || !dataRecords || dataRecords.length === 0) {
+            container.innerHTML = '<div style="color: #909399; padding: 20px; font-size: 12px;">No data or chart library loading...</div>';
+            return;
+        }
 
-        const activeSheet = this.sheetManager.getActiveSheet();
-        this.renderActiveSheet(activeSheet);
+        const chart = LightweightCharts.createChart(container, {
+            layout: { background: { color: '#131722' }, textColor: '#d1d4dc' },
+            grid: { vertLines: { color: '#1f293d' }, horzLines: { color: '#1f293d' } },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            timeScale: { borderColor: '#2a2e39' },
+            rightPriceScale: { borderColor: '#2a2e39' }
+        });
+
+        if (pane.type === 'candlestick') {
+            const series = chart.addCandlestickSeries({
+                upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+            });
+            series.setData(dataRecords.map(d => ({ time: d.date, open: d.open, high: d.high, low: d.low, close: d.close })));
+
+            if (pane.indicators) {
+                pane.indicators.forEach(ind => {
+                    if (ind.type === 'SMA') {
+                        const smaData = this.calculateSMA(dataRecords, ind.period);
+                        const lineSeries = chart.addLineSeries({ color: ind.color || '#2962ff', lineWidth: 2 });
+                        lineSeries.setData(smaData);
+                    }
+                });
+            }
+        } else if (pane.type === 'volume') {
+            const series = chart.addHistogramSeries({
+                color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: ''
+            });
+            series.setData(dataRecords.map(d => ({ time: d.date, value: d.volume, color: d.close >= d.open ? '#26a69a' : '#ef5350' })));
+
+            if (pane.indicators) {
+                pane.indicators.forEach(ind => {
+                    if (ind.type === 'SMA') {
+                        const smaVol = this.calculateSMA(dataRecords.map(d => ({ date: d.date, close: d.volume })), ind.period);
+                        const lineSeries = chart.addLineSeries({ color: ind.color || '#ff9800', lineWidth: 2 });
+                        lineSeries.setData(smaVol);
+                    }
+                });
+            }
+        } else if (pane.type === 'delivery') {
+            const series = chart.addHistogramSeries({
+                color: '#ab47bc', priceScaleId: ''
+            });
+            series.setData(dataRecords.map(d => ({ time: d.date, value: d.delivery || d.volume * 0.4 })));
+
+            if (pane.indicators) {
+                pane.indicators.forEach(ind => {
+                    if (ind.type === 'SMA') {
+                        const smaDel = this.calculateSMA(dataRecords.map(d => ({ date: d.date, close: d.delivery || d.volume * 0.4 })), ind.period);
+                        const lineSeries = chart.addLineSeries({ color: ind.color || '#00bcd4', lineWidth: 2 });
+                        lineSeries.setData(smaDel);
+                    }
+                });
+            }
+        }
+
+        chart.timeScale().fitContent();
+        this.charts.push(chart);
     }
 
-    async renderActiveSheet(sheet) {
-        const records = await this.dataEngine.getHistoricalData(this.currentSymbol, sheet.timeframe);
-        this.chartEngine.renderSheet(sheet, records);
-        this.updateMetrics(records);
-    }
-
-    updateMetrics(records) {
-        if (!records || records.length === 0) return;
-        const latest = records[records.length - 1];
-        
-        const setVal = (id, val) => {
-            const el = document.getElementById(id);
-            if (el) el.textContent = val;
-        };
-
-        setVal('m-open', latest.open);
-        setVal('m-high', latest.high);
-        setVal('m-low', latest.low);
-        setVal('m-close', latest.close);
-        setVal('m-vol', latest.volume.toLocaleString());
+    calculateSMA(data, period) {
+        let result = [];
+        for (let i = 0; i < data.length; i++) {
+            if (i < period - 1) continue;
+            let sum = 0;
+            for (let j = 0; j < period; j++) {
+                sum += data[i - j].close;
+            }
+            result.push({ time: data[i].date, value: sum / period });
+        }
+        return result;
     }
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-    new App();
-});
