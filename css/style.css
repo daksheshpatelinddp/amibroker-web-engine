@@ -1,159 +1,30 @@
-body, html {
+/* Custom CSS Resets & Chart Layout Rules */
+html, body {
+  height: 100%;
+  width: 100%;
   margin: 0;
   padding: 0;
-  width: 100%;
-  height: 100%;
-  background-color: #131722;
-  color: #d1d4dc;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+
+/* Ensure flexbox children shrink properly without collapsing chart canvas */
+#chart-workspace, #chart-container {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-}
-
-/* Top Bar & Symbol Header */
-.top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  background-color: #131722;
-  border-bottom: 1px solid #2a2e39;
-}
-
-.symbol-header-container {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.symbol-header {
-  font-size: 16px;
-  font-weight: 700;
-  color: #e0e3eb;
-  letter-spacing: 0.5px;
-}
-
-.status-badge {
-  font-size: 11px;
-  background-color: rgba(4, 153, 129, 0.2);
-  color: #049981;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-
-.top-controls {
-  display: flex;
-  gap: 8px;
-}
-
-.btn {
-  background-color: #2a2e39;
-  color: #d1d4dc;
-  border: none;
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.btn:hover {
-  background-color: #363c4e;
-}
-
-/* Main Chart Container */
-.chart-container {
-  flex: 1;
-  width: 100%;
-  background-color: #131722;
+  flex: 1 1 0%;
+  min-height: 0;
+  min-width: 0;
   position: relative;
+  width: 100%;
+  height: 100%;
 }
 
-/* Bottom Sheet Bar */
-.sheet-bar {
-  display: flex;
-  align-items: center;
-  background-color: #131722;
-  border-top: 1px solid #2a2e39;
-  padding: 4px 8px;
-  overflow-x: auto;
-  min-height: 32px;
+/* Scrollbar styling for sheet tabs */
+#sheet-bar::-webkit-scrollbar {
+  height: 3px;
 }
-
-.sheets-list {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 1;
-  overflow-x: auto;
-}
-
-.sheet-tab {
-  display: flex;
-  align-items: center;
-  padding: 4px 12px;
-  background-color: #1e222d;
-  color: #787b86;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-  transition: background-color 0.2s, color 0.2s;
-}
-
-.sheet-tab:hover {
-  color: #d1d4dc;
-  background-color: #2a2e39;
-}
-
-.sheet-tab.active {
-  background-color: #2a2e39;
-  color: #2962ff;
-  border-bottom: 2px solid #2962ff;
-  font-weight: 600;
-}
-
-.sheet-tab .close-btn {
-  margin-left: 8px;
-  font-size: 14px;
-  line-height: 1;
-  color: #787b86;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  padding: 0 2px;
-}
-
-.sheet-tab .close-btn:hover {
-  color: #f23645;
-}
-
-.sheet-tab-input {
-  background: #131722;
-  color: #d1d4dc;
-  border: 1px solid #2962ff;
-  font-size: 12px;
-  padding: 1px 4px;
-  outline: none;
-  width: 70px;
+#sheet-bar::-webkit-scrollbar-thumb {
+  background: #334155;
   border-radius: 2px;
-}
-
-.add-sheet-btn {
-  background: transparent;
-  border: none;
-  color: #787b86;
-  font-size: 18px;
-  font-weight: bold;
-  cursor: pointer;
-  padding: 2px 10px;
-  border-radius: 4px;
-}
-
-.add-sheet-btn:hover {
-  color: #d1d4dc;
-  background-color: #2a2e39;
 }
