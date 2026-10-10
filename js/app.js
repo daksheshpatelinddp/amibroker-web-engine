@@ -1,15 +1,31 @@
 import { dataEngine } from './data-engine.js';
 import { chartEngine } from './chart-engine.js';
-import { sheetManager } from './sheet-manager.js';
-import { DuckEngine } from './duck-engine.js';
+import { SheetManager } from './sheet-manager.js';
 import { RangeEngine } from './range-engine.js';
+import { Workspace } from './workspace.js';
+import { openAddPane, openPaneEditor } from './pane-ui.js';
 import { DATABASES, ACTIVE_DB } from './config.js';
+
+// Indian-style short numbers for the header line: 1.2K, 3.4L (lakh), 5.6Cr (crore)
+function fmtQty(n) {
+    if (!Number.isFinite(n)) return '-';
+    const a = Math.abs(n);
+    if (a >= 1e7) return (n / 1e7).toFixed(2) + 'Cr';
+    if (a >= 1e5) return (n / 1e5).toFixed(2) + 'L';
+    if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(Math.round(n));
+}
+const fmtPrice = (n) => (Number.isFinite(n) ? n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-');
 
 class Application {
     constructor() {
         this.initialized = false;
         this.symbols = [];
         try { this.symbols = JSON.parse(localStorage.getItem('symbol_list') || '[]'); } catch (e) {}
+        this.ws = new Workspace();          // sheets, panes, overlays (saved in the browser)
+        this.barCache = new Map();          // symbol -> rows, so switching sheets is instant
+        this.currentRows = [];
+        this.loadToken = 0;                 // ignores answers that arrive after you already moved on
     }
 
     async init() {
@@ -23,12 +39,22 @@ class Application {
 
         // UI first: a chart/sheet problem must never block data loading
         try { chartEngine.init(); } catch (e) { console.error('Chart init failed:', e); }
-        try { sheetManager.init(); } catch (e) { console.error('Sheet init failed:', e); }
+        try {
+            this.sheetManager = new SheetManager('sheet-bar', this.ws, {
+                onSelect: (sheet) => this.openSheet(sheet),
+                onAdd: (sheet) => this.openSheet(sheet),
+                onRemove: (newActive) => { if (newActive) this.openSheet(newActive); },
+            });
+            this.sheetManager.init();
+        } catch (e) { console.error('Sheet init failed:', e); }
         this.setupUIListeners();
-        const btnFit = document.getElementById('btn-fit');
-        if (btnFit) btnFit.addEventListener('click', () => chartEngine.fitAll());
-        const btnLatest = document.getElementById('btn-latest');
-        if (btnLatest) btnLatest.addEventListener('click', () => chartEngine.goLatest());
+
+        chartEngine.onHover = (i) => this.updateHeader(i);
+        chartEngine.onPaneClick = (paneId) => openPaneEditor(this.ws, this.ws.active(), paneId, () => this.relayout());
+        const on = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
+        on('btn-fit', () => chartEngine.fitAll());
+        on('btn-latest', () => chartEngine.goLatest());
+        on('btn-add-pane', () => openAddPane(this.ws, this.ws.active(), () => this.relayout()));
         // Tap the footer message to read the whole text (useful for errors)
         const footerMsg = document.getElementById('cache-status');
         if (footerMsg) footerMsg.addEventListener('click', () => alert(this.fullStatus || ''));
@@ -44,9 +70,7 @@ class Application {
         }
 
         this.startRange();
-        const box = document.getElementById('symbol-input');
-        if (box) box.value = 'RELIANCE';
-        await this.loadActiveSymbol('RELIANCE');
+        await this.openSheet(this.ws.active());
     }
 
     // Main engine: reads one symbol with parallel range requests (fast, small download)
@@ -60,13 +84,15 @@ class Application {
         });
     }
 
-    // Backup engine (DuckDB-WASM): only started if the main engine fails
+    // Backup engine (DuckDB-WASM): its code is downloaded only if the main engine fails
     ensureDuck() {
         if (!this.duckReady) {
-            this.duck = new DuckEngine(DATABASES[ACTIVE_DB]);
-            this.duck.onProgress = (m) => this.setCacheText(m);
-            const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('DuckDB start timed out (60s)')), 60000));
-            this.duckReady = Promise.race([this.duck.init(), timeout]).then(() => true);
+            this.duckReady = import('./duck-engine.js').then(({ DuckEngine }) => {
+                this.duck = new DuckEngine(DATABASES[ACTIVE_DB]);
+                this.duck.onProgress = (m) => this.setCacheText(m);
+                const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('DuckDB start timed out (60s)')), 60000));
+                return Promise.race([this.duck.init(), timeout]);
+            }).then(() => true);
         }
         return this.duckReady;
     }
@@ -80,6 +106,54 @@ class Application {
                 try { localStorage.setItem('symbol_list', JSON.stringify(list)); } catch (e) {}
             }
         }).catch((e) => { this.symbolsRequested = false; console.warn('Symbol list failed', e); });
+    }
+
+    // Switch to a sheet: show its symbol (from memory if already loaded)
+    async openSheet(sheet) {
+        const box = document.getElementById('symbol-input');
+        if (box) box.value = sheet.symbol;
+        await this.loadActiveSymbol(sheet.symbol);
+    }
+
+    // Draw the active sheet's panes for the given rows
+    display(rows, { keepRange = false } = {}) {
+        this.currentRows = rows;
+        try {
+            chartEngine.render(this.ws.active(), rows, { keepRange });
+        } catch (e) {
+            console.error('Chart draw failed:', e);
+            this.setCacheText('Chart error: ' + (e.message || e));
+        }
+        this.updateHeader(null);
+    }
+
+    // Only the pane layout changed (add/remove pane, moving average): redraw, keep the zoom
+    relayout() {
+        if (this.currentRows.length) this.display(this.currentRows, { keepRange: true });
+        else this.updateHeader(null);
+    }
+
+    // The symbol bar above the chart: name, last price and change; follows the crosshair
+    updateHeader(index) {
+        const sheet = this.ws.active();
+        const set = (id, text) => { const e = document.getElementById(id); if (e) e.textContent = text; };
+        set('sym-title', sheet.symbol);
+        const n = chartEngine.barCount;
+        const i = (index === null || index === undefined) ? n - 1 : index;
+        const bar = chartEngine.barAt(i);
+        if (!bar) { set('sym-price', ''); set('sym-change', ''); set('sym-ohlc', ''); return; }
+        set('sym-price', fmtPrice(bar.close));
+        const ch = document.getElementById('sym-change');
+        if (ch) {
+            if (Number.isFinite(bar.prevClose) && bar.prevClose > 0) {
+                const pct = (bar.close / bar.prevClose - 1) * 100;
+                ch.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+                ch.style.color = pct >= 0 ? '#22c55e' : '#ef4444';
+            } else { ch.textContent = ''; }
+        }
+        const deliv = Number.isFinite(bar.delivery)
+            ? ` D ${fmtQty(bar.delivery)}${bar.volume > 0 ? ` (${(bar.delivery / bar.volume * 100).toFixed(0)}%)` : ''}` : '';
+        set('sym-ohlc', `${bar.date}  O ${fmtPrice(bar.open)}  H ${fmtPrice(bar.high)}  L ${fmtPrice(bar.low)}  C ${fmtPrice(bar.close)}  V ${fmtQty(bar.volume)}${deliv}`);
     }
 
     // Shows a readable, selectable error box (no console needed on a phone)
@@ -187,6 +261,15 @@ class Application {
     async loadActiveSymbol(symbol) {
         try {
             const t0 = performance.now();
+            const token = ++this.loadToken;
+            this.ws.setSymbol(this.ws.active().id, symbol);   // also moves linked sheets
+            const hit = this.barCache.get(symbol);
+            if (hit) {                                         // opened before in this visit
+                this.display(hit);
+                this.setCacheText(`${symbol}: ${hit.length} bars (kept in memory)`);
+                return;
+            }
+            this.updateHeader(null);
             this.setCacheText(`Loading ${symbol}...`);
             let data = null, source = '', note = '';
             const problems = [];
@@ -226,12 +309,17 @@ class Application {
             if (!data) {
                 data = await dataEngine.getStockData(
                     symbol, 2023, new Date().getFullYear(),
-                    (partial) => { if (partial.length) chartEngine.renderCandlestickData(partial); }
+                    (partial) => { if (partial.length && token === this.loadToken) this.display(partial); }
                 );
                 source = 'hyparquet';
                 this.refreshSymbolList();
             }
 
+            if (data.length > 0) {
+                this.barCache.set(symbol, data);
+                if (this.barCache.size > 30) this.barCache.delete(this.barCache.keys().next().value);
+            }
+            if (token !== this.loadToken) return;              // you already opened something else
             const box = document.getElementById('symbol-input');
             if (box && document.activeElement !== box) box.value = symbol;
             if (problems.length) note += ` | ${problems.join(' || ')}`;
@@ -240,7 +328,7 @@ class Application {
                 this.showDiag(problems.join(' || '));
                 return;
             }
-            chartEngine.renderCandlestickData(data);
+            this.display(data);
             this.showDiag(problems.join(' || '));
             const secs = ((performance.now() - t0) / 1000).toFixed(1);
             this.setCacheText(`${source}: ${data.length} bars in ${secs}s${note}`);
