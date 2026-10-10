@@ -1,176 +1,109 @@
 /**
- * sheet-manager.js
- * Dynamic Multi-Sheet & Multi-Pane Manager for AmiBroker Web
+ * SheetManager - Multi-Sheet Workstation Manager with AmiBroker Link & Lock Controls
  */
-
 export class SheetManager {
-    constructor(appInstance) {
-        this.app = appInstance;
-        this.sheets = [];
-        this.activeSheetId = null;
-        this.nextSheetIndex = 1;
-        
-        // Initialize with default sheets
-        this.initDefaultSheets();
+  constructor(containerId, onSheetChange) {
+    this.container = document.getElementById(containerId);
+    this.onSheetChange = onSheetChange;
+    this.linkColors = ["#64748b", "#ef4444", "#22c55e", "#3b82f6", "#eab308"]; // Gray, Red, Green, Blue, Yellow
+    
+    // Initialize 10 AmiBroker Workstation Sheets
+    this.sheets = Array.from({ length: 10 }, (_, i) => ({
+      id: `sheet-${i + 1}`,
+      name: `Sheet ${i + 1}`,
+      active: i === 0,
+      locked: false,
+      symbolLinkIdx: 0,   // 0 = Unlinked (Gray)
+      intervalLinkIdx: 0, // 0 = Unlinked (Gray)
+      chartId: 1000 + i + 1,
+    }));
+  }
+
+  render() {
+    if (!this.container) return;
+    this.container.innerHTML = "";
+
+    const activeSheet = this.sheets.find((s) => s.active) || this.sheets[0];
+
+    // Left Controls: Sheet Lock, Symbol Link (S), Interval Link (I)
+    const controlGroup = document.createElement("div");
+    controlGroup.className = "flex items-center space-x-1 pr-3 border-r border-slate-800 shrink-0";
+
+    // Lock Toggle Button
+    const lockBtn = document.createElement("button");
+    lockBtn.className = `p-1 text-[11px] rounded hover:bg-slate-800 transition ${
+      activeSheet.locked ? "text-amber-400 font-bold" : "text-slate-500"
+    }`;
+    lockBtn.title = activeSheet.locked ? "Sheet Locked" : "Sheet Unlocked";
+    lockBtn.innerHTML = activeSheet.locked ? "🔒" : "🔓";
+    lockBtn.onclick = () => {
+      activeSheet.locked = !activeSheet.locked;
+      this.render();
+    };
+
+    // Symbol Link (S) Badge
+    const symbolLinkBtn = document.createElement("button");
+    symbolLinkBtn.className = "px-1.5 py-0.5 text-[10px] font-extrabold rounded text-slate-950 transition";
+    symbolLinkBtn.style.backgroundColor = this.linkColors[activeSheet.symbolLinkIdx];
+    symbolLinkBtn.textContent = "S";
+    symbolLinkBtn.title = "Symbol Link Group";
+    symbolLinkBtn.onclick = () => {
+      activeSheet.symbolLinkIdx = (activeSheet.symbolLinkIdx + 1) % this.linkColors.length;
+      this.render();
+    };
+
+    // Interval Link (I) Badge
+    const intervalLinkBtn = document.createElement("button");
+    intervalLinkBtn.className = "px-1.5 py-0.5 text-[10px] font-extrabold rounded text-slate-950 transition";
+    intervalLinkBtn.style.backgroundColor = this.linkColors[activeSheet.intervalLinkIdx];
+    intervalLinkBtn.textContent = "I";
+    intervalLinkBtn.title = "Interval Link Group";
+    intervalLinkBtn.onclick = () => {
+      activeSheet.intervalLinkIdx = (activeSheet.intervalLinkIdx + 1) % this.linkColors.length;
+      this.render();
+    };
+
+    controlGroup.appendChild(lockBtn);
+    controlGroup.appendChild(symbolLinkBtn);
+    controlGroup.appendChild(intervalLinkBtn);
+    this.container.appendChild(controlGroup);
+
+    // Sheet Tabs Scrollable Bar
+    const tabsWrapper = document.createElement("div");
+    tabsWrapper.className = "flex items-center space-x-1 overflow-x-auto shrink-0 flex-1 scrollbar-none";
+
+    this.sheets.forEach((sheet) => {
+      const tab = document.createElement("button");
+      tab.className = `px-3 py-1 text-xs font-medium rounded-t transition whitespace-nowrap ${
+        sheet.active
+          ? "bg-slate-800 text-sky-400 border-t-2 border-sky-400"
+          : "bg-slate-900/50 text-slate-400 hover:text-slate-200"
+      }`;
+      tab.textContent = sheet.name;
+      tab.onclick = () => this.selectSheet(sheet.id);
+      tabsWrapper.appendChild(tab);
+    });
+
+    this.container.appendChild(tabsWrapper);
+  }
+
+  init() {
+    this.render();
+  }
+
+  selectSheet(sheetId) {
+    this.sheets.forEach((s) => (s.active = s.id === sheetId));
+    this.render();
+    const current = this.sheets.find((s) => s.id === sheetId);
+    if (this.onSheetChange && current) {
+      this.onSheetChange(current);
     }
+  }
 
-    initDefaultSheets() {
-        this.addSheet("Sheet 1");
-        this.addSheet("Sheet 2");
-        this.setActiveSheet(this.sheets[0].id);
-    }
-
-    addSheet(name = null) {
-        const id = 'sheet_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-        const sheetName = name || `Sheet ${this.nextSheetIndex++}`;
-        
-        const newSheet = {
-            id: id,
-            name: sheetName,
-            symbol: this.app.currentSymbol || 'NIFTY 50',
-            timeframe: 'D',
-            panes: [
-                { id: 'pane_' + Date.now() + '_1', type: 'candlestick', height: '60%', indicators: [] },
-                { id: 'pane_' + Date.now() + '_2', type: 'volume', height: '20%', indicators: [{ type: 'SMA', period: 20, color: '#ff9800' }] },
-                { id: 'pane_' + Date.now() + '_3', type: 'delivery', height: '20%', indicators: [] }
-            ]
-        };
-
-        this.sheets.push(newSheet);
-        this.renderTabs();
-        this.setActiveSheet(id);
-        return newSheet;
-    }
-
-    removeSheet(id) {
-        if (this.sheets.length <= 1) {
-            console.warn("At least one sheet must remain.");
-            return;
-        }
-
-        const index = this.sheets.findIndex(s => s.id === id);
-        if (index !== -1) {
-            this.sheets.splice(index, 1);
-            if (this.activeSheetId === id) {
-                const nextActive = this.sheets[Math.max(0, index - 1)];
-                this.setActiveSheet(nextActive.id);
-            } else {
-                this.renderTabs();
-            }
-        }
-    }
-
-    renameSheet(id, newName) {
-        const sheet = this.sheets.find(s => s.id === id);
-        if (sheet && newName.trim()) {
-            sheet.name = newName.trim();
-            this.renderTabs();
-        }
-    }
-
-    setActiveSheet(id) {
-        const sheet = this.sheets.find(s => s.id === id);
-        if (!sheet) return;
-
-        this.activeSheetId = id;
-        this.renderTabs();
-        
-        if (this.app && typeof this.app.renderActiveSheet === 'function') {
-            this.app.renderActiveSheet(sheet);
-        }
-    }
-
-    getActiveSheet() {
-        return this.sheets.find(s => s.id === this.activeSheetId) || this.sheets[0];
-    }
-
-    addPaneToActiveSheet(type = 'indicator', subType = 'RSI') {
-        const sheet = this.getActiveSheet();
-        if (!sheet) return;
-
-        const newPane = {
-            id: 'pane_' + Date.now(),
-            type: type,
-            subType: subType,
-            height: '20%',
-            indicators: []
-        };
-        sheet.panes.push(newPane);
-        this.app.renderActiveSheet(sheet);
-    }
-
-    removePaneFromActiveSheet(paneId) {
-        const sheet = this.getActiveSheet();
-        if (!sheet || sheet.panes.length <= 1) return;
-
-        sheet.panes = sheet.panes.filter(p => p.id !== paneId);
-        this.app.renderActiveSheet(sheet);
-    }
-
-    addOverlayToPane(paneId, indicatorConfig) {
-        const sheet = this.getActiveSheet();
-        if (!sheet) return;
-
-        const pane = sheet.panes.find(p => p.id === paneId);
-        if (pane) {
-            if (!pane.indicators) pane.indicators = [];
-            pane.indicators.push(indicatorConfig);
-            this.app.renderActiveSheet(sheet);
-        }
-    }
-
-    renderTabs() {
-        let container = document.getElementById('sheet-tabs-container');
-        if (!container) return;
-
-        container.innerHTML = '';
-        
-        this.sheets.forEach(sheet => {
-            const tabEl = document.createElement('div');
-            tabEl.className = `sheet-tab ${sheet.id === this.activeSheetId ? 'active' : ''}`;
-            
-            const titleSpan = document.createElement('span');
-            titleSpan.className = 'sheet-title';
-            titleSpan.textContent = sheet.name;
-            titleSpan.title = "Double-click to rename";
-            
-            titleSpan.addEventListener('dblclick', () => {
-                const input = document.createElement('input');
-                input.type = 'text';
-                input.value = sheet.name;
-                input.className = 'sheet-rename-input';
-                input.onblur = (e) => this.renameSheet(sheet.id, e.target.value);
-                input.onkeydown = (e) => { if (e.key === 'Enter') this.renameSheet(sheet.id, e.target.value); };
-                tabEl.replaceChild(input, titleSpan);
-                input.focus();
-            });
-
-            tabEl.addEventListener('click', (e) => {
-                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
-                    this.setActiveSheet(sheet.id);
-                }
-            });
-
-            if (this.sheets.length > 1) {
-                const closeBtn = document.createElement('button');
-                closeBtn.className = 'sheet-close-btn';
-                closeBtn.innerHTML = '&times;';
-                closeBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    this.removeSheet(sheet.id);
-                };
-                tabEl.appendChild(closeBtn);
-            }
-
-            tabEl.insertBefore(titleSpan, tabEl.firstChild);
-            container.appendChild(tabEl);
-        });
-
-        // Add New Sheet Button (+)
-        const addBtn = document.createElement('button');
-        addBtn.className = 'sheet-add-btn';
-        addBtn.innerHTML = '+ Add Sheet';
-        addBtn.onclick = () => this.addSheet();
-        container.appendChild(addBtn);
-    }
+  getActiveSheet() {
+    return this.sheets.find((s) => s.active) || this.sheets[0];
+  }
 }
+
+// app.js imports this singleton
+export const sheetManager = new SheetManager("sheet-bar");
