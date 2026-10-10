@@ -11,6 +11,7 @@ const COLUMN_NAMES = {
   low:    ['low'],
   close:  ['close'],
   volume: ['volume', 'vol'],
+  delivery: ['delivery', 'deliv_qty', 'delivery_qty'],   // optional
 };
 
 function toDateString(v) {
@@ -87,7 +88,7 @@ export class RangeEngine {
     if (!this.metaCache.has(info.year)) {
       const p = (async () => {
         const file = this._buffer(info);
-        const metadata = await parquetMetadataAsync(file, 1 << 18); // last 256 KB holds the footer
+        const metadata = await parquetMetadataAsync(file, 1 << 17); // last 128 KB normally holds the footer (~80 KB)
         const first = metadata.row_groups[0].columns.map(c => c.meta_data.path_in_schema[0]);
         const lower = new Map(first.map(n => [String(n).toLowerCase(), n]));
         const col = {};
@@ -183,11 +184,12 @@ export class RangeEngine {
       l: Float64Array.from(rows, r => r.low),
       c: Float64Array.from(rows, r => r.close),
       v: Float64Array.from(rows, r => r.volume),
+      q: Float64Array.from(rows, r => (r.delivery === undefined ? NaN : r.delivery)),
     };
   }
 
   _unpack(p, symbol) {
-    return p.d.map((d, i) => ({ symbol, date: d, open: p.o[i], high: p.h[i], low: p.l[i], close: p.c[i], volume: p.v[i] }));
+    return p.d.map((d, i) => ({ symbol, date: d, open: p.o[i], high: p.h[i], low: p.l[i], close: p.c[i], volume: p.v[i], delivery: p.q ? p.q[i] : NaN }));
   }
 
   // ---- one symbol, one year ----
@@ -207,7 +209,7 @@ export class RangeEngine {
 
     let rows = [];
     if (from >= 0) {
-      const wanted = ['symbol', 'date', 'open', 'high', 'low', 'close', 'volume']
+      const wanted = ['symbol', 'date', 'open', 'high', 'low', 'close', 'volume', 'delivery']
         .map(k => col[k]).filter(Boolean);
       let out = [];
       await parquetRead({
@@ -222,6 +224,7 @@ export class RangeEngine {
         open: Number(r[col.open] ?? 0), high: Number(r[col.high] ?? 0),
         low: Number(r[col.low] ?? 0), close: Number(r[col.close] ?? 0),
         volume: Number(col.volume ? (r[col.volume] ?? 0) : 0),
+        delivery: (col.delivery && r[col.delivery] != null) ? Number(r[col.delivery]) : NaN, // NaN = not available
       }));
     }
     this._cachePut({ key, token: info.token, data: this._pack(rows), ts: Date.now() }); // not awaited

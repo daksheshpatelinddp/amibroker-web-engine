@@ -1,140 +1,109 @@
-class SheetManager {
-  constructor(app) {
-    this.app = app;
-    this.sheets = [];
-    this.activeSheetId = null;
-    this.sheetCounter = 1;
-
-    this.container = document.getElementById('sheets-list');
-    this.addBtn = document.getElementById('add-sheet-btn');
-
-    this.init();
-  }
-
-  init() {
-    if (this.addBtn) {
-      this.addBtn.addEventListener('click', () => this.addSheet());
-    }
-    if (this.sheets.length === 0) {
-      this.addSheet("Sheet 1");
-      this.addSheet("Sheet 2");
-    }
-  }
-
-  addSheet(name = null) {
-    const id = 'sheet_' + Date.now() + Math.random().toString(36).substring(2, 5);
-    const sheetName = name || `Sheet ${this.sheetCounter++}`;
+/**
+ * SheetManager - Multi-Sheet Workstation Manager with AmiBroker Link & Lock Controls
+ */
+export class SheetManager {
+  constructor(containerId, onSheetChange) {
+    this.container = document.getElementById(containerId);
+    this.onSheetChange = onSheetChange;
+    this.linkColors = ["#64748b", "#ef4444", "#22c55e", "#3b82f6", "#eab308"]; // Gray, Red, Green, Blue, Yellow
     
-    const sheet = {
-      id: id,
-      name: sheetName,
-      drawings: [],
-      studies: []
-    };
-
-    this.sheets.push(sheet);
-    this.setActiveSheet(id);
-    this.render();
-  }
-
-  removeSheet(id, e) {
-    if (e) e.stopPropagation();
-    if (this.sheets.length <= 1) {
-      alert("At least one sheet must remain.");
-      return;
-    }
-
-    const index = this.sheets.findIndex(s => s.id === id);
-    if (index !== -1) {
-      this.sheets.splice(index, 1);
-      
-      if (this.activeSheetId === id) {
-        const nextActive = this.sheets[Math.max(0, index - 1)];
-        this.setActiveSheet(nextActive.id);
-      } else {
-        this.render();
-      }
-    }
-  }
-
-  setActiveSheet(id) {
-    this.activeSheetId = id;
-    this.render();
-    if (this.app && typeof this.app.onSheetChange === 'function') {
-      this.app.onSheetChange(this.getActiveSheet());
-    }
-  }
-
-  getActiveSheet() {
-    return this.sheets.find(s => s.id === this.activeSheetId);
-  }
-
-  renameSheet(id, newName) {
-    const sheet = this.sheets.find(s => s.id === id);
-    if (sheet && newName.trim()) {
-      sheet.name = newName.trim();
-    }
-    this.render();
+    // Initialize 10 AmiBroker Workstation Sheets
+    this.sheets = Array.from({ length: 10 }, (_, i) => ({
+      id: `sheet-${i + 1}`,
+      name: `Sheet ${i + 1}`,
+      active: i === 0,
+      locked: false,
+      symbolLinkIdx: 0,   // 0 = Unlinked (Gray)
+      intervalLinkIdx: 0, // 0 = Unlinked (Gray)
+      chartId: 1000 + i + 1,
+    }));
   }
 
   render() {
     if (!this.container) return;
-    this.container.innerHTML = '';
+    this.container.innerHTML = "";
 
-    this.sheets.forEach(sheet => {
-      const tab = document.createElement('div');
-      tab.className = `sheet-tab ${sheet.id === this.activeSheetId ? 'active' : ''}`;
-      
-      const titleSpan = document.createElement('span');
-      titleSpan.textContent = sheet.name;
-      tab.appendChild(titleSpan);
+    const activeSheet = this.sheets.find((s) => s.active) || this.sheets[0];
 
-      // Inline renaming on double click
-      tab.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'sheet-tab-input';
-        input.value = sheet.name;
+    // Left Controls: Sheet Lock, Symbol Link (S), Interval Link (I)
+    const controlGroup = document.createElement("div");
+    controlGroup.className = "flex items-center space-x-1 pr-3 border-r border-slate-800 shrink-0";
 
-        const finishRename = () => {
-          this.renameSheet(sheet.id, input.value);
-        };
+    // Lock Toggle Button
+    const lockBtn = document.createElement("button");
+    lockBtn.className = `p-1 text-[11px] rounded hover:bg-slate-800 transition ${
+      activeSheet.locked ? "text-amber-400 font-bold" : "text-slate-500"
+    }`;
+    lockBtn.title = activeSheet.locked ? "Sheet Locked" : "Sheet Unlocked";
+    lockBtn.innerHTML = activeSheet.locked ? "🔒" : "🔓";
+    lockBtn.onclick = () => {
+      activeSheet.locked = !activeSheet.locked;
+      this.render();
+    };
 
-        input.addEventListener('blur', finishRename);
-        input.addEventListener('keydown', (evt) => {
-          if (evt.key === 'Enter') {
-            finishRename();
-          } else if (evt.key === 'Escape') {
-            this.render();
-          }
-        });
+    // Symbol Link (S) Badge
+    const symbolLinkBtn = document.createElement("button");
+    symbolLinkBtn.className = "px-1.5 py-0.5 text-[10px] font-extrabold rounded text-slate-950 transition";
+    symbolLinkBtn.style.backgroundColor = this.linkColors[activeSheet.symbolLinkIdx];
+    symbolLinkBtn.textContent = "S";
+    symbolLinkBtn.title = "Symbol Link Group";
+    symbolLinkBtn.onclick = () => {
+      activeSheet.symbolLinkIdx = (activeSheet.symbolLinkIdx + 1) % this.linkColors.length;
+      this.render();
+    };
 
-        tab.replaceChild(input, titleSpan);
-        input.focus();
-        input.select();
-      });
+    // Interval Link (I) Badge
+    const intervalLinkBtn = document.createElement("button");
+    intervalLinkBtn.className = "px-1.5 py-0.5 text-[10px] font-extrabold rounded text-slate-950 transition";
+    intervalLinkBtn.style.backgroundColor = this.linkColors[activeSheet.intervalLinkIdx];
+    intervalLinkBtn.textContent = "I";
+    intervalLinkBtn.title = "Interval Link Group";
+    intervalLinkBtn.onclick = () => {
+      activeSheet.intervalLinkIdx = (activeSheet.intervalLinkIdx + 1) % this.linkColors.length;
+      this.render();
+    };
 
-      // Tab selection click
-      tab.addEventListener('click', () => {
-        if (this.activeSheetId !== sheet.id) {
-          this.setActiveSheet(sheet.id);
-        }
-      });
+    controlGroup.appendChild(lockBtn);
+    controlGroup.appendChild(symbolLinkBtn);
+    controlGroup.appendChild(intervalLinkBtn);
+    this.container.appendChild(controlGroup);
 
-      // Remove button (×) if more than 1 sheet exists
-      if (this.sheets.length > 1) {
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'close-btn';
-        closeBtn.innerHTML = '&times;';
-        closeBtn.title = 'Remove Sheet';
-        closeBtn.addEventListener('click', (e) => this.removeSheet(sheet.id, e));
-        tab.appendChild(closeBtn);
-      }
+    // Sheet Tabs Scrollable Bar
+    const tabsWrapper = document.createElement("div");
+    tabsWrapper.className = "flex items-center space-x-1 overflow-x-auto shrink-0 flex-1 scrollbar-none";
 
-      this.container.appendChild(tab);
+    this.sheets.forEach((sheet) => {
+      const tab = document.createElement("button");
+      tab.className = `px-3 py-1 text-xs font-medium rounded-t transition whitespace-nowrap ${
+        sheet.active
+          ? "bg-slate-800 text-sky-400 border-t-2 border-sky-400"
+          : "bg-slate-900/50 text-slate-400 hover:text-slate-200"
+      }`;
+      tab.textContent = sheet.name;
+      tab.onclick = () => this.selectSheet(sheet.id);
+      tabsWrapper.appendChild(tab);
     });
+
+    this.container.appendChild(tabsWrapper);
+  }
+
+  init() {
+    this.render();
+  }
+
+  selectSheet(sheetId) {
+    this.sheets.forEach((s) => (s.active = s.id === sheetId));
+    this.render();
+    const current = this.sheets.find((s) => s.id === sheetId);
+    if (this.onSheetChange && current) {
+      this.onSheetChange(current);
+    }
+  }
+
+  getActiveSheet() {
+    return this.sheets.find((s) => s.active) || this.sheets[0];
   }
 }
 
-window.SheetManager = SheetManager;
+// app.js imports this singleton
+export const sheetManager = new SheetManager("sheet-bar");
