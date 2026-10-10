@@ -26,7 +26,7 @@
   </script>
 
   <!-- TradingView Lightweight Charts CDN -->
-  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@5.2.1/dist/lightweight-charts.standalone.production.js"></script>
 
   <link rel="stylesheet" href="css/style.css" />
 </head>
@@ -53,18 +53,32 @@
 
   <!-- Main Workstation Canvas Area -->
   <main class="flex-1 flex flex-col min-h-0 relative">
-    <!-- Workstation Sheet Tabs -->
-    <div id="sheet-bar" class="h-8 bg-slate-900/80 border-b border-slate-800 flex items-center px-2 space-x-1 overflow-x-auto shrink-0">
-      <!-- Sheet Tabs injected by SheetManager -->
+    <!-- Symbol header: the symbol of the active sheet, last price and change (follows the crosshair) -->
+    <div id="symbol-bar" class="bg-slate-900/80 border-b border-slate-800 flex items-center justify-between px-3 py-1 shrink-0 space-x-2">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-baseline space-x-2">
+          <span id="sym-title" class="text-base font-bold text-slate-100 truncate">-</span>
+          <span id="sym-price" class="text-sm text-slate-200"></span>
+          <span id="sym-change" class="text-xs"></span>
+        </div>
+        <div id="sym-ohlc" class="text-[10px] text-slate-400 truncate"></div>
+      </div>
+      <div class="flex items-center space-x-1 shrink-0">
+        <button id="btn-add-pane" type="button" class="px-2 py-1 rounded bg-sky-600 text-white text-[11px] font-semibold">＋ Pane</button>
+        <button id="btn-fit" type="button" class="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200 text-[11px]">Fit</button>
+        <button id="btn-latest" type="button" class="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200 text-[11px]">Latest</button>
+      </div>
     </div>
 
-    <!-- Multi-pane Chart Stack -->
+    <!-- Multi-pane chart. #pane-labels holds the tappable pane titles drawn over it -->
     <div id="chart-workspace" class="flex-1 min-h-0 w-full relative bg-slate-950 flex flex-col">
       <div id="chart-container" class="w-full h-full min-h-0 flex-1"></div>
-      <div class="absolute left-2 top-2 z-20 flex space-x-1">
-        <button id="btn-fit" class="px-2 py-1 rounded bg-slate-800/90 border border-slate-700 text-slate-200 text-[11px]">Fit</button>
-        <button id="btn-latest" class="px-2 py-1 rounded bg-slate-800/90 border border-slate-700 text-slate-200 text-[11px]">Latest</button>
-      </div>
+      <div id="pane-labels" class="absolute inset-0 pointer-events-none z-20"></div>
+    </div>
+
+    <!-- Sheet tabs: below the chart -->
+    <div id="sheet-bar" class="h-9 bg-slate-900/80 border-t border-slate-800 flex items-center px-2 shrink-0">
+      <!-- injected by SheetManager -->
     </div>
   </main>
 
