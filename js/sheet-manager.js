@@ -15,7 +15,6 @@ class SheetManager {
     if (this.addBtn) {
       this.addBtn.addEventListener('click', () => this.addSheet());
     }
-    // Initialize default sheets if none exist
     if (this.sheets.length === 0) {
       this.addSheet("Sheet 1");
       this.addSheet("Sheet 2");
