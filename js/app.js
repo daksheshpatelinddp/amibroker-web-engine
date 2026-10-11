@@ -38,7 +38,12 @@ class Application {
         dataEngine.baseUrl = DATABASES[ACTIVE_DB].baseUrl; // last-resort engine uses the same folder
         dataEngine.onProgress = (m) => this.setCacheText(m);
         // On a phone there is no console: surface any error in the footer
-        window.addEventListener('error', (e) => this.setCacheText('ERR: ' + e.message));
+       
+       window.addEventListener('error', (e) => {
+    if (String(e.message).includes('ResizeObserver loop')) return;
+    this.setCacheText('ERR: ' + e.message);
+});
+
         window.addEventListener('unhandledrejection', (e) => this.setCacheText('ERR: ' + (e.reason && e.reason.message || e.reason)));
 
         // UI first: a chart/sheet problem must never block data loading
