@@ -35,7 +35,7 @@ console.log(`  ${BUILTIN_FORMULAS.length} formulas checked`);
 console.log('reference');
 const names = new Set(aflEngine.functionNames());
 const refNames = new Set([...AFL_REFERENCE.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\(/g)].map((m) => m[1].toLowerCase()));
-const skip = new Set(['if', 'for', 'while', 'do', 'function', 'name', 'array', 'x', 'y', 'a', 'b']);
+const skip = new Set(['if', 'for', 'while', 'do', 'switch', 'function', 'name', 'array', 'x', 'y', 'a', 'b']);
 for (const n of refNames) if (!skip.has(n) && !names.has(n) && !['_section_begin', '_section_end'].includes(n)) ok(false, `reference mentions unsupported function ${n}()`);
 ok(run(AFL_EXAMPLE).errors.length === 0, 'AFL_EXAMPLE runs');
 
@@ -130,6 +130,46 @@ console.log('parameters');
   ok(r.vars.a[7] === bars.v[7] && r.vars.t === 1 && r.plots[0].hidden === true, 'user values: Volume field, trigger fires once, Hidden style');
   r = run('a = ParamField("S", 7); b = ParamField("S2", 6);');
   ok(r.vars.a[3] === bars.dq[3] && r.vars.b[3] === 0, 'Delivery field + OI');
+}
+
+// ---------------------------------------------------------------- switch + on-chart GUI controls
+console.log('switch + gui');
+{
+  let r = run('s=0; for(i=0;i<4;i++){ switch(i){ case 0: s+=1; break; case 1: s+=10; case 2: s+=100; break; default: s+=1000; } } t = ""; switch("b"){ case "a": t="A"; break; case "b": t="B"; break; }');
+  ok(r.errors.length === 0 && r.vars.s === 1211 && r.vars.t === 'B', 'switch: break, fall-through, default, text: ' + (r.errors[0] || r.vars.s));
+  const code = `
+idA = 1; idB = 2; idS = 3; idE = 4; idD = 5; idR1 = 6; idR2 = 7;
+a = GuiButton("Go", idA, 10, 10, 60, 22, notifyClicked);
+b = GuiCheckBox("Show", idB, 80, 10, 60, 22, notifyClicked);
+c = GuiSlider(idS, 150, 10, 120, 22, notifyEditChange);
+GuiEdit(idE, 280, 10, 80, 22, notifyEditChange | notifyHitReturn);
+GuiDateTime(idD, 370, 10, 100, 22, notifyEditChange);
+GuiRadio("One", idR1, 10, 40, 60, 22, notifyClicked);
+GuiRadio("Two", idR2, 80, 40, 60, 22, notifyClicked);
+GuiSetRange(idS, 5, 50, 5, 5);
+if (c == guiNew) GuiSetValue(idS, 20);
+clicked = 0; ev = "";
+for (n = 0; id = GuiGetEvent(n, 0); n++) {
+  code = GuiGetEvent(n, 1);
+  switch (id) { case idA: clicked++; break; case idS: ev = GuiGetEvent(n, 2); break; default: break; }
+}
+chk = GuiGetCheck(idB); val = GuiGetValue(idS); txt = GuiGetText(idE); dn = GuiGetValue(idD); cap = GuiGetText(idA);
+GuiSetText("Run", idA);`;
+  r = run(code);
+  ok(r.errors.length === 0, 'GUI formula runs: ' + r.errors[0]);
+  ok(r.gui.length === 7 && r.gui[0].type === 'button' && r.gui[0].x === 10 && r.gui[2].min === 5 && r.gui[2].max === 50 && r.gui[2].step === 5, 'controls described for the chart (type, position, slider range)');
+  ok(r.vars.a === 1 && r.vars.c === 1, 'first run returns guiNew');
+  ok(r.vars.val === 20 && r.guiState[3].value === 20, 'start value set once and kept as state');
+  ok(r.gui[0].text === 'Run' && r.gui[5].group === 6 && r.gui[6].group === 6, 'GuiSetText(text,id) changes the caption; radios share a group');
+  const st = r.guiState;
+  st[2] = { checked: 1 }; st[3].value = 35; st[4] = { text: '42.5' }; st[5] = { text: '2024-01-31' };
+  const r2 = run(code, { guiState: st, guiKnown: [1, 2, 3, 4, 5, 6, 7], guiEvents: [{ id: 1, code: 1 }, { id: 3, code: 16 }, { id: 1, code: 1 }] });
+  ok(r2.vars.a === 2 && r2.vars.c === 2, 'later runs return guiExisting');
+  ok(r2.vars.clicked === 2 && r2.vars.ev === '3:16', 'GuiGetEvent queue: 2 clicks, slider event text');
+  ok(r2.vars.chk === 1 && r2.vars.val === 35 && r2.vars.txt === '42.5' && r2.vars.dn === 1240131, 'user changes are read back (check, slider, edit, date)');
+  const r3 = run('GuiButton("x", 1, 0, 0, 10, 10, notifyClicked); GuiEnable(1, 0); GuiButton("y", 2, 0, 0, 10, 10, 1); GuiDestroy(2); z = GuiSetValue(99, 1);');
+  ok(r3.gui.length === 1 && r3.gui[0].enabled === false && r3.vars.z === 0, 'GuiEnable / GuiDestroy / unknown id');
+  ok(/greater than zero/.test(run('GuiButton("x", 0, 0, 0, 10, 10, 1);').errors[0] || ''), 'id must be above zero');
 }
 
 // ---------------------------------------------------------------- zig-zag, options
