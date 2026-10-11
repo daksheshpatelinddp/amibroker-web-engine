@@ -5,6 +5,8 @@
  */
 import { barsToArrays, sma, ema, rsi, macd, sourceArray, applyTransform } from './indicators.js';
 import { paneTitle, overlayTitle } from './workspace.js';
+import { aflEngine, colorToHex, shapeKind } from './afl-engine.js';
+import { formulaStore } from './formula-store.js';
 
 const COLORS = { up: '#22c55e', down: '#ef4444', grid: '#1e293b', border: '#334155', text: '#94a3b8', bg: '#020617' };
 const DEFAULT_BARS_SHOWN = 250;   // a fresh chart opens on about one year; "Fit" shows everything
@@ -19,6 +21,8 @@ export class ChartEngine {
     this.sheet = null;
     this.onHover = null;       // (barIndex | null) => void
     this.onPaneClick = null;   // (paneId) => void
+    this.onFormulaErrors = null; // (paneId, errors[]) => void   called after a draw when a formula had problems
+    this.paneInfo = new Map(); // paneId -> { errors, params, legend, notes } for formula panes
     this._labelTimer = null;
     if (this.container && typeof ResizeObserver !== 'undefined') {
       new ResizeObserver(() => this._scheduleLabels()).observe(this.container);
@@ -56,6 +60,7 @@ export class ChartEngine {
     this.sheet = sheet;
     this.arrays = barsToArrays(rows);
     this.mainSeries = null;
+    this.paneInfo = new Map();
 
     const chart = LWC.createChart(this.container, {
       autoSize: true,
@@ -89,6 +94,9 @@ export class ChartEngine {
       } catch (e) { chart.timeScale().fitContent(); }
     }
     this._scheduleLabels();
+    if (this.onFormulaErrors) {
+      for (const [paneId, info] of this.paneInfo) if (info.errors.length) this.onFormulaErrors(paneId, info.errors);
+    }
   }
 
   // ---- building one pane ----
@@ -156,6 +164,7 @@ export class ChartEngine {
         overlays(m.line);
         break;
       }
+      case 'afl': this._buildAflPane(chart, LWC, pane, idx); break;
       case 'custom': {
         const vals = applyTransform(sourceArray(a, pane.params.source), pane.params.transform, pane.params.period);
         // volume-like data and their averages read better as 12.3M than as 12345678.00
@@ -166,6 +175,118 @@ export class ChartEngine {
         break;
       }
       default: break;
+    }
+  }
+
+  // ---- a pane driven by an AFL formula ----
+  _buildAflPane(chart, LWC, pane, idx) {
+    const a = this.arrays, t = a.t;
+    const info = { errors: [], params: [], legend: [], notes: [] };
+    this.paneInfo.set(pane.id, info);
+    const f = formulaStore.get(pane.params.formulaId);
+    if (!f) { info.errors.push('The formula for this pane was deleted. Tap the pane title to remove the pane or choose another formula.'); return; }
+
+    const res = aflEngine.run(f.code, a, { symbol: this.sheet ? this.sheet.symbol : '', params: pane.params.values || {} });
+    info.errors = res.errors; info.params = res.params; info.title = res.title;
+
+    const PALETTE = ['#38bdf8', '#f59e0b', '#a78bfa', '#f472b6', '#34d399', '#f87171', '#fbbf24', '#e2e8f0'];
+    let nextColor = 0;
+    const baseColor = (c) => {
+      if (c instanceof Float64Array) { for (let i = c.length - 1; i >= 0; i--) { const h = colorToHex(c[i]); if (h) return h; } return PALETTE[nextColor++ % PALETTE.length]; }
+      return colorToHex(c) || PALETTE[nextColor++ % PALETTE.length];
+    };
+    const pointColor = (c, i) => (c instanceof Float64Array ? colorToHex(c[i]) : null);
+    const format = (data, name) => {
+      let mx = 0;
+      for (let i = 0; i < data.length; i++) { const v = Math.abs(data[i]); if (v > mx && Number.isFinite(v)) mx = v; }
+      if (mx >= 1e5 || /volume|deliver/i.test(name || '')) return { type: 'volume' };
+      if (mx < 1) return { type: 'price', precision: 4, minMove: 0.0001 };
+      if (mx < 10) return { type: 'price', precision: 3, minMove: 0.001 };
+      return { type: 'price', precision: 2, minMove: 0.01 };
+    };
+
+    let first = null;
+    res.plots.forEach((p, k) => {
+      if (p.noLine && p.kind === 'line' && !p.dots) return;
+      const isOhlc = p.kind === 'candle' || p.kind === 'bar';
+      const color = isOhlc ? (colorToHex(typeof p.color === 'number' ? p.color : -1) || '#94a3b8') : baseColor(p.color);
+      const common = { priceLineVisible: false, lastValueVisible: !p.noLabel && p.kind !== 'hist' };
+      if (p.ownScale) common.priceScaleId = `own_${pane.id}_${k}`;
+      let s;
+      if (p.kind === 'candle' || p.kind === 'bar') {
+        const o = p.ohlc, scalar = typeof p.color === 'number' ? colorToHex(p.color) : null;
+        const up = scalar || COLORS.up, down = scalar || COLORS.down;
+        const data = t.map((time, i) => {
+          if (!Number.isFinite(o.c[i]) || !Number.isFinite(o.o[i]) || !Number.isFinite(o.h[i]) || !Number.isFinite(o.l[i])) return { time };
+          const pt = { time, open: o.o[i], high: o.h[i], low: o.l[i], close: o.c[i] };
+          const pc = pointColor(p.color, i);
+          if (pc) { pt.color = pc; pt.wickColor = pc; pt.borderColor = pc; }
+          return pt;
+        });
+        s = p.kind === 'candle'
+          ? chart.addSeries(LWC.CandlestickSeries, { ...common, lastValueVisible: true, priceLineVisible: true, upColor: up, downColor: down, borderVisible: false, wickUpColor: up, wickDownColor: down }, idx)
+          : chart.addSeries(LWC.BarSeries, { ...common, lastValueVisible: true, priceLineVisible: true, upColor: up, downColor: down }, idx);
+        s.setData(data);
+        if (!this.mainSeries) this.mainSeries = s;
+      } else if (p.kind === 'hist') {
+        s = chart.addSeries(LWC.HistogramSeries, { ...common, color, priceFormat: format(p.data, p.name) }, idx);
+        s.setData(t.map((time, i) => {
+          if (!Number.isFinite(p.data[i])) return { time };
+          const pc = pointColor(p.color, i);
+          return pc ? { time, value: p.data[i], color: pc } : { time, value: p.data[i] };
+        }));
+      } else if (p.kind === 'area') {
+        s = chart.addSeries(LWC.AreaSeries, { ...common, lineColor: color, topColor: color + '55', bottomColor: color + '08', lineWidth: p.thick ? 3 : 2, priceFormat: format(p.data, p.name) }, idx);
+        s.setData(t.map((time, i) => (Number.isFinite(p.data[i]) ? { time, value: p.data[i] } : { time })));
+      } else {
+        s = chart.addSeries(LWC.LineSeries, {
+          ...common, color, lineWidth: p.thick ? 2 : 1, crosshairMarkerVisible: false, priceFormat: format(p.data, p.name),
+          lineStyle: p.dashed ? 2 : 0, lineType: p.step ? 1 : 0,
+          ...(p.dots ? { lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2 } : {}),
+        }, idx);
+        s.setData(t.map((time, i) => {
+          if (!Number.isFinite(p.data[i])) return { time };
+          const pc = pointColor(p.color, i);
+          return pc ? { time, value: p.data[i], color: pc } : { time, value: p.data[i] };
+        }));
+      }
+      if (p.ownScale) {
+        try { s.priceScale().applyOptions({ scaleMargins: p.kind === 'hist' ? { top: 0.78, bottom: 0 } : { top: 0.1, bottom: 0.1 }, visible: false }); } catch (e) { /* ignore */ }
+      }
+      if (!first) first = s;
+      if (p.name && !isOhlc && !(p.kind === 'hist' && p.ownScale)) info.legend.push({ name: p.name, color });
+    });
+
+    // horizontal grid lines, and arrows from PlotShapes
+    const anchor = () => {
+      if (first) return first;
+      first = chart.addSeries(LWC.LineSeries, { lineVisible: false, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }, idx);
+      first.setData(t.map((time, i) => (Number.isFinite(a.c[i]) ? { time, value: a.c[i] } : { time })));
+      return first;
+    };
+    for (const g of res.grids) {
+      try { anchor().createPriceLine({ price: g.level, color: colorToHex(g.color) || '#475569', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); } catch (e) { /* ignore */ }
+    }
+    const markers = [];
+    for (const sh of res.shapes) {
+      for (let i = 0; i < t.length; i++) {
+        const code = Math.round(sh.shapes[i]);
+        if (!(code > 0)) continue;
+        const kind = shapeKind(code);
+        const down = !!kind.down;
+        const pos = sh.position === 'above' ? 'aboveBar' : sh.position === 'below' ? 'belowBar' : (down ? 'aboveBar' : 'belowBar');
+        const col = colorToHex(sh.color instanceof Float64Array ? sh.color[i] : sh.color) || (down ? COLORS.down : COLORS.up);
+        markers.push(kind.text !== undefined
+          ? { time: t[i], position: pos, shape: 'circle', color: col, text: kind.text, size: 0.5 }
+          : { time: t[i], position: pos, shape: kind.shape, color: col, size: 1 });
+      }
+    }
+    if (markers.length) {
+      const m = markers.length > 4000 ? markers.slice(-4000) : markers;
+      try { (LWC.createSeriesMarkers || (() => {}))(anchor(), m); } catch (e) { info.notes.push('Arrows could not be drawn: ' + e.message); }
+    }
+    if (!res.plots.length && !markers.length && !res.grids.length && !res.errors.length) {
+      info.notes.push('This formula draws nothing on a chart. It is meant for Scanner / Exploration.');
     }
   }
 
@@ -190,9 +311,13 @@ export class ChartEngine {
       div.className = 'pane-label';
       div.style.left = `${Math.max(0, r.left - wrap.left) + 6}px`;
       div.style.top = `${Math.max(0, r.top - wrap.top) + 4}px`;
-      const ov = (p.overlays || []).map(o => `<span style="color:${o.color}">${overlayTitle(o)}</span>`).join(' ');
-      div.innerHTML = `<span class="pane-label-name">${paneTitle(p)}</span>${ov ? ' ' + ov : ''} <span class="pane-label-dots">⋯</span>`;
-      div.title = 'Tap to edit this pane';
+      const info = this.paneInfo.get(p.id);
+      const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+      let ov = (p.overlays || []).map(o => `<span style="color:${o.color}">${overlayTitle(o)}</span>`).join(' ');
+      if (info && info.legend.length) ov = info.legend.slice(0, 6).map(l => `<span style="color:${l.color}">${esc(l.name)}</span>`).join(' ');
+      const warn = info && info.errors.length ? ' <span style="color:#f87171" title="Formula problem">⚠</span>' : (info && info.notes.length ? ' <span style="color:#fbbf24">ⓘ</span>' : '');
+      div.innerHTML = `<span class="pane-label-name">${esc(paneTitle(p))}</span>${ov ? ' ' + ov : ''}${warn} <span class="pane-label-dots">⋯</span>`;
+      div.title = info && info.errors.length ? info.errors.join('\n') : (info && info.notes.length ? info.notes.join('\n') : 'Tap to edit this pane');
       div.addEventListener('click', (e) => { e.stopPropagation(); if (this.onPaneClick) this.onPaneClick(p.id); });
       this.labels.appendChild(div);
     });

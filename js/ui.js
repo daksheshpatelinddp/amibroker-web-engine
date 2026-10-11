@@ -12,30 +12,49 @@ export const BTN_PRIMARY = 'px-3 py-2 rounded bg-sky-600 text-white text-xs font
 export const BTN_DANGER = 'px-3 py-2 rounded bg-red-900/60 border border-red-700 text-red-200 text-xs active:bg-red-800';
 export const INPUT = 'select-text bg-slate-800 border border-slate-700 text-slate-100 rounded px-2 py-2 text-xs outline-none focus:border-sky-500';
 
-/** Opens a bottom-sheet style dialog. build(body, close) fills it. Returns close(). */
-export function openModal(title, build) {
-  const old = document.getElementById('modal-root');
-  if (old) old.remove();
+/**
+ * Opens a bottom-sheet style dialog. build(body, close) fills it. Returns close().
+ * opts.stack      keep other dialogs open underneath (editor -> library -> AI ...)
+ * opts.wide       big dialog for the formula editor (does not close when you tap outside it)
+ * opts.beforeClose  () => false cancels closing (used for "unsaved changes?")
+ * close.force()   closes without asking
+ */
+export function openModal(title, build, opts = {}) {
+  if (!opts.stack) { const old = document.getElementById('modal-root'); if (old) old.remove(); }
 
   const root = el('div', 'fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60');
-  root.id = 'modal-root';
-  const panel = el('div', 'w-full max-w-md bg-slate-900 border border-slate-700 rounded-t-xl sm:rounded-xl p-3 max-h-[85vh] overflow-y-auto select-text');
-  const head = el('div', 'flex items-center justify-between mb-3');
-  head.appendChild(el('div', 'text-sm font-semibold text-slate-100', title));
+  if (!opts.stack) root.id = 'modal-root';
+  const panel = el('div', opts.wide
+    ? 'w-full max-w-4xl h-[94vh] sm:h-[90vh] bg-slate-900 border border-slate-700 rounded-t-xl sm:rounded-xl p-3 flex flex-col select-text'
+    : 'w-full max-w-md bg-slate-900 border border-slate-700 rounded-t-xl sm:rounded-xl p-3 max-h-[85vh] overflow-y-auto select-text');
+  const head = el('div', 'flex items-center justify-between mb-2 shrink-0');
+  head.appendChild(el('div', 'text-sm font-semibold text-slate-100 truncate', title));
   const x = el('button', 'px-2 py-1 text-slate-400 text-base', '✕');
   x.type = 'button';
   head.appendChild(x);
-  const body = el('div', 'space-y-3');
+  const body = el('div', opts.wide ? 'flex-1 min-h-0 flex flex-col space-y-2' : 'space-y-3');
   panel.appendChild(head);
   panel.appendChild(body);
   root.appendChild(panel);
   document.body.appendChild(root);
 
-  const close = () => root.remove();
+  const close = () => {
+    if (opts.beforeClose && opts.beforeClose() === false) return;
+    root.remove();
+    if (opts.onClose) opts.onClose();
+  };
+  close.force = () => { root.remove(); if (opts.onClose) opts.onClose(); };
   x.onclick = close;
-  root.addEventListener('pointerdown', (e) => { if (e.target === root) close(); });
+  if (!opts.wide) root.addEventListener('pointerdown', (e) => { if (e.target === root) close(); });
   build(body, close);
   return close;
+}
+
+/** A short message at the bottom of the screen. */
+export function toast(text, ms = 2600) {
+  const t = el('div', 'fixed left-1/2 -translate-x-1/2 bottom-12 z-[90] px-3 py-2 rounded bg-slate-700 text-slate-100 text-xs shadow-lg max-w-[90vw]', text);
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), ms);
 }
 
 export function colorPicker(colors, initial, onPick) {

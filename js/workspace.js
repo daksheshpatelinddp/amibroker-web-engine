@@ -1,6 +1,8 @@
 // Workspace = the list of sheets, each sheet = a symbol + a stack of panes.
 // No DOM in here: it only holds the data, changes it, and saves it in the browser.
 
+import { formulaStore } from './formula-store.js';
+
 const STORAGE_KEY = 'amibroker_workspace_v1';
 let counter = 0;
 const uid = (prefix) => `${prefix}${Date.now().toString(36)}${(counter++).toString(36)}`;
@@ -13,6 +15,7 @@ export const PANE_KINDS = {
   rsi:      'RSI',
   macd:     'MACD',
   custom:   'Custom line',
+  afl:      'Formula (AFL)',
 };
 
 export const OVERLAY_COLORS = ['#f59e0b', '#38bdf8', '#a78bfa', '#f472b6', '#34d399', '#f87171', '#fbbf24', '#e2e8f0'];
@@ -27,6 +30,10 @@ export function paneTitle(p) {
     case 'delpct': return 'Delivery %';
     case 'rsi': return `RSI(${p.params.period || 14})`;
     case 'macd': return `MACD(${p.params.fast || 12},${p.params.slow || 26},${p.params.signal || 9})`;
+    case 'afl': {
+      const f = formulaStore.get(p.params.formulaId);
+      return f ? f.name : 'Formula (missing)';
+    }
     case 'custom': {
       const src = SOURCE_LABELS[p.params.source] || 'Close';
       const t = p.params.transform;
@@ -44,6 +51,7 @@ function defaultParams(kind, given = {}) {
   switch (kind) {
     case 'rsi': return { period: clampInt(given.period, 14, 2, 200) };
     case 'macd': return { fast: 12, slow: 26, signal: 9 };
+    case 'afl': return { formulaId: given.formulaId || '', values: { ...(given.values || {}) } };
     case 'custom': return {
       source: given.source || 'close',
       transform: given.transform || 'none',
@@ -60,16 +68,18 @@ function clampInt(v, dflt, min, max) {
 }
 
 function newPane(kind, params) {
+  let weight = kind === 'price' ? 3 : 1;
+  if (kind === 'afl') { const f = formulaStore.get(params && params.formulaId); if (f && f.weight) weight = f.weight; }
   return {
     id: uid('p'),
     kind,
-    weight: kind === 'price' ? 3 : 1,
+    weight,
     params: defaultParams(kind, params),
     overlays: [],
   };
 }
 
-function newSheet(name, symbol) {
+function newSheet(name, symbol, panes) {
   return {
     id: uid('s'),
     name,
@@ -77,7 +87,7 @@ function newSheet(name, symbol) {
     locked: false,
     symbolLinkIdx: 0,     // 0 = not linked, 1..4 = link colour group
     intervalLinkIdx: 0,
-    panes: [newPane('price'), newPane('volume')],
+    panes: panes || [newPane('price'), newPane('volume')],
   };
 }
 
@@ -133,6 +143,17 @@ export class Workspace {
 
   addSheet(symbol) {
     const sheet = newSheet(this.nextDefaultName(), symbol || this.active().symbol);
+    this.sheets.push(sheet);
+    this.activeId = sheet.id;
+    this.save();
+    return sheet;
+  }
+
+  /** A new sheet (same symbol as the current one) that shows just one formula: a "blank chart" with a formula on it. */
+  addFormulaSheet(formulaId, symbol) {
+    const f = formulaStore.get(formulaId);
+    const sheet = newSheet(this.nextDefaultName(), symbol || this.active().symbol, [newPane('afl', { formulaId })]);
+    if (f && f.weight) sheet.panes[0].weight = Math.max(f.weight, 3);
     this.sheets.push(sheet);
     this.activeId = sheet.id;
     this.save();
@@ -210,6 +231,14 @@ export class Workspace {
     const j = i + delta;
     if (i < 0 || j < 0 || j >= s.panes.length) return false;
     [s.panes[i], s.panes[j]] = [s.panes[j], s.panes[i]];
+    this.save();
+    return true;
+  }
+
+  setPaneParamValues(sheetId, paneId, values) {
+    const p = this.getPane(sheetId, paneId);
+    if (!p || p.kind !== 'afl') return false;
+    p.params.values = { ...values };
     this.save();
     return true;
   }

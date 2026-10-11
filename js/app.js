@@ -5,6 +5,9 @@ import { RangeEngine } from './range-engine.js';
 import { Workspace } from './workspace.js';
 import { openAddPane, openPaneEditor } from './pane-ui.js';
 import { DATABASES, ACTIVE_DB } from './config.js';
+import { host } from './host.js';
+import { initToolsMenu } from './tools-menu.js';
+import { formulaStore } from './formula-store.js';
 
 // Indian-style short numbers for the header line: 1.2K, 3.4L (lakh), 5.6Cr (crore)
 function fmtQty(n) {
@@ -48,6 +51,25 @@ class Application {
             this.sheetManager.init();
         } catch (e) { console.error('Sheet init failed:', e); }
         this.setupUIListeners();
+
+        // Tools menu + the bridge the formula windows use to reach the chart
+        Object.assign(host, {
+            relayout: () => this.relayout(),
+            addFormulaPane: (id) => { this.ws.addPane(this.ws.active().id, 'afl', { formulaId: id }); this.relayout(); },
+            newFormulaSheet: (id) => {
+                const sheet = this.ws.addFormulaSheet(id);
+                if (this.sheetManager) this.sheetManager.render();
+                this.openSheet(sheet);
+            },
+            getBars: () => chartEngine.arrays,
+            symbol: () => this.ws.active().symbol,
+        });
+        try { initToolsMenu('tools-root'); } catch (e) { console.error('Tools menu failed:', e); }
+        chartEngine.onFormulaErrors = (paneId, errors) => {
+            const pane = this.ws.active().panes.find((p) => p.id === paneId);
+            const f = pane && formulaStore.get(pane.params.formulaId);
+            this.setCacheText(`Formula "${f ? f.name : '?'}": ${errors[0]}`);
+        };
 
         chartEngine.onHover = (i) => this.updateHeader(i);
         chartEngine.onPaneClick = (paneId) => openPaneEditor(this.ws, this.ws.active(), paneId, () => this.relayout());
