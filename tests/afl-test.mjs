@@ -95,7 +95,7 @@ console.log('language');
   r = run('x = IIf(Close > Open, 1, 0); y = Ref(Close, -1); z = Ref(Close, 1);');
   ok(r.vars.y[10] === bars.c[9] && r.vars.z[10] === bars.c[11], 'Ref(-1) is previous, Ref(+1) is next');
   r = run('p = Param("Len", 7, 1, 50, 1); q = Param("Len", 7, 1, 50, 1);', { params: { Len: 12 } });
-  ok(r.vars.p === 12 && r.params.length === 2 && r.params[0].name === 'Len', 'Param override + registry');
+  ok(r.vars.p === 12 && r.params.length === 1 && r.params[0].name === 'Len' && r.params[0].sincr === 0, 'Param override + registry');
   r = run('Buy = Cross(Close, MA(Close,20)); Sell = 0; Filter = Buy; AddColumn(Close,"C",1.2); AddTextColumn("hi","T");');
   ok(r.buy && r.sell && r.filter && r.columns.length === 2 && r.usesSignals, 'signal variables + columns captured');
   r = run('Plot(Close,"c",colorRed,styleLine|styleThick); Plot(Volume,"v",IIf(Close>Open,colorGreen,colorRed),styleHistogram|styleOwnScale);');
@@ -104,6 +104,81 @@ console.log('language');
   ok(r.shapes.length === 1 && r.shapes[0].position === 'below', 'PlotShapes position from Low');
   r = run('Title = "{{NAME}} {{DATE}}";', { symbol: 'ABC' });
   ok(r.title.startsWith('ABC 20'), 'Title placeholders');
+}
+
+// ---------------------------------------------------------------- parameters (AmiBroker Param family)
+console.log('parameters');
+{
+  let r = run('a = ParamStr("Ticker","MSFT"); b = ParamTime("Start","09:30"); c = ParamTime("Start2","13:35:15"); d = ParamTime("S3","09:30",1); e = ParamDate("Day","2003-05-03"); f = ParamDate("Day2","2003-05-03",1); k = ParamColor("Col", colorCycle); m = ParamColor("Col2", colorCycle);');
+  ok(r.errors.length === 0, 'Param* run: ' + r.errors[0]);
+  ok(r.vars.a === 'MSFT' && r.vars.b === 93000 && r.vars.c === 133515 && r.vars.d === '09:30:00', 'ParamStr / ParamTime');
+  ok(r.vars.e === 1030503 && r.vars.f === '2003-05-03', 'ParamDate DateNum + string: ' + r.vars.e);
+  ok(r.vars.k !== r.vars.m, 'colorCycle cycles');
+  ok(['str', 'time', 'time', 'time', 'date', 'date', 'color', 'color'].join() === r.params.map((p) => p.type).join(), 'registry types');
+  r = run('a = ParamStr("T","X"); b = ParamTime("S","09:30"); e = ParamDate("D","2003-05-03"); n = Param("N",5,1,10,1);', { params: { T: 'INFY', S: '15:20', D: '2024-01-31', N: 8 } });
+  ok(r.vars.a === 'INFY' && r.vars.b === 152000 && r.vars.e === 1240131 && r.vars.n === 8, 'user values replace defaults');
+  r = run('t = ParamToggle("Show","No|Yes",1); l = ParamList("Kind","A|B|C","B");', { params: { Show: 0, Kind: 'C' } });
+  ok(r.vars.t === 0 && r.vars.l === 'C', 'toggle + list overrides');
+}
+
+// ---------------------------------------------------------------- zig-zag, options
+console.log('zigzag + options');
+{
+  const zz = bars.c.map((x) => x);
+  let r = run('z = Zig(Close, 10); p = Peak(Close, 10, 1); tr = Trough(Close, 10, 1); pb = PeakBars(Close, 10, 1);');
+  ok(r.errors.length === 0 && Number.isFinite(last(r.vars.z)) && Number.isFinite(last(r.vars.p)) && Number.isFinite(last(r.vars.pb)), 'Zig/Peak/Trough/PeakBars run');
+  ok(Number.isNaN(r.vars.p[0]), 'Peak has no look-ahead at bar 0');
+  r = run('SetOption("InitialEquity", 500000); SetTradeDelays(1,1,1,1); SetPositionSize(10, spsPercentOfEquity); ApplyStop(stopTypeLoss, stopModePercent, 5, 1); a = GetOption("InitialEquity"); b = GetOption("MaxOpenPositions");');
+  ok(r.errors.length === 0 && r.vars.a === 500000 && r.vars.b === 10, 'SetOption / GetOption');
+  ok(r.options.tradedelays.join() === '1,1,1,1' && r.stops.length === 1 && r.stops[0].amount === 5 && r.options.positionsizeset.size === 10, 'delays, size and stops are recorded for the backtester');
+  r = aflEngine.run('x = Interval(); Title = "{{INTERVAL}}";', bars, { interval: 'W', intervalName: 'Weekly' });
+  ok(r.vars.x === 604800 && r.title === 'Weekly', 'Interval() follows the chart time frame');
+}
+
+// ---------------------------------------------------------------- time frames + saved-layout migration
+console.log('time frames + migration');
+{
+  const { resample, periodKey } = await import('../js/timeframe.js');
+  const { Workspace } = await import('../js/workspace.js');
+  const rows = bars.t.map((d, i) => ({ symbol: 'T', date: d, open: bars.o[i], high: bars.h[i], low: bars.l[i], close: bars.c[i], volume: bars.v[i], delivery: bars.dq[i] }));
+  const w = resample(rows, 'W'), m = resample(rows, 'M'), y = resample(rows, 'Y');
+  ok(w.length < rows.length / 4 && w.length > rows.length / 6, `weekly bars: ${w.length} from ${rows.length}`);
+  ok(m.length < w.length && y.length < m.length && y.length >= 5, `monthly ${m.length}, yearly ${y.length}`);
+  const first = rows.filter((r) => periodKey(r.date, 'M') === periodKey(rows[0].date, 'M'));
+  ok(m[0].open === first[0].open && m[0].close === first[first.length - 1].close && m[0].high === Math.max(...first.map((r) => r.high)) && m[0].low === Math.min(...first.map((r) => r.low)), 'monthly OHLC = first open, max high, min low, last close');
+  ok(m[0].volume === first.reduce((s, r) => s + r.volume, 0) && m[0].date === first[first.length - 1].date, 'monthly volume is the sum; bar dated on last trading day');
+  ok(resample(rows, 'D') === rows, 'daily returns the same rows');
+  ok(w.every((b) => new Date(b.date + 'T00:00:00Z').getUTCDay() >= 1 && new Date(b.date + 'T00:00:00Z').getUTCDay() <= 5), 'weekly bars end on a weekday');
+  const barsW = { t: w.map((b) => b.date), o: w.map((b) => b.open), h: w.map((b) => b.high), l: w.map((b) => b.low), c: w.map((b) => b.close), v: w.map((b) => b.volume), dq: w.map((b) => b.delivery), delpct: w.map((b) => 0) };
+  const rw = aflEngine.run('Plot(RSI(14),"r",colorRed); x = Interval();', barsW, { interval: 'W' });
+  ok(rw.errors.length === 0 && rw.vars.x === 604800, 'formulas run on weekly bars');
+
+  // an old saved layout (native panes with moving averages) becomes formula panes with the same settings
+  const old = { v: 1, activeId: 's1', sheets: [{ id: 's1', name: 'Sheet 1', symbol: 'X', locked: false, symbolLinkIdx: 0, intervalLinkIdx: 0, panes: [
+    { id: 'p1', kind: 'price', weight: 3, params: {}, overlays: [{ id: 'o1', type: 'ema', period: 21, color: '#f59e0b' }] },
+    { id: 'p2', kind: 'rsi', weight: 1, params: { period: 9 }, overlays: [] },
+    { id: 'p3', kind: 'macd', weight: 1, params: { fast: 8, slow: 21, signal: 5 }, overlays: [] },
+    { id: 'p4', kind: 'volume', weight: 1, params: {}, overlays: [{ id: 'o2', type: 'sma', period: 30, color: '#38bdf8' }] },
+  ] }] };
+  const mem = { d: JSON.stringify(old), getItem() { return this.d; }, setItem(k, v) { this.d = v; } };
+  const ws = new Workspace(mem, 'k');
+  const ps = ws.sheets[0].panes;
+  ok(ps.every((p) => p.kind === 'afl'), 'all panes migrated to formula panes');
+  ok(ps[0].params.formulaId === 'b:price-ma' && ps[0].params.values['Period 1 (0 = off)'] === 21 && ps[0].params.values['Period 2 (0 = off)'] === 0 && ps[0].params.values['Average type'] === 'EMA', 'price + EMA overlay -> Price + Moving Averages');
+  ok(ps[1].params.values.Period === 9 && ps[2].params.values.Fast === 8 && ps[3].params.values['Average period'] === 30, 'RSI / MACD / volume settings carried over');
+  ok(JSON.parse(mem.d).sheets[0].panes[0].kind === 'afl', 'migrated layout is saved');
+  const { formulaStore: fs } = await import('../js/formula-store.js');
+  for (const p of ps) {
+    const f = fs.get(p.params.formulaId);
+    const r = aflEngine.run(f.code, bars, { params: p.params.values });
+    ok(r.errors.length === 0 && r.plots.length > 0, `migrated pane ${f.name} runs`);
+  }
+  const mp = aflEngine.run(fs.get('b:price-ma').code, bars, { params: ps[0].params.values });
+  ok(mp.plots.length === 2 && mp.plots[1].name === 'EMA 21', 'only the periods that are on are drawn (0 = off): ' + mp.plots.map((p) => p.name));
+  const fresh = new Workspace({ getItem: () => null, setItem() {} }, 'k2');
+  ok(fresh.sheets[0].panes.map((p) => p.params.formulaId).join() === 'b:price-candle,b:volume' && fresh.sheets[0].interval === 'D', 'new workspace starts with formula panes');
+  const s2 = fresh.addSheet('Y'); fresh.cycleLink(fresh.sheets[0].id, 'interval'); fresh.cycleLink(s2.id, 'interval');
+  ok(fresh.setInterval(fresh.sheets[0].id, 'W').length === 2 && s2.interval === 'W', 'interval link group: linked sheets follow the time frame');
 }
 
 // ---------------------------------------------------------------- errors give a line number
