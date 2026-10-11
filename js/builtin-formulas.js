@@ -93,6 +93,29 @@ PlotShapes(Buy  * shapeUpArrow,   colorBrightGreen, 0, Low);
 PlotShapes(Sell * shapeDownArrow, colorRed,         0, High);
 _SECTION_END();`, { weight: 3 }),
 
+  f('price-gui-ema', 'Price + EMA with on-chart controls', TR, 'Candles with an EMA you control from buttons on the chart: show/hide box, period slider, reset button', `
+_SECTION_BEGIN("On-chart controls");
+idShow = 1; idLen = 2; idReset = 3; idBand = 4;
+GuiCheckBox("EMA", idShow, 8, 8, 56, 22, notifyClicked);
+GuiCheckBox("Band", idBand, 66, 8, 62, 22, notifyClicked);
+if (GuiSlider(idLen, 132, 8, 150, 22, notifyEditChange) == guiNew) {
+  GuiSetRange(idLen, 2, 200, 1, 10);
+  GuiSetValue(idLen, 20);
+  GuiSetCheck(idShow, 1);
+}
+GuiButton("Reset", idReset, 288, 8, 56, 22, notifyClicked);
+for (n = 0; id = GuiGetEvent(n, 0); n++) {
+  if (id == idReset) { GuiSetValue(idLen, 20); GuiSetCheck(idShow, 1); GuiSetCheck(idBand, 0); }
+}
+len = GuiGetValue(idLen);
+Plot(Close, "Price", colorDefault, styleCandle);
+if (GuiGetCheck(idShow)) Plot(EMA(Close, len), "EMA " + NumToStr(len, 1.0), colorOrange, styleThick);
+if (GuiGetCheck(idBand)) {
+  Plot(EMA(High, len), "High EMA", colorGrey50, styleDashed);
+  Plot(EMA(Low, len), "Low EMA", colorGrey50, styleDashed);
+}
+_SECTION_END();`, { weight: 3 }),
+
   f('price-supertrend', 'Supertrend', TR, 'ATR based trend-following line with buy / sell arrows', `
 _SECTION_BEGIN("Supertrend");
 period = Param("ATR period", 10, 1, 100, 1);

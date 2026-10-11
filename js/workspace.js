@@ -254,6 +254,15 @@ export class Workspace {
     return true;
   }
 
+  /** Remembers what the user did to a formula's on-chart controls (checked, slider value, text). No redraw needed. */
+  setPaneGuiState(sheetId, paneId, state) {
+    const p = this.getPane(sheetId, paneId);
+    if (!p || p.kind !== 'afl') return false;
+    p.params.gui = JSON.parse(JSON.stringify(state || {}));
+    this.save();
+    return true;
+  }
+
   setPaneParamValues(sheetId, paneId, values) {
     const p = this.getPane(sheetId, paneId);
     if (!p || p.kind !== 'afl') return false;

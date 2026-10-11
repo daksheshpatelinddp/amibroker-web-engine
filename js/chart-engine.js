@@ -23,6 +23,10 @@ export class ChartEngine {
     this.onHover = null;       // (barIndex | null) => void
     this.onPaneClick = null;   // (paneId) => void
     this.onFormulaErrors = null; // (paneId, errors[]) => void   called after a draw when a formula had problems
+    this.guiEvents = {};       // { paneId: [{id, code}] } clicks on on-chart controls, consumed by the next draw
+    this.guiKnown = {};        // { paneId: [ids] } controls the formula created last time (for guiNew / guiExisting)
+    this.onGuiEvent = null;    // (paneId, {id, code}) => void
+    this.onGuiState = null;    // (paneId, state) => void
     this.triggers = {};        // { paneId: { buttonName: 1 } } set by a ParamTrigger button, consumed by the next draw
     this.paneInfo = new Map(); // paneId -> { errors, params, legend, notes } for formula panes
     this._labelTimer = null;
@@ -96,7 +100,7 @@ export class ChartEngine {
       } catch (e) { chart.timeScale().fitContent(); }
     }
     this._scheduleLabels();
-    this.triggers = {};      // a button press fires exactly once
+    this.triggers = {}; this.guiEvents = {};      // a button press fires exactly once
     if (this.onFormulaErrors) {
       for (const [paneId, info] of this.paneInfo) if (info.errors.length) this.onFormulaErrors(paneId, info.errors);
     }
@@ -189,8 +193,11 @@ export class ChartEngine {
     const f = formulaStore.get(pane.params.formulaId);
     if (!f) { info.errors.push('The formula for this pane was deleted. Tap the pane title to remove the pane or choose another formula.'); return; }
 
-    const res = aflEngine.run(f.code, a, { symbol: this.sheet ? this.sheet.symbol : '', params: pane.params.values || {}, triggers: this.triggers[pane.id] || {}, interval: (this.sheet && this.sheet.interval) || 'D', intervalName: INTERVALS[(this.sheet && this.sheet.interval) || 'D'] });
+    const res = aflEngine.run(f.code, a, { symbol: this.sheet ? this.sheet.symbol : '', params: pane.params.values || {}, triggers: this.triggers[pane.id] || {}, guiState: pane.params.gui || {}, guiEvents: this.guiEvents[pane.id] || [], guiKnown: this.guiKnown[pane.id] || [], interval: (this.sheet && this.sheet.interval) || 'D', intervalName: INTERVALS[(this.sheet && this.sheet.interval) || 'D'] });
     info.errors = res.errors; info.params = res.params; info.title = res.title;
+    info.gui = res.gui || [];
+    this.guiKnown[pane.id] = info.gui.map((c) => c.id);
+    if (res.guiState && JSON.stringify(res.guiState) !== JSON.stringify(pane.params.gui || {}) && this.onGuiState) this.onGuiState(pane.id, res.guiState);
 
     const PALETTE = ['#38bdf8', '#f59e0b', '#a78bfa', '#f472b6', '#34d399', '#f87171', '#fbbf24', '#e2e8f0'];
     let nextColor = 0;
@@ -323,7 +330,82 @@ export class ChartEngine {
       div.title = info && info.errors.length ? info.errors.join('\n') : (info && info.notes.length ? info.notes.join('\n') : 'Tap to edit this pane');
       div.addEventListener('click', (e) => { e.stopPropagation(); if (this.onPaneClick) this.onPaneClick(p.id); });
       this.labels.appendChild(div);
+      if (info && info.gui && info.gui.length) {
+        const base = { left: Math.max(0, r.left - wrap.left), top: Math.max(0, r.top - wrap.top) };
+        info.gui.forEach((def) => this.labels.appendChild(this._guiControl(def, p, info, base)));
+      }
     });
+  }
+
+
+  // ---- on-chart GUI controls (GuiButton, GuiCheckBox, GuiSlider, GuiEdit, GuiRadio, GuiDateTime) ----
+  _guiControl(def, pane, info, base) {
+    const st = (pane.params.gui && pane.params.gui[def.id]) || {};
+    const box = document.createElement('div');
+    box.className = 'gui-ctl';
+    box.style.left = `${base.left + def.x}px`;
+    box.style.top = `${base.top + def.y}px`;
+    box.style.width = `${Math.max(20, def.w)}px`;
+    box.style.height = `${Math.max(16, def.h)}px`;
+    const stop = (e) => e.stopPropagation();
+    ['pointerdown', 'mousedown', 'touchstart', 'click', 'wheel'].forEach((ev) => box.addEventListener(ev, stop, { passive: true }));
+
+    // remember what the user did, then tell the formula (only for the actions it asked to hear about)
+    const act = (patch, code, others = {}) => {
+      const all = JSON.parse(JSON.stringify(pane.params.gui || {}));
+      for (const [id, pt] of Object.entries(others)) all[id] = { ...(all[id] || {}), ...pt };
+      all[def.id] = { ...(all[def.id] || {}), ...patch };
+      pane.params.gui = all;
+      if (this.onGuiState) this.onGuiState(pane.id, all);
+      if ((def.flags & code) && this.onGuiEvent) this.onGuiEvent(pane.id, { id: def.id, code });
+    };
+    const NOTIFY_CLICKED = 1, NOTIFY_HITRETURN = 8, NOTIFY_EDITCHANGE = 16;
+    let input;
+    switch (def.type) {
+      case 'button': {
+        input = document.createElement('button'); input.type = 'button'; input.textContent = def.text;
+        input.onclick = () => act({}, NOTIFY_CLICKED);
+        break;
+      }
+      case 'checkbox': case 'radio': {
+        const lab = document.createElement('label'); lab.className = 'gui-row';
+        const cb = document.createElement('input'); cb.type = def.type === 'radio' ? 'radio' : 'checkbox'; cb.checked = !!st.checked;
+        cb.onchange = () => {
+          const others = {};
+          if (def.type === 'radio') for (const o of info.gui) if (o.type === 'radio' && o.group === def.group && o.id !== def.id) others[o.id] = { checked: 0 };
+          act({ checked: cb.checked ? 1 : 0 }, NOTIFY_CLICKED, others);
+          if (def.type === 'radio') this._scheduleLabels();
+        };
+        lab.appendChild(cb); lab.appendChild(document.createTextNode(' ' + def.text));
+        input = lab; input._disable = cb;
+        break;
+      }
+      case 'slider': {
+        input = document.createElement('input'); input.type = 'range';
+        input.min = def.min; input.max = def.max; input.step = def.step || 1;
+        input.value = st.value !== undefined ? Math.min(def.max, Math.max(def.min, st.value)) : def.min;
+        input.title = input.value;
+        input.oninput = () => { input.title = input.value; };
+        input.onchange = () => act({ value: Number(input.value) }, NOTIFY_EDITCHANGE);
+        break;
+      }
+      case 'edit': {
+        input = document.createElement('input'); input.type = 'text'; input.value = st.text !== undefined ? st.text : '';
+        input.onchange = () => act({ text: input.value }, NOTIFY_EDITCHANGE);
+        input.onkeydown = (e) => { if (e.key === 'Enter') act({ text: input.value }, NOTIFY_HITRETURN); };
+        break;
+      }
+      case 'datetime': {
+        input = document.createElement('input'); input.type = 'date';
+        input.value = st.text || (this.arrays && this.arrays.t.length ? this.arrays.t[this.arrays.t.length - 1] : '');
+        input.onchange = () => { if (input.value) act({ text: input.value }, NOTIFY_EDITCHANGE); };
+        break;
+      }
+      default: input = document.createElement('span');
+    }
+    (input._disable || input).disabled = !def.enabled;
+    box.appendChild(input);
+    return box;
   }
 
   // ---- view buttons ----

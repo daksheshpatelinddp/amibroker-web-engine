@@ -114,6 +114,25 @@ class Parser {
         const step = list(')'); this.expectOp(')');
         return { type: 'for', init, cond, step, body: this.statement(), line: t.line };
       }
+      if (kw === 'switch') {
+        this.next(); this.expectOp('('); const e = this.expr(); this.expectOp(')'); this.expectOp('{');
+        const cases = [];
+        while (!this.isOp('}')) {
+          let test = null;
+          if (this.isKw('case')) { this.next(); test = this.or(); }
+          else if (this.isKw('default')) this.next();
+          else throw this.err("Expected 'case' or 'default' inside switch");
+          this.expectOp(':');
+          const body = [];
+          while (!this.isOp('}') && !this.isKw('case') && !this.isKw('default')) {
+            if (this.peek().t === 'eof') throw this.err("Missing '}'");
+            body.push(this.statement());
+          }
+          cases.push({ test, body });
+        }
+        this.next();
+        return { type: 'switch', e, cases, line: t.line };
+      }
       if (kw === 'break') { this.next(); this.semi(); return { type: 'break' }; }
       if (kw === 'continue') { this.next(); this.semi(); return { type: 'continue' }; }
       if (kw === 'return') {
@@ -311,6 +330,7 @@ class Interp {
     this.retVal = 0;
     this.depth = 0;
     this.line = 0;
+    this.guiState = JSON.parse(JSON.stringify(opts && opts.guiState ? opts.guiState : {}));   // user-made changes to on-chart controls
     this.buildConsts();
     this.lib = buildFunctions(this);
   }
@@ -331,6 +351,8 @@ class Interp {
     for (const [k, v] of Object.entries(SHAPE)) c.set('shape' + k.toLowerCase(), v);
     for (let d = 0; d <= 9; d++) c.set('shapedigit' + d, 100 + d);
     c.set('colorcycle', -2);
+    Object.entries({ notifyClicked: 1, notifySetFocus: 2, notifyKillFocus: 4, notifyHitReturn: 8, notifyEditChange: 16,
+      notifyMouseEnter: 32, notifyMouseLeave: 64, guiNew: 1, guiExisting: 2 }).forEach(([k, v]) => c.set(k.toLowerCase(), v));
     Object.entries({ stopTypeLoss: 1, stopTypeProfit: 2, stopTypeTrailing: 3, stopTypeNBar: 4, stopModeDisable: 0, stopModePoint: 1,
       stopModePercent: 2, stopModeRisk: 3, stopModeBars: 4, spsValue: 1, spsPercentOfEquity: 2, spsShares: 3, spsNoChange: 4,
       spsPercentOfPosition: 5, maskDefault: 0, maskAll: 0xffffff, maskPrice: 1, maskHistogram: 2 }).forEach(([k, v]) => c.set(k.toLowerCase(), v));
@@ -489,6 +511,20 @@ class Interp {
       case 'dowhile': this.line = s.line;
         do { this.tick(); const r = this.exec(s.body); if (r === 1) break; if (r === 3) return 3; } while (this.cond(this.ev(s.cond)));
         return 0;
+      case 'switch': {
+        this.line = s.line;
+        const same = (a, b) => { a = isArr(a) ? a[a.length - 1] : a; b = isArr(b) ? b[b.length - 1] : b; return a === b; };
+        const v = this.ev(s.e);
+        let start = s.cases.findIndex((c) => c.test !== null && same(v, this.ev(c.test)));
+        if (start < 0) start = s.cases.findIndex((c) => c.test === null);
+        if (start < 0) return 0;
+        for (let i = start; i < s.cases.length; i++) {       // falls through until break, like C
+          const r = this.execList(s.cases[i].body);
+          if (r === 1) return 0;
+          if (r) return r;
+        }
+        return 0;
+      }
       case 'break': return 1;
       case 'continue': return 2;
       case 'return': this.retVal = s.e ? this.ev(s.e) : 0; return 3;
@@ -621,6 +657,78 @@ function buildFunctions(E) {
   F.applystop = (a) => { E.res.stops.push({ type: S(a[0]), mode: S(a[1]), amount: S(a[2]), exitAtStop: S(a[3], 0), volatile: S(a[4], 0), reentry: S(a[5], 0) }); return 0; };
   F.setchartoptions = (a) => { E.res.options.chartoptions = a.map((x) => (isArr(x) ? 0 : x)); return 0; };
   for (const nm of ['setbarsrequired', 'setformulaname', 'addtocomposite', 'requesttimedrefresh', 'addsummaryrows', 'staticvarset']) F[nm] = () => 0;
+
+  // --- on-chart GUI controls. The chart draws them over the pane; user actions come back through GuiGetEvent().
+  const GUI = E.res.gui;
+  const gKnown = new Set([...(E.opts.guiKnown || []).map(Number), ...Object.keys(E.guiState).map(Number)]);
+  const gFind = (id) => GUI.find((c) => c.id === id);
+  const gSt = (id) => (E.guiState[id] = E.guiState[id] || {});
+  const TEXTUAL = new Set(['button', 'checkbox', 'radio']);
+  const mkGui = (type) => (a) => {
+    let k = 0;
+    const text = TEXTUAL.has(type) ? String(a[k++] === undefined ? '' : a[k - 1]) : '';
+    const id = S(a[k++]);
+    if (!(Number.isInteger(id) && id > 0)) E.fail('GUI control id must be an integer greater than zero');
+    const def = { type, text, id, x: S(a[k++], 0), y: S(a[k++], 0), w: S(a[k++], 90), h: S(a[k++], 22), flags: S(a[k++], 0), enabled: true };
+    if (type === 'slider') Object.assign(def, { min: 0, max: 100, step: 1 });
+    const prev = GUI[GUI.length - 1];
+    if (type === 'radio') def.group = prev && prev.type === 'radio' ? prev.group : id;
+    const at = GUI.findIndex((c) => c.id === id);
+    if (at >= 0) GUI[at] = def; else GUI.push(def);
+    return gKnown.has(id) ? 2 : 1;                       // guiExisting : guiNew
+  };
+  Object.assign(F, {
+    guibutton: mkGui('button'), guicheckbox: mkGui('checkbox'), guiradio: mkGui('radio'),
+    guislider: mkGui('slider'), guiedit: mkGui('edit'), guidatetime: mkGui('datetime'),
+  });
+  F.guigetevent = (a) => {
+    const ev = (E.opts.guiEvents || [])[S(a[0], 0)], what = S(a[1], 0);
+    if (!ev) return what === 2 ? '' : 0;
+    return what === 0 ? ev.id : what === 1 ? ev.code : `${ev.id}:${ev.code}`;
+  };
+  F.guigetcheck = (a) => ((E.guiState[S(a[0])] || {}).checked ? 1 : 0);
+  F.guisetcheck = (a) => { gSt(S(a[0])).checked = truthy(S(a[1], 1)) ? 1 : 0; return 0; };
+  F.guisetrange = (a) => {
+    const d = gFind(S(a[0]));
+    if (d && d.type === 'slider') { d.min = S(a[1], 0); d.max = S(a[2], 100); d.step = S(a[3], 1) || 1; d.tic = S(a[4], 0); }
+    return 0;
+  };
+  const clampTo = (d, v) => (d && d.type === 'slider' ? Math.min(d.max, Math.max(d.min, v)) : v);
+  F.guisetvalue = (a) => {
+    const id = S(a[0]), d = gFind(id);
+    if (!d) return 0;
+    const v = clampTo(d, S(a[1], 0));
+    gSt(id).value = v; if (d.type === 'edit') gSt(id).text = String(v);
+    return 1;
+  };
+  F.guigetvalue = (a) => {
+    const id = S(a[0]), d = gFind(id), st = E.guiState[id] || {};
+    if (d && d.type === 'slider') return clampTo(d, st.value !== undefined ? st.value : d.min);
+    if (d && d.type === 'datetime') {
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(st.text || bars.t[bars.t.length - 1] || '');
+      return m ? (+m[1] - 1900) * 10000 + +m[2] * 100 + +m[3] : 0;
+    }
+    const v = Number(st.text); return Number.isFinite(v) ? v : (st.value !== undefined ? st.value : 0);
+  };
+  F.guigettext = (a) => {
+    const id = S(a[0]), d = gFind(id), st = E.guiState[id] || {};
+    if (d && TEXTUAL.has(d.type)) return d.text;
+    if (d && d.type === 'slider') return String(F.guigetvalue([id]));
+    if (d && d.type === 'datetime') return st.text || bars.t[bars.t.length - 1] || '';
+    return st.text === undefined ? '' : String(st.text);
+  };
+  F.guisettext = (a) => {                                // note the order: GuiSetText("text", id)
+    const id = S(a[1]), d = gFind(id);
+    if (!d) return 0;
+    if (TEXTUAL.has(d.type)) d.text = String(a[0]); else gSt(id).text = String(a[0]);
+    return 1;
+  };
+  F.guienable = (a) => { const d = gFind(S(a[0])); if (d) d.enabled = truthy(S(a[1], 1)); return d ? 1 : 0; };
+  F.guidestroy = (a) => {
+    if (!a.length) GUI.length = 0;
+    else { const at = GUI.findIndex((c) => c.id === S(a[0])); if (at >= 0) GUI.splice(at, 1); }
+    return 0;
+  };
 
   // --- parameters (appear in the Parameters dialog; the user's value replaces the default)
   const paramVal = (name, def) => {
@@ -773,7 +881,7 @@ Interp.prototype.binary2 = function (a, b, f) {
 export class AFLEngine {
   /** All function and constant names the interpreter knows (used by the help text and tests). */
   functionNames() {
-    const dummy = new Interp({ t: ['2000-01-01'], o: [1], h: [1], l: [1], c: [1], v: [1] }, {}, { params: [], plots: [], shapes: [], grids: [], columns: [], options: {}, stops: [] });
+    const dummy = new Interp({ t: ['2000-01-01'], o: [1], h: [1], l: [1], c: [1], v: [1] }, {}, { params: [], plots: [], shapes: [], grids: [], columns: [], options: {}, stops: [], gui: [], guiState: null });
     return Object.keys(dummy.lib).filter((k) => !k.endsWith('_'));
   }
 
@@ -784,7 +892,7 @@ export class AFLEngine {
   run(code, bars, opts = {}) {
     const res = {
       plots: [], shapes: [], grids: [], columns: [], params: [], errors: [], title: '',
-      buy: null, sell: null, short: null, cover: null, filter: null, vars: {}, usesSignals: false, options: {}, stops: [],
+      buy: null, sell: null, short: null, cover: null, filter: null, vars: {}, usesSignals: false, options: {}, stops: [], gui: [], guiState: null,
     };
     if (!bars || !bars.t || bars.t.length === 0) { res.errors.push('No data loaded'); return res; }
     let ast;
@@ -797,6 +905,7 @@ export class AFLEngine {
       if (e instanceof AFLError) { res.errors.push(e.message); res.errorLine = e.line || 0; }
       else { res.errors.push(`Internal error: ${e && e.message ? e.message : e}`); res.errorLine = it.line; }
     }
+    res.guiState = it.guiState;
     const g = it.globals, n = it.n;
     const sig = (k) => (g.has(k) ? toArr(g.get(k), n) : null);
     res.buy = sig('buy'); res.sell = sig('sell'); res.short = sig('short'); res.cover = sig('cover');

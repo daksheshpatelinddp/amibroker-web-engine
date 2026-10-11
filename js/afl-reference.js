@@ -9,6 +9,7 @@ OPERATORS: + - * / % ^(power)  < > <= >= == !=  AND OR NOT (also & | &&  ||)  ?:
  Everything works on whole arrays at once (one value per bar). Comparisons give 1 (true) or 0 (false) per bar.
  Comments: // line   /* block */   Every statement ends with ;
 CONTROL: if(){} else{}  for(i=0;i<BarCount;i++){}  while(){}  do{}while();  break; continue; return;
+ switch(x){ case 1: ...; break; case 2: ...; break; default: ...; }
  function name(a,b){ ...; return x; }     array[i] reads/writes one bar.
 
 MOVING AVERAGES / SMOOTHING
@@ -59,6 +60,20 @@ USER SETTINGS (each one appears in the pane's Parameters dialog, so a trader cha
  ParamDate("name","2024-01-31")  returns DateNum (1240131);  ParamDate("name","2024-01-31",1) returns the text "2024-01-31"
  Defaults must be constants. Use a Param for EVERY number the user may want to change.
  _SECTION_BEGIN("title"); ... _SECTION_END();  (optional, ignored)
+
+ON-CHART CONTROLS (buttons, boxes and sliders drawn on top of the pane; the formula hears about clicks through events)
+ GuiButton("text", id, x, y, width, height, notifyClicked)     GuiCheckBox("text", id, x, y, w, h, notifyClicked)
+ GuiRadio("text", id, x, y, w, h, notifyClicked)  (radio buttons created one after another form one group)
+ GuiSlider(id, x, y, w, h, notifyEditChange)  GuiEdit(id, x, y, w, h, notifyEditChange)  GuiDateTime(id, x, y, w, h, notifyEditChange)
+   id = unique whole number above 0; x,y = pixels from the top-left corner of the pane. Each returns guiNew the first time, guiExisting after.
+ GuiGetCheck(id) 1/0   GuiSetCheck(id,1)   GuiGetValue(id) (slider number / edit number / date as DateNum)   GuiSetValue(id,v)
+ GuiSetRange(id,min,max,step,tickfreq) for a slider   GuiGetText(id)   GuiSetText("text",id)   GuiEnable(id,1or0)   GuiDestroy(id) or GuiDestroy()
+ GuiGetEvent(n,0) = id of the n-th click/change since the last redraw (0 when there are no more), GuiGetEvent(n,1) = what happened.
+ notify flags: notifyClicked notifyEditChange notifyHitReturn (combine with |)
+ Pattern: create the controls every time the formula runs, set start values only when guiNew, then read the state:
+   if (GuiSlider(2, 130, 8, 160, 22, notifyEditChange) == guiNew) { GuiSetRange(2, 5, 200, 1, 10); GuiSetValue(2, 20); }
+   for (n = 0; id = GuiGetEvent(n, 0); n++) { if (id == 3) GuiSetValue(2, 20); }   // handle a Reset button
+   len = GuiGetValue(2);   Plot(EMA(Close, len), "EMA", colorOrange);
 
 TRADING RULES (scanner / exploration / backtest)
  Buy = condition;  Sell = condition;  Short = condition;  Cover = condition;   (arrays of 1/0)

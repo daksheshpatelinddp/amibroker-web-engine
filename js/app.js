@@ -72,6 +72,8 @@ class Application {
             this.setCacheText(`Formula "${f ? f.name : '?'}": ${errors[0]}`);
         };
 
+        chartEngine.onGuiState = (paneId, state) => this.ws.setPaneGuiState(this.ws.active().id, paneId, state);
+        chartEngine.onGuiEvent = (paneId, ev) => { chartEngine.guiEvents = { [paneId]: [ev] }; this.relayout(); };
         chartEngine.onHover = (i) => this.updateHeader(i);
         chartEngine.onPaneClick = (paneId) => openPaneEditor(this.ws, this.ws.active(), paneId, () => this.relayout());
         const on = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
