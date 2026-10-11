@@ -121,6 +121,17 @@ console.log('parameters');
   ok(r.vars.t === 0 && r.vars.l === 'C', 'toggle + list overrides');
 }
 
+// ParamField / ParamStyle / ParamTrigger
+{
+  let r = run('a = ParamField("Src", 3); b = ParamField("Src2", 4); c = ParamStyle("St", styleLine|styleThick, maskDefault); t = ParamTrigger("Go","Click"); Plot(a,"x",colorRed,c);');
+  ok(r.errors.length === 0 && r.vars.a[10] === bars.c[10] && near(r.vars.b[10], (bars.h[10] + bars.l[10] + bars.c[10]) / 3) && r.vars.c === 5 && r.vars.t === 0, 'ParamField default Close / (H+L+C)/3, ParamStyle value, ParamTrigger 0: ' + r.errors[0]);
+  ok(['field', 'field', 'style', 'trigger'].join() === r.params.map((p) => p.type).join() && r.plots[0].thick, 'registry types + style flags reach Plot');
+  r = run('a = ParamField("Src", 3); c = ParamStyle("St", styleLine); t = ParamTrigger("Go","Click"); Plot(a,"x",colorRed,c);', { params: { Src: 5, St: 256 }, triggers: { Go: 1 } });
+  ok(r.vars.a[7] === bars.v[7] && r.vars.t === 1 && r.plots[0].hidden === true, 'user values: Volume field, trigger fires once, Hidden style');
+  r = run('a = ParamField("S", 7); b = ParamField("S2", 6);');
+  ok(r.vars.a[3] === bars.dq[3] && r.vars.b[3] === 0, 'Delivery field + OI');
+}
+
 // ---------------------------------------------------------------- zig-zag, options
 console.log('zigzag + options');
 {
