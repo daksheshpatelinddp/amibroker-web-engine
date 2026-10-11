@@ -670,9 +670,28 @@ function buildFunctions(E) {
     return Number.isFinite(v) ? v : def;
   };
   F.paramstyle = (a) => {
-    const name = String(a[0]), def = S(a[1], 1);
-    register({ name, type: 'number', def, min: 0, max: 1048575, step: 1 });
+    const name = String(a[0]), def = S(a[1], 1), mask = S(a[2], 0);
+    register({ name, type: 'style', def, mask });
     const v = Number(paramVal(name, def)); return Number.isFinite(v) ? v : def;
+  };
+  // ParamField: pick the price array. -1/3 = Close (default), 0 Open, 1 High, 2 Low, 4 (H+L+C)/3, 5 Volume, 6 OI, 7 Delivery, 8 Delivery %
+  F.paramfield = (a) => {
+    const name = String(a[0]), def = a[1] === undefined ? 3 : S(a[1], 3);
+    register({ name, type: 'field', def, items: ['Close', 'Open', 'High', 'Low', 'Average (H+L+C)/3', 'Volume', 'Open Interest', 'Delivery qty', 'Delivery %'], codes: [3, 0, 1, 2, 4, 5, 6, 7, 8] });
+    let f = Number(paramVal(name, def)); if (!Number.isFinite(f)) f = 3;
+    switch (Math.trunc(f)) {
+      case 0: return E.O; case 1: return E.H; case 2: return E.Lw;
+      case 4: return Float64Array.from(E.H, (h, i) => (h + E.Lw[i] + E.C[i]) / 3);
+      case 5: return E.V; case 6: return newArr(n(), 0);
+      case 7: return E.consts.get('delivery'); case 8: return E.consts.get('delpct');
+      default: return E.C;
+    }
+  };
+  // ParamTrigger: a button. Returns 1 only for the one redraw caused by pressing it, otherwise 0.
+  F.paramtrigger = (a) => {
+    const name = String(a[0]), label = a[1] === undefined ? name : String(a[1]);
+    register({ name, type: 'trigger', label });
+    return E.opts.triggers && E.opts.triggers[name] ? 1 : 0;
   };
   F.paramstr = (a) => {
     const name = String(a[0]), def = a[1] === undefined ? '' : String(a[1]);
@@ -702,7 +721,7 @@ function buildFunctions(E) {
     : (style & STYLE.Area) ? 'area' : 'line');
   const flags = (style) => ({
     thick: !!(style & STYLE.Thick), dashed: !!(style & STYLE.Dashed), dots: !!(style & STYLE.Dots),
-    noLine: !!(style & STYLE.NoLine) || !!(style & STYLE.NoDraw), step: !!(style & STYLE.Staircase),
+    noLine: !!(style & STYLE.NoLine) || !!(style & STYLE.NoDraw), hidden: !!(style & STYLE.NoDraw), step: !!(style & STYLE.Staircase),
     ownScale: !!(style & STYLE.OwnScale), noLabel: !!(style & STYLE.NoLabel), left: !!(style & STYLE.LeftAxisScale),
   });
   F.plot = (a) => {

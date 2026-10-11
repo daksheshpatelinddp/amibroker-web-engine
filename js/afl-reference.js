@@ -50,6 +50,11 @@ USER SETTINGS (each one appears in the pane's Parameters dialog, so a trader cha
  Param("name", default, min, max, step)           number with slider, e.g. Param("Period", 14, 2, 100, 1)
  ParamToggle("name","No|Yes",default)              ParamList("name","A|B|C","B")
  ParamColor("name", colorBlue)  (colorCycle as default cycles colors)      ParamStr("name","text")
+ ParamField("Apply to", 3)  price-array dropdown: 0 Open 1 High 2 Low 3 Close (the default) 4 (H+L+C)/3 5 Volume 6 OI 7 Delivery 8 Delivery%
+   e.g. src = ParamField("Apply to", 3); Plot(MA(src, 20), "MA", colorOrange);
+ ParamStyle("name", styleLine|styleThick, maskDefault)  line-style check boxes; mask: maskDefault (thick dashed hidden ownscale) maskPrice maskHistogram maskAll
+   e.g. st = ParamStyle("Style", styleThick); Plot(MA(Close,20), "MA", colorRed, st);
+ ParamTrigger("name","Button text")  a button; returns 1 only on the redraw caused by pressing it, else 0
  ParamTime("name","09:30")  returns number HHMMSS (093000);  ParamTime("name","09:30",1) returns the text "09:30:00"
  ParamDate("name","2024-01-31")  returns DateNum (1240131);  ParamDate("name","2024-01-31",1) returns the text "2024-01-31"
  Defaults must be constants. Use a Param for EVERY number the user may want to change.

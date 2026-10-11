@@ -9,7 +9,7 @@ import { hexToColor, colorToHex } from './afl-engine.js';
  * values      current user values { name: value }   (changed in place)
  * commit()    called after every change so the caller can save + redraw
  */
-export function renderParamControls(container, params, values, commit) {
+export function renderParamControls(container, params, values, commit, fire = null) {
   const seen = new Set();
   let shown = 0;
   for (const prm of params) {
@@ -64,7 +64,52 @@ export function renderParamControls(container, params, values, commit) {
       control.type = 'date'; control.value = cur !== undefined ? cur : prm.def;
       control.onchange = () => { if (control.value) { values[prm.name] = control.value; commit(); } };
     }
+    else if (prm.type === 'field') {
+      const opts = {}; prm.items.forEach((it, i) => { opts[prm.codes[i]] = it; });
+      control = select(opts, cur !== undefined ? cur : prm.def);
+      control.onchange = () => { values[prm.name] = Number(control.value); commit(); };
+    } else if (prm.type === 'style') {
+      control = styleControl(prm, cur !== undefined ? cur : prm.def, (v) => { values[prm.name] = v; commit(); });
+    } else if (prm.type === 'trigger') {
+      const b = el('button', BTN + ' w-full', prm.label || prm.name);
+      b.type = 'button'; b.onclick = () => { if (fire) fire(prm.name); };
+      container.appendChild(b); shown++;
+      continue;
+    }
     if (control) container.appendChild(labeled(prm.name, control));
   }
   return shown;
+}
+
+// ParamStyle: the styles the formula's mask allows, as check boxes (one drawing type at a time).
+const FLAGS = [
+  ['Line', 1, 'kind'], ['Histogram', 2, 'kind'], ['Candle', 64, 'kind'], ['Bar', 128, 'kind'], ['Area', 32768, 'kind'],
+  ['Thick', 4], ['Dashed', 32], ['Dots', 8], ['Hidden', 256], ['Own scale', 16384],
+];
+const MASKS = {
+  0: ['Thick', 'Dashed', 'Hidden', 'Own scale'],                                   // maskDefault
+  1: ['Thick', 'Hidden', 'Own scale', 'Candle', 'Bar'],                            // maskPrice
+  2: ['Histogram', 'Thick', 'Hidden', 'Own scale', 'Area'],                        // maskHistogram
+};
+function styleControl(prm, value, set) {
+  const allowed = prm.mask >= 3 ? FLAGS.map((f) => f[0]) : (MASKS[prm.mask] || MASKS[0]);
+  let v = Number(value) || 1;
+  const wrap = el('div', 'flex flex-wrap gap-x-4 gap-y-1');
+  const kinds = FLAGS.filter((f) => f[2] === 'kind').map((f) => f[1]);
+  const boxes = [];
+  for (const [label, bit, kind] of FLAGS) {
+    if (!allowed.includes(label)) continue;
+    const row = el('label', 'flex items-center space-x-1 text-xs text-slate-200');
+    const cb = el('input'); cb.type = 'checkbox'; cb.checked = (v & bit) !== 0; cb.className = 'accent-sky-500';
+    cb.onchange = () => {
+      if (cb.checked) { if (kind) v = (v & ~kinds.reduce((a, b) => a | b, 0)) | bit; else v |= bit; }
+      else v &= ~bit;
+      if (!(v & kinds.reduce((a, b) => a | b, 0)) && !(v & 256)) v |= 1;      // always some drawing type
+      boxes.forEach(([c, b]) => { c.checked = (v & b) !== 0; });
+      set(v);
+    };
+    row.appendChild(cb); row.appendChild(el('span', '', label));
+    wrap.appendChild(row); boxes.push([cb, bit]);
+  }
+  return wrap;
 }

@@ -123,7 +123,8 @@ export function openPaneEditor(ws, sheet, paneId, onChange) {
       body.appendChild(el('div', 'text-[11px] text-slate-400', 'Parameters (change a value and the chart updates)'));
       const values = { ...(pane.params.values || {}) };
       const commit = () => { ws.setPaneParamValues(sheet.id, pane.id, values); onChange(); };
-      const shown = renderParamControls(body, info.params, values, commit);
+      const fire = (name) => { chartEngine.triggers = { [pane.id]: { [name]: 1 } }; onChange(); };
+      const shown = renderParamControls(body, info.params, values, commit, fire);
       if (!shown) body.appendChild(el('div', 'text-xs text-slate-500', 'This formula has no parameters. Add Param("Name", default, min, max, step) in the formula editor to create one.'));
       else {
         const reset = el('button', BTN + ' w-full', 'Reset parameters to defaults');

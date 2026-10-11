@@ -23,6 +23,7 @@ export class ChartEngine {
     this.onHover = null;       // (barIndex | null) => void
     this.onPaneClick = null;   // (paneId) => void
     this.onFormulaErrors = null; // (paneId, errors[]) => void   called after a draw when a formula had problems
+    this.triggers = {};        // { paneId: { buttonName: 1 } } set by a ParamTrigger button, consumed by the next draw
     this.paneInfo = new Map(); // paneId -> { errors, params, legend, notes } for formula panes
     this._labelTimer = null;
     if (this.container && typeof ResizeObserver !== 'undefined') {
@@ -95,6 +96,7 @@ export class ChartEngine {
       } catch (e) { chart.timeScale().fitContent(); }
     }
     this._scheduleLabels();
+    this.triggers = {};      // a button press fires exactly once
     if (this.onFormulaErrors) {
       for (const [paneId, info] of this.paneInfo) if (info.errors.length) this.onFormulaErrors(paneId, info.errors);
     }
@@ -187,7 +189,7 @@ export class ChartEngine {
     const f = formulaStore.get(pane.params.formulaId);
     if (!f) { info.errors.push('The formula for this pane was deleted. Tap the pane title to remove the pane or choose another formula.'); return; }
 
-    const res = aflEngine.run(f.code, a, { symbol: this.sheet ? this.sheet.symbol : '', params: pane.params.values || {}, interval: (this.sheet && this.sheet.interval) || 'D', intervalName: INTERVALS[(this.sheet && this.sheet.interval) || 'D'] });
+    const res = aflEngine.run(f.code, a, { symbol: this.sheet ? this.sheet.symbol : '', params: pane.params.values || {}, triggers: this.triggers[pane.id] || {}, interval: (this.sheet && this.sheet.interval) || 'D', intervalName: INTERVALS[(this.sheet && this.sheet.interval) || 'D'] });
     info.errors = res.errors; info.params = res.params; info.title = res.title;
 
     const PALETTE = ['#38bdf8', '#f59e0b', '#a78bfa', '#f472b6', '#34d399', '#f87171', '#fbbf24', '#e2e8f0'];
@@ -208,7 +210,7 @@ export class ChartEngine {
 
     let first = null;
     res.plots.forEach((p, k) => {
-      if (p.noLine && p.kind === 'line' && !p.dots) return;
+      if (p.hidden || (p.noLine && p.kind === 'line' && !p.dots)) return;
       const isOhlc = p.kind === 'candle' || p.kind === 'bar';
       const color = isOhlc ? (colorToHex(typeof p.color === 'number' ? p.color : -1) || '#94a3b8') : baseColor(p.color);
       const common = { priceLineVisible: false, lastValueVisible: !p.noLabel && p.kind !== 'hist' };

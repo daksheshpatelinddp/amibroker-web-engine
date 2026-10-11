@@ -69,13 +69,15 @@ function avg(a, p, t) {
   return MA(a, p);
 }
 type = ParamList("Average type", "SMA|EMA|WMA", "SMA");
+src  = ParamField("Apply to", 3);
+lineStyle = ParamStyle("Line style", styleThick, maskDefault);
 p1 = Param("Period 1 (0 = off)", 20, 0, 500, 1);
 p2 = Param("Period 2 (0 = off)", 50, 0, 500, 1);
 p3 = Param("Period 3 (0 = off)", 200, 0, 500, 1);
 Plot(Close, "Price", colorDefault, styleCandle);
-if (p1 > 0) Plot(avg(Close, p1, type), type + " " + NumToStr(p1, 1.0), ParamColor("Color 1", colorOrange), styleThick);
-if (p2 > 0) Plot(avg(Close, p2, type), type + " " + NumToStr(p2, 1.0), ParamColor("Color 2", colorSkyblue), styleThick);
-if (p3 > 0) Plot(avg(Close, p3, type), type + " " + NumToStr(p3, 1.0), ParamColor("Color 3", colorViolet), styleThick);
+if (p1 > 0) Plot(avg(src, p1, type), type + " " + NumToStr(p1, 1.0), ParamColor("Color 1", colorOrange), lineStyle);
+if (p2 > 0) Plot(avg(src, p2, type), type + " " + NumToStr(p2, 1.0), ParamColor("Color 2", colorSkyblue), lineStyle);
+if (p3 > 0) Plot(avg(src, p3, type), type + " " + NumToStr(p3, 1.0), ParamColor("Color 3", colorViolet), lineStyle);
 _SECTION_END();`, { weight: 3 }),
 
   f('price-ema-cross', 'Price + EMA Crossover', TR, 'Fast / slow EMA with buy and sell arrows where they cross', `
@@ -149,7 +151,8 @@ _SECTION_END();`),
   f('rsi', 'RSI', MO, 'Relative Strength Index with 70 / 30 levels', `
 _SECTION_BEGIN("RSI");
 p = Param("Period", 14, 2, 100, 1);
-Plot(RSI(p), "RSI", colorOrange, styleThick);
+src = ParamField("Apply to", 3);
+Plot(RSIa(src, p), "RSI", ParamColor("RSI color", colorOrange), styleThick);
 PlotGrid(70, colorRed);
 PlotGrid(50, colorGrey40);
 PlotGrid(30, colorBrightGreen);
@@ -211,10 +214,11 @@ _SECTION_END();`),
 _SECTION_BEGIN("Bollinger Bands");
 p = Param("Period", 20, 2, 200, 1);
 w = Param("Width (std dev)", 2, 0.5, 5, 0.5);
+src = ParamField("Apply to", 3);
 Plot(Close, "Price", colorDefault, styleCandle);
-Plot(BBandTop(Close, p, w), "Upper", colorSkyblue, styleLine);
-Plot(MA(Close, p), "Middle", colorGrey50, styleDashed);
-Plot(BBandBot(Close, p, w), "Lower", colorSkyblue, styleLine);
+Plot(BBandTop(src, p, w), "Upper", colorSkyblue, styleLine);
+Plot(MA(src, p), "Middle", colorGrey50, styleDashed);
+Plot(BBandBot(src, p, w), "Lower", colorSkyblue, styleLine);
 _SECTION_END();`, { weight: 3 }),
 
   f('price-keltner', 'Price + Keltner Channel', VO, 'EMA with ATR based channel', `
