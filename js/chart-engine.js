@@ -7,6 +7,7 @@ import { barsToArrays, sma, ema, rsi, macd, sourceArray, applyTransform } from '
 import { paneTitle, overlayTitle } from './workspace.js';
 import { aflEngine, colorToHex, shapeKind } from './afl-engine.js';
 import { formulaStore } from './formula-store.js';
+import { INTERVALS } from './timeframe.js';
 
 const COLORS = { up: '#22c55e', down: '#ef4444', grid: '#1e293b', border: '#334155', text: '#94a3b8', bg: '#020617' };
 const DEFAULT_BARS_SHOWN = 250;   // a fresh chart opens on about one year; "Fit" shows everything
@@ -186,7 +187,7 @@ export class ChartEngine {
     const f = formulaStore.get(pane.params.formulaId);
     if (!f) { info.errors.push('The formula for this pane was deleted. Tap the pane title to remove the pane or choose another formula.'); return; }
 
-    const res = aflEngine.run(f.code, a, { symbol: this.sheet ? this.sheet.symbol : '', params: pane.params.values || {} });
+    const res = aflEngine.run(f.code, a, { symbol: this.sheet ? this.sheet.symbol : '', params: pane.params.values || {}, interval: (this.sheet && this.sheet.interval) || 'D', intervalName: INTERVALS[(this.sheet && this.sheet.interval) || 'D'] });
     info.errors = res.errors; info.params = res.params; info.title = res.title;
 
     const PALETTE = ['#38bdf8', '#f59e0b', '#a78bfa', '#f472b6', '#34d399', '#f87171', '#fbbf24', '#e2e8f0'];

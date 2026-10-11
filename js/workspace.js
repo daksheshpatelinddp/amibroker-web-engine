@@ -87,7 +87,8 @@ function newSheet(name, symbol, panes) {
     locked: false,
     symbolLinkIdx: 0,     // 0 = not linked, 1..4 = link colour group
     intervalLinkIdx: 0,
-    panes: panes || [newPane('price'), newPane('volume')],
+    interval: 'D',        // D W M Q Y
+    panes: panes || [newPane('afl', { formulaId: 'b:price-candle' }), newPane('afl', { formulaId: 'b:volume' })],
   };
 }
 
@@ -108,7 +109,10 @@ export class Workspace {
         const data = JSON.parse(raw);
         if (data && Array.isArray(data.sheets) && data.sheets.length > 0 && data.sheets.every(validSheet)) {
           this.sheets = data.sheets;
+          let changed = false;
+          for (const sh of this.sheets) sh.panes = sh.panes.map((p) => { const m = migratePane(p); if (m !== p) changed = true; return m; });
           this.activeId = data.sheets.some(s => s.id === data.activeId) ? data.activeId : data.sheets[0].id;
+          if (changed) this.save();
           return;
         }
       }
@@ -196,6 +200,21 @@ export class Workspace {
     return changed;
   }
 
+  // Changes the time frame of a sheet. Unlocked sheets in the same interval-link colour group follow.
+  setInterval(id, tf) {
+    const s = this.get(id);
+    if (!s || !tf) return [];
+    const changed = [];
+    if (s.interval !== tf) { s.interval = tf; changed.push(s.id); }
+    if (s.intervalLinkIdx > 0) {
+      for (const o of this.sheets) {
+        if (o.id !== s.id && !o.locked && o.intervalLinkIdx === s.intervalLinkIdx && o.interval !== tf) { o.interval = tf; changed.push(o.id); }
+      }
+    }
+    if (changed.length) this.save();
+    return changed;
+  }
+
   toggleLock(id) { const s = this.get(id); if (s) { s.locked = !s.locked; this.save(); } }
   cycleLink(id, which, groups = 5) {
     const s = this.get(id); if (!s) return;
@@ -272,6 +291,29 @@ export class Workspace {
     this.save();
     return true;
   }
+}
+
+// Older saved layouts used built-in pane kinds. Turn them into formula panes so every pane has editable parameters.
+const MIGRATE = { price: 'b:price-candle', volume: 'b:volume', delivery: 'b:delivery-qty', delpct: 'b:delivery-pct', rsi: 'b:rsi', macd: 'b:macd' };
+function migratePane(p) {
+  const formulaId = MIGRATE[p.kind];
+  if (!formulaId) return p;
+  const ov = p.overlays || [], values = {};
+  let id = formulaId;
+  if (p.kind === 'rsi' && p.params && p.params.period) values.Period = p.params.period;
+  if (p.kind === 'macd' && p.params) { values.Fast = p.params.fast || 12; values.Slow = p.params.slow || 26; values.Signal = p.params.signal || 9; }
+  if (p.kind === 'price' && ov.length) {
+    id = 'b:price-ma';
+    values['Average type'] = ov.every((o) => o.type === 'ema') ? 'EMA' : 'SMA';
+    for (let i = 0; i < 3; i++) values[`Period ${i + 1} (0 = off)`] = ov[i] ? ov[i].period : 0;
+    ov.slice(0, 3).forEach((o, i) => { values[`Color ${i + 1}`] = hexToColorNum(o.color); });
+  }
+  if ((p.kind === 'volume' || p.kind === 'delivery' || p.kind === 'delpct') && ov.length) values['Average period'] = ov[0].period;
+  return { id: p.id, kind: 'afl', weight: p.weight || (p.kind === 'price' ? 3 : 1), params: { formulaId: id, values }, overlays: [] };
+}
+function hexToColorNum(hex) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex));
+  return m ? parseInt(m[1], 16) + parseInt(m[2], 16) * 256 + parseInt(m[3], 16) * 65536 : 0;
 }
 
 function validSheet(s) {

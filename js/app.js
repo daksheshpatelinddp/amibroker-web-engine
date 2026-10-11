@@ -8,6 +8,7 @@ import { DATABASES, ACTIVE_DB } from './config.js';
 import { host } from './host.js';
 import { initToolsMenu } from './tools-menu.js';
 import { formulaStore } from './formula-store.js';
+import { resample } from './timeframe.js';
 
 // Indian-style short numbers for the header line: 1.2K, 3.4L (lakh), 5.6Cr (crore)
 function fmtQty(n) {
@@ -74,6 +75,11 @@ class Application {
         chartEngine.onHover = (i) => this.updateHeader(i);
         chartEngine.onPaneClick = (paneId) => openPaneEditor(this.ws, this.ws.active(), paneId, () => this.relayout());
         const on = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
+        const tf = document.getElementById('tf-select');
+        if (tf) tf.addEventListener('change', () => {
+            this.ws.setInterval(this.ws.active().id, tf.value);   // linked sheets follow
+            if (this.currentRows.length) this.display(this.currentRows);
+        });
         on('btn-fit', () => chartEngine.fitAll());
         on('btn-latest', () => chartEngine.goLatest());
         on('btn-add-pane', () => openAddPane(this.ws, this.ws.active(), () => this.relayout()));
@@ -139,9 +145,12 @@ class Application {
 
     // Draw the active sheet's panes for the given rows
     display(rows, { keepRange = false } = {}) {
-        this.currentRows = rows;
+        this.currentRows = rows;                       // always the daily bars; the sheet's time frame is applied here
+        const sheet = this.ws.active();
+        const tfBox = document.getElementById('tf-select');
+        if (tfBox) tfBox.value = sheet.interval || 'D';
         try {
-            chartEngine.render(this.ws.active(), rows, { keepRange });
+            chartEngine.render(sheet, resample(rows, sheet.interval || 'D'), { keepRange });
         } catch (e) {
             console.error('Chart draw failed:', e);
             this.setCacheText('Chart error: ' + (e.message || e));

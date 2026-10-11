@@ -307,3 +307,55 @@ export function sinceExtreme(c, a, n, isMax) {
   }
   return out;
 }
+
+// ---- zig-zag family. A swing is "confirmed" once price has moved `pct` percent away from the extreme.
+// Returns the confirmed peaks and troughs in the order they were confirmed:
+//   { peaks:[{idx, val, at}], troughs:[...], pivots:[{idx,val}] }   (at = bar on which it became known)
+export function swings(a, pct) {
+  const L = a.length, peaks = [], troughs = [], pivots = [];
+  pct = Number(pct);
+  if (!(pct > 0) || L === 0) return { peaks, troughs, pivots };
+  let start = 0; while (start < L && Number.isNaN(a[start])) start++;
+  if (start >= L) return { peaks, troughs, pivots };
+  let dir = 0, hi = a[start], hiI = start, lo = a[start], loI = start;
+  pivots.push({ idx: start, val: a[start] });
+  for (let i = start + 1; i < L; i++) {
+    const v = a[i]; if (Number.isNaN(v)) continue;
+    if (v > hi) { hi = v; hiI = i; }
+    if (v < lo) { lo = v; loI = i; }
+    if (dir >= 0 && v <= hi * (1 - pct / 100) && hiI >= loI) {          // fell far enough from the high: peak confirmed
+      peaks.push({ idx: hiI, val: hi, at: i }); pivots.push({ idx: hiI, val: hi });
+      dir = -1; lo = v; loI = i; hi = v; hiI = i;
+    } else if (dir <= 0 && v >= lo * (1 + pct / 100) && loI >= hiI) {   // rose far enough from the low: trough confirmed
+      troughs.push({ idx: loI, val: lo, at: i }); pivots.push({ idx: loI, val: lo });
+      dir = 1; hi = v; hiI = i; lo = v; loI = i;
+    }
+  }
+  return { peaks, troughs, pivots };
+}
+
+// Zig: straight lines between the confirmed pivots; the last leg runs to the final bar (so it can repaint, as in AmiBroker).
+export function zig(a, pct) {
+  const L = a.length, out = newArr(L), { pivots } = swings(a, pct);
+  if (!pivots.length) return out;
+  const pts = pivots.slice();
+  let lastReal = L - 1; while (lastReal > 0 && Number.isNaN(a[lastReal])) lastReal--;
+  if (pts[pts.length - 1].idx !== lastReal) pts.push({ idx: lastReal, val: a[lastReal] });
+  for (let k = 0; k + 1 < pts.length; k++) {
+    const p = pts[k], q = pts[k + 1];
+    for (let i = p.idx; i <= q.idx; i++) out[i] = p.val + (q.val - p.val) * (i - p.idx) / Math.max(1, q.idx - p.idx);
+  }
+  return out;
+}
+
+// Peak / Trough / PeakBars / TroughBars: the n-th most recent confirmed swing, only using data known at each bar (no look-ahead).
+export function swingSeries(a, pct, n, isPeak, wantBars) {
+  n = Math.max(1, Math.floor(Number(n)) || 1);
+  const L = a.length, out = newArr(L), s = swings(a, pct), list = isPeak ? s.peaks : s.troughs;
+  let k = 0;                                     // how many swings are known so far
+  for (let i = 0; i < L; i++) {
+    while (k < list.length && list[k].at <= i) k++;
+    if (k >= n) { const sw = list[k - n]; out[i] = wantBars ? i - sw.idx : sw.val; }
+  }
+  return out;
+}

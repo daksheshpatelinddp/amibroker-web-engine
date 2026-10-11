@@ -29,11 +29,11 @@ export function tokenize(src) {
     if (ch === '#') { while (i < n && src[i] !== '\n') i++; continue; } // #include / #pragma are ignored
     if ((ch >= '0' && ch <= '9') || (ch === '.' && src[i + 1] >= '0' && src[i + 1] <= '9')) {
       num.lastIndex = i; const m = num.exec(src);
-      toks.push({ t: 'num', v: parseFloat(m[0]), line }); i += m[0].length; continue;
+      toks.push({ t: 'num', v: parseFloat(m[0]), line, pos: i, end: i + m[0].length }); i += m[0].length; continue;
     }
     if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch === '_') {
       idr.lastIndex = i; const m = idr.exec(src);
-      toks.push({ t: 'id', v: m[0], line }); i += m[0].length; continue;
+      toks.push({ t: 'id', v: m[0], line, pos: i, end: i + m[0].length }); i += m[0].length; continue;
     }
     if (ch === '"' || ch === "'") {
       let s = '', j = i + 1, closed = false;
@@ -45,11 +45,11 @@ export function tokenize(src) {
         s += c; j++;
       }
       if (!closed) throw new AFLError('Unterminated string', line);
-      toks.push({ t: 'str', v: s, line }); i = j + 1; continue;
+      toks.push({ t: 'str', v: s, line, pos: i, end: j + 1 }); i = j + 1; continue;
     }
     const two = src.substr(i, 2);
-    if (TWO.includes(two)) { toks.push({ t: 'op', v: two, line }); i += 2; continue; }
-    if (ONE.includes(ch)) { toks.push({ t: 'op', v: ch, line }); i++; continue; }
+    if (TWO.includes(two)) { toks.push({ t: 'op', v: two, line, pos: i, end: i + 2 }); i += 2; continue; }
+    if (ONE.includes(ch)) { toks.push({ t: 'op', v: ch, line, pos: i, end: i + 1 }); i++; continue; }
     throw new AFLError(`Unexpected character '${ch}'`, line);
   }
   toks.push({ t: 'eof', v: '', line });
@@ -330,6 +330,10 @@ class Interp {
     for (const [k, v] of Object.entries(STYLE)) c.set('style' + k.toLowerCase(), v);
     for (const [k, v] of Object.entries(SHAPE)) c.set('shape' + k.toLowerCase(), v);
     for (let d = 0; d <= 9; d++) c.set('shapedigit' + d, 100 + d);
+    c.set('colorcycle', -2);
+    Object.entries({ stopTypeLoss: 1, stopTypeProfit: 2, stopTypeTrailing: 3, stopTypeNBar: 4, stopModeDisable: 0, stopModePoint: 1,
+      stopModePercent: 2, stopModeRisk: 3, stopModeBars: 4, spsValue: 1, spsPercentOfEquity: 2, spsShares: 3, spsNoChange: 4,
+      spsPercentOfPosition: 5, maskDefault: 0, maskAll: 0xffffff, maskPrice: 1, maskHistogram: 2 }).forEach(([k, v]) => c.set(k.toLowerCase(), v));
     this.consts = c;
   }
 
@@ -542,6 +546,13 @@ function buildFunctions(E) {
   F.bbandbot = (a) => { const x = A(a[0]), p = S(a[1], 20), w = S(a[2], 2); const m = L.ma(x, p), d = L.stdev(x, p); return m.map((v, i) => v - w * d[i]); };
   F.truerange = () => L.trueRange(E.H, E.Lw, E.C);
 
+  // --- zig-zag family (percent change)
+  F.zig = (a) => L.zig(A(a[0]), S(a[1]));
+  F.peak = (a) => L.swingSeries(A(a[0]), S(a[1]), S(a[2], 1), true, false);
+  F.trough = (a) => L.swingSeries(A(a[0]), S(a[1]), S(a[2], 1), false, false);
+  F.peakbars = (a) => L.swingSeries(A(a[0]), S(a[1]), S(a[2], 1), true, true);
+  F.troughbars = (a) => L.swingSeries(A(a[0]), S(a[1]), S(a[2], 1), false, true);
+
   // --- logic / series
   F.cross = (a) => L.cross(A(a[0]), A(a[1]));
   F.flip = (a) => L.flip(A(a[0]), A(a[1]));
@@ -582,7 +593,7 @@ function buildFunctions(E) {
   F.dayofweek = () => Float64Array.from(dateParts(), (p) => new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay());
   F.name = () => String(E.opts.symbol || '');
   F.fullname = F.name;
-  F.interval = () => 86400;
+  F.interval = () => ({ D: 86400, W: 604800, M: 2592000, Q: 7776000, Y: 31536000 })[E.opts.interval || 'D'] || 86400;
   F.version = () => 6;
 
   // --- text
@@ -595,44 +606,91 @@ function buildFunctions(E) {
   F._section_begin = (a) => String(a[0] || '');
   F._section_end = () => 0;
 
-  // --- no-op setup calls
-  for (const nm of ['setoption', 'settradedelays', 'setchartoptions', 'setbarsrequired', 'setformulaname', 'setpositionsize',
-    'applystop', 'addtocomposite', 'requesttimedrefresh', 'addsummaryrows', 'staticvarset']) F[nm] = () => 0;
+  // --- trade / chart options: recorded for the Backtester (the chart itself ignores them)
+  const OPTION_DEFAULTS = { initialequity: 100000, maxopenpositions: 10, commissionmode: 0, commissionamount: 0, allowsamebarexit: 1,
+    allowpositionshrinking: 0, activatestopsimmediately: 0, pricebounds: 1, extraspace: 0, usepreviousclose: 0, minshares: 1,
+    roundlotsize: 0, tickssize: 0, marginrequirement: 100, interestrate: 0, accountmargin: 100, reverseentrysignalforce: 0,
+    holdminbars: 0, maxopenlong: 0, maxopenshort: 0, futuresmode: 0, worstrankheld: 0, allowexposure: 0 };
+  F.setoption = (a) => { E.res.options[String(a[0]).toLowerCase()] = a[1]; return 0; };
+  F.getoption = (a) => {
+    const k = String(a[0]).toLowerCase();
+    return k in E.res.options ? E.res.options[k] : (k in OPTION_DEFAULTS ? OPTION_DEFAULTS[k] : NaN);
+  };
+  F.settradedelays = (a) => { E.res.options.tradedelays = a.map((x) => S(x, 0)); return 0; };
+  F.setpositionsize = (a) => { E.res.options.positionsizeset = { size: S(a[0], 0), type: S(a[1], 2) }; return 0; };
+  F.applystop = (a) => { E.res.stops.push({ type: S(a[0]), mode: S(a[1]), amount: S(a[2]), exitAtStop: S(a[3], 0), volatile: S(a[4], 0), reentry: S(a[5], 0) }); return 0; };
+  F.setchartoptions = (a) => { E.res.options.chartoptions = a.map((x) => (isArr(x) ? 0 : x)); return 0; };
+  for (const nm of ['setbarsrequired', 'setformulaname', 'addtocomposite', 'requesttimedrefresh', 'addsummaryrows', 'staticvarset']) F[nm] = () => 0;
 
-  // --- parameters
+  // --- parameters (appear in the Parameters dialog; the user's value replaces the default)
   const paramVal = (name, def) => {
     const v = E.opts.params && E.opts.params[name];
     return v === undefined || v === null || v === '' ? def : v;
   };
+  const register = (prm) => { if (!E.res.params.some((x) => x.name === prm.name)) E.res.params.push(prm); };
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const parseTime = (s) => {
+    const m = /^\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(s));
+    return m ? { h: Math.min(23, +m[1]), m: Math.min(59, +m[2]), s: Math.min(59, +(m[3] || 0)) } : { h: 0, m: 0, s: 0 };
+  };
+  const parseDate = (s) => {
+    s = String(s).trim();
+    let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(s);
+    if (m) return { y: +m[1], m: +m[2], d: +m[3] };
+    m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/.exec(s);
+    if (m) { let y = +m[3]; if (y < 100) y += y < 50 ? 2000 : 1900; const x = +m[1], z = +m[2]; return x > 12 ? { y, m: z, d: x } : { y, m: x, d: z }; }
+    return { y: 2000, m: 1, d: 1 };
+  };
   F.param = (a) => {
-    const name = String(a[0]), def = S(a[1], 0), min = S(a[2], 0), max = S(a[3], 100), step = S(a[4], 1);
-    E.res.params.push({ name, type: 'number', def, min, max, step });
+    const name = String(a[0]), def = S(a[1], 0), min = S(a[2], 0), max = S(a[3], 100), step = S(a[4], 1), sincr = S(a[5], 0);
+    register({ name, type: 'number', def, min, max, step, sincr });
     const v = Number(paramVal(name, def));
     return Number.isFinite(v) ? v : def;
   };
   F.paramtoggle = (a) => {
     const name = String(a[0]), items = String(a[1] === undefined ? 'No|Yes' : a[1]).split('|'), def = S(a[2], 0);
-    E.res.params.push({ name, type: 'list', items, def });
+    register({ name, type: 'list', items, def });
     const v = Number(paramVal(name, def));
     return Number.isFinite(v) ? v : def;
   };
   F.paramlist = (a) => {
     const name = String(a[0]), items = String(a[1]).split('|'); let def = a[2];
     if (typeof def !== 'string') def = items[Math.max(0, Math.min(items.length - 1, S(def, 0)))];
-    E.res.params.push({ name, type: 'text', items, def });
+    register({ name, type: 'text', items, def });
     const v = String(paramVal(name, def));
     return items.includes(v) ? v : def;
   };
+  let cycle = 0;
   F.paramcolor = (a) => {
-    const name = String(a[0]), def = S(a[1], 55);
-    E.res.params.push({ name, type: 'color', def });
+    const name = String(a[0]);
+    let def = S(a[1], 55);
+    if (def === -2) def = [9, 13, 11, 44, 41, 38, 43, 10][cycle++ % 8];   // colorCycle: orange, blue, green, turquoise, gold, violet, bright green, dark yellow
+    register({ name, type: 'color', def });
     const v = Number(paramVal(name, def));
     return Number.isFinite(v) ? v : def;
   };
   F.paramstyle = (a) => {
     const name = String(a[0]), def = S(a[1], 1);
-    E.res.params.push({ name, type: 'number', def, min: 0, max: 100000, step: 1 });
+    register({ name, type: 'number', def, min: 0, max: 1048575, step: 1 });
     const v = Number(paramVal(name, def)); return Number.isFinite(v) ? v : def;
+  };
+  F.paramstr = (a) => {
+    const name = String(a[0]), def = a[1] === undefined ? '' : String(a[1]);
+    register({ name, type: 'str', def });
+    return String(paramVal(name, def));
+  };
+  F.paramtime = (a) => {
+    const name = String(a[0]), def = a[1] === undefined ? '00:00:00' : String(a[1]), fmt = S(a[2], 0);
+    const t = parseTime(paramVal(name, def)), d = parseTime(def);
+    register({ name, type: 'time', def: `${pad2(d.h)}:${pad2(d.m)}:${pad2(d.s)}` });
+    return fmt === 1 ? `${pad2(t.h)}:${pad2(t.m)}:${pad2(t.s)}` : t.h * 10000 + t.m * 100 + t.s;   // TimeNum, e.g. 133515
+  };
+  F.paramdate = (a) => {
+    const name = String(a[0]), def = a[1] === undefined ? '2000-01-01' : String(a[1]), fmt = S(a[2], 0);
+    const t = parseDate(paramVal(name, def)), d = parseDate(def);
+    register({ name, type: 'date', def: `${d.y}-${pad2(d.m)}-${pad2(d.d)}` });
+    const dn = (t.y - 1900) * 10000 + t.m * 100 + t.d;                          // DateNum, e.g. 990503
+    return fmt === 1 ? `${t.y}-${pad2(t.m)}-${pad2(t.d)}` : fmt === 2 ? dn * 1e6 : dn;
   };
   F.colorrgb = (a) => S(a[0], 0) + S(a[1], 0) * 256 + S(a[2], 0) * 65536;
   F.rgb = F.colorrgb;
@@ -696,7 +754,7 @@ Interp.prototype.binary2 = function (a, b, f) {
 export class AFLEngine {
   /** All function and constant names the interpreter knows (used by the help text and tests). */
   functionNames() {
-    const dummy = new Interp({ t: ['2000-01-01'], o: [1], h: [1], l: [1], c: [1], v: [1] }, {}, { params: [], plots: [], shapes: [], grids: [], columns: [] });
+    const dummy = new Interp({ t: ['2000-01-01'], o: [1], h: [1], l: [1], c: [1], v: [1] }, {}, { params: [], plots: [], shapes: [], grids: [], columns: [], options: {}, stops: [] });
     return Object.keys(dummy.lib).filter((k) => !k.endsWith('_'));
   }
 
@@ -707,7 +765,7 @@ export class AFLEngine {
   run(code, bars, opts = {}) {
     const res = {
       plots: [], shapes: [], grids: [], columns: [], params: [], errors: [], title: '',
-      buy: null, sell: null, short: null, cover: null, filter: null, vars: {}, usesSignals: false,
+      buy: null, sell: null, short: null, cover: null, filter: null, vars: {}, usesSignals: false, options: {}, stops: [],
     };
     if (!bars || !bars.t || bars.t.length === 0) { res.errors.push('No data loaded'); return res; }
     let ast;
@@ -734,7 +792,7 @@ export class AFLEngine {
 
 function expandTitle(s, bars, opts) {
   const i = bars.t.length - 1, f = (x) => (Number.isFinite(x) ? x.toFixed(2) : '-');
-  return s.replace(/\{\{NAME\}\}/gi, opts.symbol || '').replace(/\{\{INTERVAL\}\}/gi, 'Daily')
+  return s.replace(/\{\{NAME\}\}/gi, opts.symbol || '').replace(/\{\{INTERVAL\}\}/gi, opts.intervalName || 'Daily')
     .replace(/\{\{DATE\}\}/gi, bars.t[i])
     .replace(/\{\{OHLCX\}\}|\{\{OHLC\}\}/gi, `O ${f(bars.o[i])} H ${f(bars.h[i])} L ${f(bars.l[i])} C ${f(bars.c[i])}`)
     .replace(/\{\{VALUES\}\}/gi, '');

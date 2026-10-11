@@ -26,12 +26,12 @@ _SECTION_END();`, { weight: 3 }),
 
   f('price-line', 'Price (Close Line)', PV, 'Simple line chart of the closing price', `
 _SECTION_BEGIN("Line");
-Plot(Close, "Close", colorSkyblue, styleLine | styleThick);
+Plot(Close, "Close", ParamColor("Line color", colorSkyblue), styleLine | styleThick);
 _SECTION_END();`, { weight: 3 }),
 
   f('price-area', 'Price (Area)', PV, 'Closing price drawn as a filled area', `
 _SECTION_BEGIN("Area");
-Plot(Close, "Close", colorSkyblue, styleArea);
+Plot(Close, "Close", ParamColor("Area color", colorSkyblue), styleArea);
 _SECTION_END();`, { weight: 3 }),
 
   f('price-heikin', 'Heikin-Ashi Candles', PV, 'Smoothed Heikin-Ashi candlesticks', `
@@ -69,13 +69,13 @@ function avg(a, p, t) {
   return MA(a, p);
 }
 type = ParamList("Average type", "SMA|EMA|WMA", "SMA");
-p1 = Param("Period 1", 20, 2, 500, 1);
-p2 = Param("Period 2", 50, 2, 500, 1);
-p3 = Param("Period 3", 200, 2, 500, 1);
+p1 = Param("Period 1 (0 = off)", 20, 0, 500, 1);
+p2 = Param("Period 2 (0 = off)", 50, 0, 500, 1);
+p3 = Param("Period 3 (0 = off)", 200, 0, 500, 1);
 Plot(Close, "Price", colorDefault, styleCandle);
-Plot(avg(Close, p1, type), type + " " + NumToStr(p1, 1.0), colorOrange, styleThick);
-Plot(avg(Close, p2, type), type + " " + NumToStr(p2, 1.0), colorSkyblue, styleThick);
-Plot(avg(Close, p3, type), type + " " + NumToStr(p3, 1.0), colorViolet, styleThick);
+if (p1 > 0) Plot(avg(Close, p1, type), type + " " + NumToStr(p1, 1.0), ParamColor("Color 1", colorOrange), styleThick);
+if (p2 > 0) Plot(avg(Close, p2, type), type + " " + NumToStr(p2, 1.0), ParamColor("Color 2", colorSkyblue), styleThick);
+if (p3 > 0) Plot(avg(Close, p3, type), type + " " + NumToStr(p3, 1.0), ParamColor("Color 3", colorViolet), styleThick);
 _SECTION_END();`, { weight: 3 }),
 
   f('price-ema-cross', 'Price + EMA Crossover', TR, 'Fast / slow EMA with buy and sell arrows where they cross', `
@@ -353,8 +353,11 @@ _SECTION_END();`, { weight: 3, kind: 'system' }),
 
   f('sys-macd', 'System: MACD Signal Cross', SY, 'Buy when MACD crosses above its signal line, sell when it crosses below', `
 _SECTION_BEGIN("System: MACD Cross");
-m = MACD(12, 26);
-s = Signal(12, 26, 9);
+fast = Param("Fast", 12, 2, 100, 1);
+slow = Param("Slow", 26, 2, 200, 1);
+sig  = Param("Signal", 9, 2, 100, 1);
+m = MACD(fast, slow);
+s = Signal(fast, slow, sig);
 Buy  = Cross(m, s);
 Sell = Cross(s, m);
 Short = Cover = 0;
@@ -366,16 +369,20 @@ _SECTION_END();`, { weight: 3, kind: 'system' }),
   // ------------------------------------------------------------------ explorations
   f('exp-summary', 'Exploration: Price & Volume Summary', EX, 'Lists close, % change, volume and RSI for every bar (a starting point for your own columns)', `
 _SECTION_BEGIN("Exploration: Summary");
-Filter = Volume > 0;
+minVol = Param("Minimum volume", 0, 0, 100000000, 1000);
+rsiPeriod = Param("RSI period", 14, 2, 100, 1);
+Filter = Volume > minVol;
 AddColumn(Close, "Close", 1.2);
 AddColumn(ROC(Close, 1), "Chg %", 1.2);
 AddColumn(Volume, "Volume", 1.0);
-AddColumn(RSI(14), "RSI(14)", 1.1);
+AddColumn(RSI(rsiPeriod), "RSI", 1.1);
 _SECTION_END();`, { kind: 'exploration' }),
 
   f('exp-52w-high', 'Scan: Closing at 52-week High', EX, 'Finds stocks that close at a new 250-day high', `
 _SECTION_BEGIN("Scan: 52-week high");
-Filter = Close >= HHV(High, 250) AND Volume > 0;
+days   = Param("Days (250 = 1 year)", 250, 20, 1000, 10);
+minVol = Param("Minimum volume", 0, 0, 100000000, 1000);
+Filter = Close >= HHV(High, days) AND Volume > minVol;
 AddColumn(Close, "Close", 1.2);
 AddColumn(ROC(Close, 1), "Chg %", 1.2);
 AddColumn(Volume, "Volume", 1.0);
@@ -383,18 +390,23 @@ _SECTION_END();`, { kind: 'exploration' }),
 
   f('exp-delivery-spike', 'Scan: Delivery % Spike', EX, 'Delivery % is 1.5x its 20-day average on above-average volume (NSE)', `
 _SECTION_BEGIN("Scan: Delivery spike");
-Filter = DelPct > 1.5 * MA(DelPct, 20) AND Volume > MA(Volume, 20);
+p    = Param("Average period", 20, 2, 200, 1);
+mult = Param("Delivery % multiple", 1.5, 1, 10, 0.1);
+Filter = DelPct > mult * MA(DelPct, p) AND Volume > MA(Volume, p);
 AddColumn(Close, "Close", 1.2);
 AddColumn(DelPct, "Delivery %", 1.1);
-AddColumn(MA(DelPct, 20), "Avg Del %", 1.1);
-AddColumn(Volume / MA(Volume, 20), "Rel Vol", 1.2);
+AddColumn(MA(DelPct, p), "Avg Del %", 1.1);
+AddColumn(Volume / MA(Volume, p), "Rel Vol", 1.2);
 _SECTION_END();`, { kind: 'exploration' }),
 
   f('exp-volume-breakout', 'Scan: Volume Breakout', EX, 'Close above the 20-day high with at least 2x average volume', `
 _SECTION_BEGIN("Scan: Volume breakout");
-Filter = Close > Ref(HHV(High, 20), -1) AND Volume > 2 * MA(Volume, 20);
+days = Param("Breakout above highest high of", 20, 5, 250, 1);
+p    = Param("Volume average period", 20, 2, 200, 1);
+mult = Param("Volume multiple", 2, 1, 20, 0.5);
+Filter = Close > Ref(HHV(High, days), -1) AND Volume > mult * MA(Volume, p);
 AddColumn(Close, "Close", 1.2);
 AddColumn(ROC(Close, 1), "Chg %", 1.2);
-AddColumn(Volume / MA(Volume, 20), "Rel Vol", 1.2);
+AddColumn(Volume / MA(Volume, p), "Rel Vol", 1.2);
 _SECTION_END();`, { kind: 'exploration' }),
 ];

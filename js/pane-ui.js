@@ -4,51 +4,42 @@ import { SOURCES } from './indicators.js';
 import { el, openModal, colorPicker, labeled, select, BTN, BTN_PRIMARY, BTN_DANGER, INPUT } from './ui.js';
 import { formulaStore } from './formula-store.js';
 import { chartEngine } from './chart-engine.js';
-import { hexToColor, colorToHex } from './afl-engine.js';
+import { renderParamControls } from './params-ui.js';
 
-/** "+ Pane": choose what the new pane shows. */
+/** "+ Pane": choose a formula (built-in or your own) for the new pane. */
 export function openAddPane(ws, sheet, onChange) {
   openModal('Add pane', (body, close) => {
-    body.appendChild(el('div', 'text-[11px] text-slate-400', 'Choose what the new pane should show. You can add moving averages to it afterwards.'));
+    body.appendChild(el('div', 'text-[11px] text-slate-400', 'Choose what the new pane should show. Every formula has parameters you can change afterwards (tap the pane title). Write your own from Tools > Formula Editor.'));
 
-    const kind = select(PANE_KINDS, 'volume');
-    body.appendChild(labeled('Pane type', kind));
-
-    const extra = el('div', 'space-y-3');
-    body.appendChild(extra);
-    const period = el('input', INPUT + ' w-full');
-    period.type = 'number'; period.min = '2'; period.max = '500';
-    const source = select(SOURCES, 'close');
-    const transform = select({ none: 'Raw values', sma: 'Simple average (SMA)', ema: 'Exponential average (EMA)', rsi: 'RSI', roc: 'Rate of change %' }, 'none');
-
-    const formulaOptions = {};
-    formulaStore.all().filter((f) => f.kind !== 'exploration').forEach((f) => { formulaOptions[f.id] = f.builtin ? f.name : `★ ${f.name}`; });
-    const formulaSel = select(formulaOptions, 'b:rsi');
-
-    const drawExtra = () => {
-      extra.innerHTML = '';
-      if (kind.value === 'afl') {
-        extra.appendChild(labeled('Formula (★ = yours). Write or generate more from the Tools menu.', formulaSel));
-      }
-      if (kind.value === 'rsi') { period.value = '14'; extra.appendChild(labeled('RSI period', period)); }
-      if (kind.value === 'custom') {
-        period.value = '20';
-        extra.appendChild(labeled('Data', source));
-        extra.appendChild(labeled('Calculation', transform));
-        extra.appendChild(labeled('Period (used by SMA / EMA / RSI / rate of change)', period));
-      }
+    const sel = el('select', INPUT + ' w-full');
+    const addGroup = (label, list) => {
+      if (!list.length) return;
+      const g = document.createElement('optgroup'); g.label = label;
+      list.forEach((f) => { const o = el('option', '', f.name); o.value = f.id; g.appendChild(o); });
+      sel.appendChild(g);
     };
-    kind.onchange = drawExtra;
-    drawExtra();
+    const usable = formulaStore.all().filter((f) => f.kind !== 'exploration');
+    addGroup('My formulas', usable.filter((f) => !f.builtin));
+    for (const cat of formulaStore.categories()) addGroup(cat, usable.filter((f) => f.builtin && f.category === cat));
+    sel.value = 'b:rsi';
+    body.appendChild(labeled('Formula', sel));
+    const desc = el('div', 'text-[11px] text-slate-500');
+    const showDesc = () => { const f = formulaStore.get(sel.value); desc.textContent = f ? (f.description || '') : ''; };
+    sel.onchange = showDesc; showDesc();
+    body.appendChild(desc);
 
     const add = el('button', BTN_PRIMARY + ' w-full', 'Add pane');
     add.type = 'button';
-    add.onclick = () => {
-      ws.addPane(sheet.id, kind.value, { period: period.value, source: source.value, transform: transform.value, formulaId: formulaSel.value });
-      close();
-      onChange();
-    };
+    add.onclick = () => { ws.addPane(sheet.id, 'afl', { formulaId: sel.value }); close(); onChange(); };
     body.appendChild(add);
+
+    const more = el('div', 'flex gap-2 pt-1');
+    const lib = el('button', BTN + ' flex-1', 'Formula Library…'); lib.type = 'button';
+    lib.onclick = async () => { close(); (await import('./formula-library.js')).openLibrary({ mode: 'manage' }); };
+    const edt = el('button', BTN + ' flex-1', 'New formula…'); edt.type = 'button';
+    edt.onclick = async () => { close(); (await import('./formula-editor.js')).openFormulaEditor(); };
+    more.appendChild(lib); more.appendChild(edt);
+    body.appendChild(more);
   });
 }
 
@@ -128,38 +119,14 @@ export function openPaneEditor(ws, sheet, paneId, onChange) {
         body.appendChild(el('div', 'p-2 rounded border border-amber-800 bg-amber-950/30 text-[11px] text-amber-200', info.notes.join(' ')));
       }
 
-      // settings made by Param(...) in the formula
-      body.appendChild(el('div', 'text-[11px] text-slate-400', 'Settings'));
+      // settings made by Param / ParamColor / ParamStr / ParamTime / ParamDate ... in the formula
+      body.appendChild(el('div', 'text-[11px] text-slate-400', 'Parameters (change a value and the chart updates)'));
       const values = { ...(pane.params.values || {}) };
-      const commit = () => { ws.setPaneParamValues(sheet.id, pane.id, values); onChange(); redraw(); };
-      if (!info.params.length) body.appendChild(el('div', 'text-xs text-slate-500', 'This formula has no settings.'));
-      const seen = new Set();
-      for (const prm of info.params) {
-        if (seen.has(prm.name)) continue; seen.add(prm.name);
-        let control;
-        const cur = values[prm.name];
-        if (prm.type === 'number') {
-          control = el('input', INPUT + ' w-full');
-          control.type = 'number'; control.min = prm.min; control.max = prm.max; control.step = prm.step || 'any';
-          control.value = cur !== undefined ? cur : prm.def;
-          control.onchange = () => {
-            const v = Number(control.value);
-            if (Number.isFinite(v)) values[prm.name] = Math.min(prm.max, Math.max(prm.min, v)); commit();
-          };
-        } else if (prm.type === 'list' || prm.type === 'text') {
-          const opts = {}; prm.items.forEach((it, i) => { opts[prm.type === 'list' ? i : it] = it; });
-          control = select(opts, cur !== undefined ? cur : prm.def);
-          control.onchange = () => { values[prm.name] = prm.type === 'list' ? Number(control.value) : control.value; commit(); };
-        } else if (prm.type === 'color') {
-          control = el('input', 'w-full h-9 bg-slate-800 border border-slate-700 rounded');
-          control.type = 'color';
-          control.value = colorToHex(cur !== undefined ? cur : prm.def) || '#ffffff';
-          control.onchange = () => { values[prm.name] = hexToColor(control.value); commit(); };
-        }
-        if (control) body.appendChild(labeled(prm.name, control));
-      }
-      if (info.params.length) {
-        const reset = el('button', BTN + ' w-full', 'Reset settings to defaults');
+      const commit = () => { ws.setPaneParamValues(sheet.id, pane.id, values); onChange(); };
+      const shown = renderParamControls(body, info.params, values, commit);
+      if (!shown) body.appendChild(el('div', 'text-xs text-slate-500', 'This formula has no parameters. Add Param("Name", default, min, max, step) in the formula editor to create one.'));
+      else {
+        const reset = el('button', BTN + ' w-full', 'Reset parameters to defaults');
         reset.type = 'button';
         reset.onclick = () => { ws.setPaneParamValues(sheet.id, pane.id, {}); onChange(); redraw(); };
         body.appendChild(reset);

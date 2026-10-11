@@ -18,6 +18,9 @@ HIGHEST / LOWEST / REFERENCE
  HHV(array,n)  LLV(array,n)  HHVBars(array,n)  LLVBars(array,n)  Highest(array,n)  Lowest(array,n)
  Ref(array,-1) (previous bar; positive looks ahead)  ROC(array,n) (% change)  StDev(array,n)  Correlation(a,b,n)
  HighestSince(condition,array,1)  LowestSince(condition,array,1)
+ZIG-ZAG (swing highs / lows, percent change)
+ Zig(array,percent)  Peak(array,percent,n)  Trough(array,percent,n)  PeakBars(array,percent,n)  TroughBars(array,percent,n)
+ (Zig repaints: its last leg always runs to the latest bar. Peak/Trough/PeakBars/TroughBars never look ahead.)
 INDICATORS (use the chart's own prices)
  RSI(n)  RSIa(array,n)  MACD(fast,slow)  Signal(fast,slow,signal)  ATR(n)  ADX(n)  PDI(n)  MDI(n)  CCI(n)
  StochK(n,smooth)  StochD(n,smoothK,smoothD)  MFI(n)  OBV()  SAR(acc,max)  TrueRange()
@@ -26,7 +29,7 @@ LOGIC / SERIES
  Cross(a,b) (a crosses ABOVE b)  Flip(a,b)  BarsSince(cond)  ValueWhen(cond,array,n)  IIf(cond,x,y)
  Max(a,b)  Min(a,b)  Abs  Sqrt  Log  Log10  Exp  Int  Floor  Ceil  Round(x,decimals)  Sign  Sin  Cos  Tan  Atan  Mod(a,b)
  Nz(x) (Null to 0)  IsNull(x)  LastValue(array)  BeginValue(array)  BarIndex()
-DATE / SYMBOL: DateNum() (YYMMDD from 1900)  Day()  Month()  Year()  DayOfWeek() (0=Sunday)  Name()  Interval()
+DATE / SYMBOL: DateNum() (YYMMDD from 1900)  Day()  Month()  Year()  DayOfWeek() (0=Sunday)  Name()  Interval() (seconds per bar: daily 86400)
 TEXT: NumToStr(x,1.2)  WriteVal(x,1.2)  StrFormat("%g %.2f %s %d",...)  StrLen(text)  text + text
 
 DRAWING ON THE CHART
@@ -43,16 +46,22 @@ COLORS: colorDefault colorBlack colorWhite colorRed colorGreen colorBrightGreen 
  colorYellow colorGold colorOrange colorLightOrange colorPink colorViolet colorLime colorTeal colorGrey40 colorGrey50 colorLightGrey
  colorDarkRed colorDarkGreen colorDarkBlue colorBrown colorPlum colorTurquoise colorLavender colorRose colorTan   ColorRGB(r,g,b)
 
-USER SETTINGS (appear in the Parameters dialog, so no code editing is needed)
- Param("name", default, min, max, step)     ParamToggle("name","No|Yes",default)     ParamList("name","A|B|C",default)
- ParamColor("name", colorBlue)              _SECTION_BEGIN("title"); ... _SECTION_END();  (optional, ignored)
+USER SETTINGS (each one appears in the pane's Parameters dialog, so a trader changes a number without touching code)
+ Param("name", default, min, max, step)           number with slider, e.g. Param("Period", 14, 2, 100, 1)
+ ParamToggle("name","No|Yes",default)              ParamList("name","A|B|C","B")
+ ParamColor("name", colorBlue)  (colorCycle as default cycles colors)      ParamStr("name","text")
+ ParamTime("name","09:30")  returns number HHMMSS (093000);  ParamTime("name","09:30",1) returns the text "09:30:00"
+ ParamDate("name","2024-01-31")  returns DateNum (1240131);  ParamDate("name","2024-01-31",1) returns the text "2024-01-31"
+ Defaults must be constants. Use a Param for EVERY number the user may want to change.
+ _SECTION_BEGIN("title"); ... _SECTION_END();  (optional, ignored)
 
 TRADING RULES (scanner / exploration / backtest)
  Buy = condition;  Sell = condition;  Short = condition;  Cover = condition;   (arrays of 1/0)
  BuyPrice = Close; SellPrice = Close; (optional)   PositionSize = -10;  (-10 means 10% of equity)
  Filter = condition;                                   (scan / exploration: only bars where this is true are listed)
  AddColumn(array,"name",1.2);   AddTextColumn("text","name");     (exploration result columns)
- SetOption("name",value); SetTradeDelays(1,1,1,1); ApplyStop(...) are accepted and ignored for now.
+ SetOption("name",value)  GetOption("name")  SetTradeDelays(1,1,1,1)  SetPositionSize(size,type)  ApplyStop(type,mode,amount,exitAtStop)
+   are stored with the formula for the Backtester; they do not change the chart.
 `;
 
 // A complete worked example for the AI prompt (kept short on purpose)
