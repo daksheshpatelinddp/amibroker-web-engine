@@ -1,6 +1,11 @@
-// RangeEngine: reads ONE symbol from the yearly parquet files on R2 using HTTP range requests.
-// All years are fetched in parallel, so the time is a few network round trips in total,
-// no matter how many years exist. Needs the files sorted by (symbol, date) in small row groups.
+// RangeEngine: reads ONE symbol from the parquet files on R2 using HTTP range requests.
+//
+// Two layouts are understood:
+//  * "history" (fast, preferred): <db>/manifest.json lists history bucket files. Each bucket holds ~64
+//    stocks and every stock's whole past history is ONE block, so a stock costs one small header + one
+//    block (~0.3 MB) however many years exist. The current year still comes from its yearly file.
+//  * "yearly" (fallback when there is no manifest): every yearly file is read in parallel, which gets
+//    slower with every year added.
 import { parquetMetadataAsync, parquetRead } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.4.0/+esm';
 
 const COLUMN_NAMES = {
@@ -31,6 +36,10 @@ export class RangeEngine {
     this.onProgress = () => {};
     this.ready = null;
     this.idb = null;
+    this.mode = 'yearly';       // 'history' once a valid manifest is found
+    this.manifest = null;
+    this.symbolToBucket = new Map();
+    this.histYears = 0;
   }
 
   init() {
@@ -40,30 +49,79 @@ export class RangeEngine {
 
   async _init() {
     const t0 = performance.now();
+    const manifest = await this._loadManifest();
+    if (manifest) await this._initHistory(manifest);
+    else await this._initYearly();
+    this.initSeconds = (performance.now() - t0) / 1000;
+    const what = this.mode === 'history'
+      ? `history layout: ${this.histYears} past years in ${Object.keys(this.manifest.buckets).length} files + ${this.years.length} recent`
+      : `${this.years.length} yearly files`;
+    this.onProgress(`Range engine ready (${what}, ${this.initSeconds.toFixed(1)}s)`);
+    return true;
+  }
+
+  async _loadManifest() {
+    try {
+      const r = await fetch(`${this.cfg.baseUrl}/manifest.json`, { cache: 'no-cache' });
+      if (!r.ok) return null;
+      const m = await r.json();
+      if (!m || m.format !== 2 || !m.buckets || !m.histPath || !m.fingerprint) return null;
+      return m;
+    } catch (e) { return null; }       // no manifest / unreadable: use the yearly files
+  }
+
+  // HEAD one yearly file (never from cache): does it exist, how big, which version?
+  // The version token goes into the URL so a re-uploaded file is never served from an old cached copy.
+  async _headYear(year) {
+    try {
+      const r = await fetch(`${this.cfg.baseUrl}/${year}.parquet`, { method: 'HEAD', cache: 'no-store' });
+      if (!r.ok) return null;
+      const size = Number(r.headers.get('content-length'));
+      if (!(size > 0)) throw new Error('Content-Length not readable (check R2 CORS ExposeHeaders)');
+      const raw = r.headers.get('etag') || r.headers.get('last-modified') || String(size);
+      const token = String(raw).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40);
+      return { year, size, token, url: `${this.cfg.baseUrl}/${year}.parquet?v=${token}` };
+    } catch (e) {
+      if (String(e.message).includes('Content-Length')) throw e;
+      return null;
+    }
+  }
+
+  async _initYearly() {
+    this.mode = 'yearly';
     const thisYear = new Date().getFullYear();
     const list = [];
     for (let y = this.cfg.firstYear; y <= thisYear; y++) list.push(y);
-
-    // HEAD every yearly file (never from cache): does it exist, how big, which version?
-    // The version token goes into the URL so a re-uploaded file is never served from an old cached copy.
-    const infos = await Promise.all(list.map(async (year) => {
-      try {
-        const r = await fetch(`${this.cfg.baseUrl}/${year}.parquet`, { method: 'HEAD', cache: 'no-store' });
-        if (!r.ok) return null;
-        const size = Number(r.headers.get('content-length'));
-        if (!(size > 0)) throw new Error('Content-Length not readable (check R2 CORS ExposeHeaders)');
-        const raw = r.headers.get('etag') || r.headers.get('last-modified') || String(size);
-        const token = String(raw).replace(/[^a-zA-Z0-9]/g, '').slice(0, 40);
-        return { year, size, token, url: `${this.cfg.baseUrl}/${year}.parquet?v=${token}` };
-      } catch (e) {
-        if (String(e.message).includes('Content-Length')) throw e;
-        return null;
-      }
-    }));
+    const infos = await Promise.all(list.map(y => this._headYear(y)));
     this.years = infos.filter(Boolean);
     if (this.years.length === 0) throw new Error('No yearly parquet files found on R2');
-    this.initSeconds = (performance.now() - t0) / 1000;
-    this.onProgress(`Range engine ready (${this.years.length} yearly files, ${this.initSeconds.toFixed(1)}s)`);
+  }
+
+  _applyManifest(m) {
+    this.mode = 'history';
+    this.manifest = m;
+    this.symbolToBucket = new Map();
+    for (const [bucket, b] of Object.entries(m.buckets)) for (const sym of b.symbols) this.symbolToBucket.set(sym, bucket);
+    this.histYears = m.histThrough - m.firstYear + 1;
+    for (const key of [...this.metaCache.keys()]) if (String(key).startsWith('h:')) this.metaCache.delete(key);
+  }
+
+  async _initHistory(m) {
+    this._applyManifest(m);
+    // the recent part: every yearly file after the history that exists on R2 (normally just this year)
+    const thisYear = new Date().getFullYear();
+    const list = [];
+    for (let y = m.histThrough + 1; y <= Math.max(thisYear, m.currentYear); y++) list.push(y);
+    const infos = await Promise.all(list.map(y => this._headYear(y)));
+    this.years = infos.filter(Boolean);
+  }
+
+  // The history is rebuilt on days when a split/bonus changes old prices. If a long-open page still holds the
+  // previous manifest, its files are gone: load the new manifest once and carry on.
+  async _refreshManifest() {
+    const m = await this._loadManifest();
+    if (!m || (this.manifest && m.fingerprint === this.manifest.fingerprint)) return false;
+    this._applyManifest(m);
     return true;
   }
 
@@ -78,14 +136,15 @@ export class RangeEngine {
         stats.requests++;
         if (r.status === 206) { const b = await r.arrayBuffer(); stats.bytes += b.byteLength; return b; }
         if (r.status === 200) { const b = await r.arrayBuffer(); stats.bytes += b.byteLength; return b.slice(start, end); }
-        throw new Error(`HTTP ${r.status} reading ${info.year}.parquet`);
+        throw new Error(`HTTP ${r.status} reading ${info.label || info.year + '.parquet'}`);
       },
     };
   }
 
   // Footer + row-group index of one file (fetched once per session)
   _meta(info) {
-    if (!this.metaCache.has(info.year)) {
+    const mkey = info.key || info.year;
+    if (!this.metaCache.has(mkey)) {
       const p = (async () => {
         const file = this._buffer(info);
         const metadata = await parquetMetadataAsync(file, 1 << 17); // last 128 KB normally holds the footer (~80 KB)
@@ -97,7 +156,7 @@ export class RangeEngine {
           if (hit) col[key] = lower.get(hit);
         }
         for (const need of ['symbol', 'date', 'open', 'high', 'low', 'close']) {
-          if (!col[need]) throw new Error(`${info.year}.parquet: column "${need}" not found (has: ${first.join(', ')})`);
+          if (!col[need]) throw new Error(`${info.label || info.year + '.parquet'}: column "${need}" not found (has: ${first.join(', ')})`);
         }
         const symIdx = first.indexOf(col.symbol);
         let start = 0;
@@ -110,10 +169,10 @@ export class RangeEngine {
         });
         return { file, metadata, col, groups };
       })();
-      p.catch(() => this.metaCache.delete(info.year)); // allow a retry later
-      this.metaCache.set(info.year, p);
+      p.catch(() => this.metaCache.delete(mkey)); // allow a retry later
+      this.metaCache.set(mkey, p);
     }
-    return this.metaCache.get(info.year);
+    return this.metaCache.get(mkey);
   }
 
   // ---- per symbol-year cache in IndexedDB (re-opening a symbol needs no network) ----
@@ -193,8 +252,26 @@ export class RangeEngine {
   }
 
   // ---- one symbol, one year ----
-  async _year(info, base, names) {
-    const key = `${base}|${info.year}`;
+  _year(info, base, names) {
+    return this._part(info, base, names, `${base}|${info.year}`);
+  }
+
+  // ---- one symbol, all past years (history bucket) ----
+  async _hist(base, names) {
+    const sym = names.find(n => this.symbolToBucket.has(n));
+    if (!sym) return { rows: [], cached: true };            // not in the past history (e.g. listed this year)
+    const bucket = this.symbolToBucket.get(sym);
+    const b = this.manifest.buckets[bucket];
+    const info = {
+      key: `h:${bucket}`, label: `${bucket}.parquet`, size: b.size, token: this.manifest.fingerprint,
+      url: `${this.cfg.baseUrl}/${this.manifest.histPath}/${bucket}.parquet`,
+    };
+    return this._part(info, base, [sym], `${base}|h`);
+  }
+
+  // Reads one symbol's rows from one parquet file (the file must be sorted by symbol, date).
+  // Saved in the browser per file version, so opening the same symbol again needs no network.
+  async _part(info, base, names, key) {
     const hit = await this._cacheGet(key);
     if (hit && hit.token === info.token) return { rows: this._unpack(hit.data, base), cached: true };
 
@@ -231,7 +308,7 @@ export class RangeEngine {
     return { rows, cached: false };
   }
 
-  // Full history of one symbol: all years in parallel
+  // Full history of one symbol
   async getBars(symbol) {
     await this.init();
     const t0 = performance.now();
@@ -239,11 +316,23 @@ export class RangeEngine {
     const base = String(symbol).trim().toUpperCase().replace(/\.(NS|BO)$/, '');
     const names = [base, `${base}.NS`, `${base}.BO`];
 
-    const parts = await Promise.all(this.years.map(info => this._year(info, base, names)));
+    const recent = Promise.all(this.years.map(info => this._year(info, base, names)));
+    let hist = null;
+    if (this.mode === 'history') {
+      try {
+        hist = await this._hist(base, names);
+      } catch (e) {
+        if (await this._refreshManifest()) hist = await this._hist(base, names);   // history was rebuilt meanwhile
+        else throw e;
+      }
+    }
+    const recentParts = await recent;
+
+    const parts = (hist ? [hist] : []).concat(recentParts);
     const rows = parts.flatMap(p => p.rows).sort((a, b) => (a.date < b.date ? -1 : 1));
     this.lastStats = {
-      years: this.years.length,
-      cached: parts.filter(p => p.cached).length,
+      years: (hist ? this.histYears : 0) + recentParts.length,
+      cached: (hist && hist.cached ? this.histYears : 0) + recentParts.filter(p => p.cached).length,
       requests: this.stats.requests,
       bytes: this.stats.bytes,
       seconds: (performance.now() - t0) / 1000,
@@ -251,13 +340,35 @@ export class RangeEngine {
     return rows;
   }
 
-  // Every symbol name (reads only the symbol column of the newest file)
+  // Every symbol name
   async getSymbols() {
     await this.init();
-    const info = this.years[this.years.length - 1];
-    const { file, metadata, col } = await this._meta(info);
-    let out = [];
-    await parquetRead({ file, metadata, columns: [col.symbol], onComplete: (r) => { out = r; } });
-    return [...new Set(out.map(r => String(r[0])))].sort();
+    const names = new Set(this.mode === 'history' ? this.symbolToBucket.keys() : []);
+
+    // Stocks of the newest year (this also covers stocks listed after the history was built).
+    // Preferred: the small symbols.json written by the daily conversion (one request).
+    let recent = null;
+    try {
+      const r = await fetch(`${this.cfg.baseUrl}/symbols.json`, { cache: 'no-cache' });
+      if (r.ok) { const j = await r.json(); if (j && Array.isArray(j.symbols)) recent = j.symbols; }
+    } catch (e) { /* use the fallback below */ }
+
+    if (recent) {
+      recent.forEach(n => names.add(String(n)));
+    } else {
+      // Fallback (older setups): read the symbol column of the newest yearly file
+      const info = this.years[this.years.length - 1];
+      if (info) {
+        try {
+          const { file, metadata, col } = await this._meta(info);
+          let out = [];
+          await parquetRead({ file, metadata, columns: [col.symbol], onComplete: (r) => { out = r; } });
+          out.forEach(r => names.add(String(r[0])));
+        } catch (e) {
+          if (this.mode !== 'history') throw e;               // the manifest already gave us the list
+        }
+      }
+    }
+    return [...names].sort();
   }
 }
