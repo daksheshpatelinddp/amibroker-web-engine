@@ -16,13 +16,15 @@ const last = (a) => a[a.length - 1];
 // ---------------------------------------------------------------- built-in library
 console.log('built-in formulas');
 const keys = new Set();
+const foreign = { NIFTY: bars, 'NIFTY 50': bars, TCS: bars, RELIANCE: bars, '~~~EQUITY': bars, '~~~ADV': { ...bars, c: bars.c.map(() => 1200) }, '~~~DEC': { ...bars, c: bars.c.map(() => 800) },
+  '~~~UNCH': bars, '~~~ADVV': bars, '~~~DECV': bars };
 for (const f of BUILTIN_FORMULAS) {
   ok(!keys.has(f.key), `duplicate key ${f.key}`); keys.add(f.key);
-  const r = run(f.code, { symbol: 'TEST' });
+  const r = run(f.code, { symbol: 'TEST', formulaName: f.name, foreign, action: f.commentary ? 2 : f.kind === 'exploration' ? 4 : 1, rangeFrom: 0, rangeTo: bars.t.length - 1 });
   ok(r.errors.length === 0, `${f.name}: ${r.errors.join('; ')}`);
-  if (f.kind === 'exploration') ok(r.filter && r.columns.length > 0, `${f.name}: needs Filter + AddColumn`);
-  else ok(r.plots.length > 0, `${f.name}: draws nothing`);
-  if (f.kind === 'system') ok(r.buy && r.sell, `${f.name}: needs Buy/Sell`);
+  if (f.kind === 'exploration') ok(r.filter && (r.columns.length > 0 || Object.keys(r.xy).length), `${f.name}: needs Filter + AddColumn`);
+  else if (f.kind === 'system') ok(r.usesSignals || (r.vars.positionscore && r.options.backtestmode === 1), `${f.name}: needs Buy/Sell or PositionScore`);
+  else ok(r.plots.length > 0 || r.vap.length > 0 || r.text.length > 0 || r.gui.length > 0, `${f.name}: draws nothing`);
   for (const p of r.plots) {
     ok(p.data.length === bars.t.length, `${f.name}/${p.name}: length`);
     const finite = p.data.filter(Number.isFinite).length;
@@ -123,12 +125,12 @@ console.log('parameters');
 
 // ParamField / ParamStyle / ParamTrigger
 {
-  let r = run('a = ParamField("Src", 3); b = ParamField("Src2", 4); c = ParamStyle("St", styleLine|styleThick, maskDefault); t = ParamTrigger("Go","Click"); Plot(a,"x",colorRed,c);');
-  ok(r.errors.length === 0 && r.vars.a[10] === bars.c[10] && near(r.vars.b[10], (bars.h[10] + bars.l[10] + bars.c[10]) / 3) && r.vars.c === 5 && r.vars.t === 0, 'ParamField default Close / (H+L+C)/3, ParamStyle value, ParamTrigger 0: ' + r.errors[0]);
+  let r = run('a = ParamField("Src", -1); b = ParamField("Src2", 6); c = ParamStyle("St", styleLine|styleThick, maskDefault); t = ParamTrigger("Go","Click"); Plot(a,"x",colorRed,c);');
+  ok(r.errors.length === 0 && r.vars.a[10] === bars.c[10] && near(r.vars.b[10], (bars.h[10] + bars.l[10]) / 2) && r.vars.c === 5 && r.vars.t === 0, 'ParamField default Close / (H+L+C)/3, ParamStyle value, ParamTrigger 0: ' + r.errors[0]);
   ok(['field', 'field', 'style', 'trigger'].join() === r.params.map((p) => p.type).join() && r.plots[0].thick, 'registry types + style flags reach Plot');
-  r = run('a = ParamField("Src", 3); c = ParamStyle("St", styleLine); t = ParamTrigger("Go","Click"); Plot(a,"x",colorRed,c);', { params: { Src: 5, St: 256 }, triggers: { Go: 1 } });
+  r = run('a = ParamField("Src", 3); c = ParamStyle("St", styleLine); t = ParamTrigger("Go","Click"); Plot(a,"x",colorRed,c);', { params: { Src: 4, St: 256 }, triggers: { Go: 1 } });
   ok(r.vars.a[7] === bars.v[7] && r.vars.t === 1 && r.plots[0].hidden === true, 'user values: Volume field, trigger fires once, Hidden style');
-  r = run('a = ParamField("S", 7); b = ParamField("S2", 6);');
+  r = run('a = ParamField("S", 100); b = ParamField("S2", 5);');
   ok(r.vars.a[3] === bars.dq[3] && r.vars.b[3] === 0, 'Delivery field + OI');
 }
 
@@ -215,8 +217,8 @@ console.log('time frames + migration');
   const ws = new Workspace(mem, 'k');
   const ps = ws.sheets[0].panes;
   ok(ps.every((p) => p.kind === 'afl'), 'all panes migrated to formula panes');
-  ok(ps[0].params.formulaId === 'b:price-ma' && ps[0].params.values['Period 1 (0 = off)'] === 21 && ps[0].params.values['Period 2 (0 = off)'] === 0 && ps[0].params.values['Average type'] === 'EMA', 'price + EMA overlay -> Price + Moving Averages');
-  ok(ps[1].params.values.Period === 9 && ps[2].params.values.Fast === 8 && ps[3].params.values['Average period'] === 30, 'RSI / MACD / volume settings carried over');
+  ok(ps[0].params.formulaId === 'b:price' && ps[0].params.layers.length === 1 && ps[0].params.layers[0].formulaId === 'b:ema' && ps[0].params.layers[0].values.Periods === 21, 'price + EMA overlay -> Price pane with an inserted EMA layer');
+  ok(ps[1].params.values.Periods === 9 && ps[2].params.values['Fast avg'] === 8 && ps[3].params.formulaId === 'b:volume', 'RSI / MACD settings carried over');
   ok(JSON.parse(mem.d).sheets[0].panes[0].kind === 'afl', 'migrated layout is saved');
   const { formulaStore: fs } = await import('../js/formula-store.js');
   for (const p of ps) {
@@ -224,10 +226,10 @@ console.log('time frames + migration');
     const r = aflEngine.run(f.code, bars, { params: p.params.values });
     ok(r.errors.length === 0 && r.plots.length > 0, `migrated pane ${f.name} runs`);
   }
-  const mp = aflEngine.run(fs.get('b:price-ma').code, bars, { params: ps[0].params.values });
-  ok(mp.plots.length === 2 && mp.plots[1].name === 'EMA 21', 'only the periods that are on are drawn (0 = off): ' + mp.plots.map((p) => p.name));
+  const lay = ps[0].params.layers[0], mp = aflEngine.run(fs.get(lay.formulaId).code, bars, { params: lay.values });
+  ok(mp.errors.length === 0 && mp.plots.length === 1 && mp.plots[0].data.filter(Number.isFinite).length > 100, 'inserted EMA layer runs with the migrated period');
   const fresh = new Workspace({ getItem: () => null, setItem() {} }, 'k2');
-  ok(fresh.sheets[0].panes.map((p) => p.params.formulaId).join() === 'b:price-candle,b:volume' && fresh.sheets[0].interval === 'D', 'new workspace starts with formula panes');
+  ok(fresh.sheets[0].panes.map((p) => p.params.formulaId).join() === 'b:price,b:volume' && fresh.sheets[0].interval === 'D', 'new workspace starts with formula panes');
   const s2 = fresh.addSheet('Y'); fresh.cycleLink(fresh.sheets[0].id, 'interval'); fresh.cycleLink(s2.id, 'interval');
   ok(fresh.setInterval(fresh.sheets[0].id, 'W').length === 2 && s2.interval === 'W', 'interval link group: linked sheets follow the time frame');
 }
