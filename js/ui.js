@@ -26,7 +26,7 @@ export function openModal(title, build, opts = {}) {
   if (!opts.stack) root.id = 'modal-root';
   const panel = el('div', opts.wide
     ? 'w-full max-w-4xl h-[94vh] sm:h-[90vh] bg-slate-900 border border-slate-700 rounded-t-xl sm:rounded-xl p-3 flex flex-col select-text'
-    : 'w-full max-w-md bg-slate-900 border border-slate-700 rounded-t-xl sm:rounded-xl p-3 max-h-[85vh] overflow-y-auto select-text');
+    : (opts.big ? 'w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-t-xl sm:rounded-xl p-3 max-h-[90vh] overflow-y-auto select-text' : 'w-full max-w-md bg-slate-900 border border-slate-700 rounded-t-xl sm:rounded-xl p-3 max-h-[85vh] overflow-y-auto select-text'));
   const head = el('div', 'flex items-center justify-between mb-2 shrink-0');
   head.appendChild(el('div', 'text-sm font-semibold text-slate-100 truncate', title));
   const x = el('button', 'px-2 py-1 text-slate-400 text-base', '✕');

@@ -9,6 +9,8 @@ import { host } from './host.js';
 import { initToolsMenu } from './tools-menu.js';
 import { formulaStore } from './formula-store.js';
 import { resample } from './timeframe.js';
+import { pseudoStore } from './pseudo-store.js';
+import { barsToArrays } from './indicators.js';
 
 // Indian-style short numbers for the header line: 1.2K, 3.4L (lakh), 5.6Cr (crore)
 function fmtQty(n) {
@@ -69,7 +71,14 @@ class Application {
             },
             getBars: () => chartEngine.arrays,
             symbol: () => this.ws.active().symbol,
+            ws: () => this.ws,
+            openSymbol: (sym) => { this.ws.setSymbol(this.ws.active().id, sym); this.openSheet(this.ws.active()); },
+            loadBars: (sym) => this.loadBarsFor(sym),
+            symbols: () => this.symbols || [],
         });
+        // other symbols asked for by formulas (Foreign, PlotForeign, RelStrength ...)
+        chartEngine.loadForeign = (sym) => this.loadBarsFor(sym);
+        chartEngine.onForeignLoaded = () => this.relayout();
         try { initToolsMenu('tools-root'); } catch (e) { console.error('Tools menu failed:', e); }
         chartEngine.onFormulaErrors = (paneId, errors) => {
             const pane = this.ws.active().panes.find((p) => p.id === paneId);
@@ -296,11 +305,29 @@ class Application {
         }
     }
 
+    /** Bars (as arrays) for any symbol: pseudo symbols (~~~EQUITY, breadth), the in-memory cache, or the database. Used by scans, backtests and Foreign(). */
+    async loadBarsFor(symbol) {
+        const ps = pseudoStore.get(symbol);
+        if (ps) return { t: ps.t, o: ps.o, h: ps.h, l: ps.l, c: ps.c, v: ps.v, dq: ps.t.map(() => NaN), delpct: ps.t.map(() => NaN) };
+        let rows = this.barCache.get(symbol);
+        if (!rows) {
+            try { if (this.rangeReady && await this.rangeReady) rows = await this.range.getBars(symbol); } catch (e) { rows = null; }
+            if (!rows || !rows.length) { try { await this.ensureDuck(); rows = await this.duck.getBars(symbol); } catch (e) { rows = null; } }
+            if (rows && rows.length) { this.barCache.set(symbol, rows); if (this.barCache.size > 60) this.barCache.delete(this.barCache.keys().next().value); }
+        }
+        return rows && rows.length ? barsToArrays(rows) : null;
+    }
+
     async loadActiveSymbol(symbol) {
         try {
             const t0 = performance.now();
             const token = ++this.loadToken;
             this.ws.setSymbol(this.ws.active().id, symbol);   // also moves linked sheets
+            if (pseudoStore.has(symbol)) {                    // ~~~EQUITY and friends are made by the app
+                const ps = pseudoStore.get(symbol);
+                const rows = ps.t.map((d, i) => ({ symbol, date: d, open: ps.o[i], high: ps.h[i], low: ps.l[i], close: ps.c[i], volume: ps.v[i], delivery: NaN }));
+                this.display(rows); this.setCacheText(`${symbol}: ${rows.length} bars (made by the backtester)`); return;
+            }
             const hit = this.barCache.get(symbol);
             if (hit) {                                         // opened before in this visit
                 this.display(hit);

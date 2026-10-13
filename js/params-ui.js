@@ -11,11 +11,14 @@ import { hexToColor, colorToHex } from './afl-engine.js';
  */
 export function renderParamControls(container, params, values, commit, fire = null) {
   const seen = new Set();
-  let shown = 0;
+  let shown = 0, section = null;
   for (const prm of params) {
-    if (seen.has(prm.name)) continue;
-    seen.add(prm.name); shown++;
-    const cur = values[prm.name];
+    const K = prm.key || prm.name;                           // parameters are identified by section + name
+    if (seen.has(K)) continue;
+    seen.add(K); shown++;
+    if (prm.section && prm.section !== section) container.appendChild(el('div', 'text-[11px] font-semibold text-sky-300 pt-2 border-t border-slate-800 mt-1', prm.section));
+    section = prm.section || null;
+    const cur = values[K];
     let control;
 
     if (prm.type === 'number') {
@@ -29,7 +32,7 @@ export function renderParamControls(container, params, values, commit, fire = nu
         let v = Number(raw);
         if (!Number.isFinite(v)) { num.value = cur !== undefined ? cur : prm.def; return; }
         v = Math.min(max, Math.max(min, v));
-        values[prm.name] = v; num.value = v; range.value = v; commit();
+        values[K] = v; num.value = v; range.value = v; commit();
       };
       num.onchange = () => apply(num.value);              // type a number, press Enter / leave the box
       range.oninput = () => { num.value = range.value; };   // slider moves the number live...
@@ -41,38 +44,38 @@ export function renderParamControls(container, params, values, commit, fire = nu
     } else if (prm.type === 'list') {                      // ParamToggle: stored as the item number
       const opts = {}; prm.items.forEach((it, i) => { opts[i] = it; });
       control = select(opts, cur !== undefined ? cur : prm.def);
-      control.onchange = () => { values[prm.name] = Number(control.value); commit(); };
+      control.onchange = () => { values[K] = Number(control.value); commit(); };
     } else if (prm.type === 'text') {                      // ParamList: stored as the item text
       const opts = {}; prm.items.forEach((it) => { opts[it] = it; });
       control = select(opts, cur !== undefined ? cur : prm.def);
-      control.onchange = () => { values[prm.name] = control.value; commit(); };
+      control.onchange = () => { values[K] = control.value; commit(); };
     } else if (prm.type === 'color') {
       control = el('input', 'w-full h-9 bg-slate-800 border border-slate-700 rounded');
       control.type = 'color';
       control.value = colorToHex(cur !== undefined ? cur : prm.def) || '#ffffff';
-      control.onchange = () => { values[prm.name] = hexToColor(control.value); commit(); };
+      control.onchange = () => { values[K] = hexToColor(control.value); commit(); };
     } else if (prm.type === 'str') {
       control = el('input', INPUT + ' w-full');
       control.type = 'text'; control.value = cur !== undefined ? cur : prm.def;
-      control.onchange = () => { values[prm.name] = control.value; commit(); };
+      control.onchange = () => { values[K] = control.value; commit(); };
     } else if (prm.type === 'time') {
       control = el('input', INPUT + ' w-full');
       control.type = 'time'; control.step = 1; control.value = cur !== undefined ? cur : prm.def;
-      control.onchange = () => { if (control.value) { values[prm.name] = control.value; commit(); } };
+      control.onchange = () => { if (control.value) { values[K] = control.value; commit(); } };
     } else if (prm.type === 'date') {
       control = el('input', INPUT + ' w-full');
       control.type = 'date'; control.value = cur !== undefined ? cur : prm.def;
-      control.onchange = () => { if (control.value) { values[prm.name] = control.value; commit(); } };
+      control.onchange = () => { if (control.value) { values[K] = control.value; commit(); } };
     }
     else if (prm.type === 'field') {
       const opts = {}; prm.items.forEach((it, i) => { opts[prm.codes[i]] = it; });
       control = select(opts, cur !== undefined ? cur : prm.def);
-      control.onchange = () => { values[prm.name] = Number(control.value); commit(); };
+      control.onchange = () => { values[K] = Number(control.value); commit(); };
     } else if (prm.type === 'style') {
-      control = styleControl(prm, cur !== undefined ? cur : prm.def, (v) => { values[prm.name] = v; commit(); });
+      control = styleControl(prm, cur !== undefined ? cur : prm.def, (v) => { values[K] = v; commit(); });
     } else if (prm.type === 'trigger') {
       const b = el('button', BTN + ' w-full', prm.label || prm.name);
-      b.type = 'button'; b.onclick = () => { if (fire) fire(prm.name); };
+      b.type = 'button'; b.onclick = () => { if (fire) fire(K); };
       container.appendChild(b); shown++;
       continue;
     }
@@ -83,16 +86,13 @@ export function renderParamControls(container, params, values, commit, fire = nu
 
 // ParamStyle: the styles the formula's mask allows, as check boxes (one drawing type at a time).
 const FLAGS = [
-  ['Line', 1, 'kind'], ['Histogram', 2, 'kind'], ['Candle', 64, 'kind'], ['Bar', 128, 'kind'], ['Area', 32768, 'kind'],
-  ['Thick', 4], ['Dashed', 32], ['Dots', 8], ['Hidden', 256], ['Own scale', 16384],
+  ['Line', 1, 'kind'], ['Histogram', 2, 'kind'], ['Area', 16384, 'kind'], ['Candle', 64, 'kind'], ['Bar', 128, 'kind'],
+  ['Thick', 4], ['Dashed', 32], ['Dots', 8], ['No line', 16], ['Staircase', 512], ['No label', 4096], ['Hidden', 256], ['Own scale', 32768], ['Left axis', 65536],
 ];
-const MASKS = {
-  0: ['Thick', 'Dashed', 'Hidden', 'Own scale'],                                   // maskDefault
-  1: ['Thick', 'Hidden', 'Own scale', 'Candle', 'Bar'],                            // maskPrice
-  2: ['Histogram', 'Thick', 'Hidden', 'Own scale', 'Area'],                        // maskHistogram
-};
+const PRICE_ONLY = ['Candle', 'Bar'];
 function styleControl(prm, value, set) {
-  const allowed = prm.mask >= 3 ? FLAGS.map((f) => f[0]) : (MASKS[prm.mask] || MASKS[0]);
+  const mask = Number(prm.mask) || 0;
+  const allowed = FLAGS.map((f) => f[0]).filter((l) => !PRICE_ONLY.includes(l) || (mask & 1) || mask >= 3);
   let v = Number(value) || 1;
   const wrap = el('div', 'flex flex-wrap gap-x-4 gap-y-1');
   const kinds = FLAGS.filter((f) => f[2] === 'kind').map((f) => f[1]);
@@ -104,7 +104,7 @@ function styleControl(prm, value, set) {
     cb.onchange = () => {
       if (cb.checked) { if (kind) v = (v & ~kinds.reduce((a, b) => a | b, 0)) | bit; else v |= bit; }
       else v &= ~bit;
-      if (!(v & kinds.reduce((a, b) => a | b, 0)) && !(v & 256)) v |= 1;      // always some drawing type
+      if (!(v & kinds.reduce((a, b) => a | b, 0)) && !(v & 256) && !(v & 16)) v |= 1;      // always some drawing type
       boxes.forEach(([c, b]) => { c.checked = (v & b) !== 0; });
       set(v);
     };

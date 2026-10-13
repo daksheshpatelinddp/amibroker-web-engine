@@ -6,4 +6,7 @@ export const host = {
   newFormulaSheet(formulaId) {},       // open a new sheet that shows just this formula
   getBars() { return null; },          // arrays of the symbol on screen (for "Check formula")
   symbol() { return ''; },
+  ws() { return null; },               // the Workspace (sheets and panes)
+  loadBars(symbol) { return Promise.resolve(null); }, // arrays for any symbol (scans, backtests, foreign data)
+  symbols() { return []; },            // list of symbols in the database
 };

@@ -51,7 +51,7 @@ function defaultParams(kind, given = {}) {
   switch (kind) {
     case 'rsi': return { period: clampInt(given.period, 14, 2, 200) };
     case 'macd': return { fast: 12, slow: 26, signal: 9 };
-    case 'afl': return { formulaId: given.formulaId || '', values: { ...(given.values || {}) } };
+    case 'afl': return { formulaId: given.formulaId || '', values: { ...(given.values || {}) }, layers: (given.layers || []).map((l) => ({ ...l })) };
     case 'custom': return {
       source: given.source || 'close',
       transform: given.transform || 'none',
@@ -88,7 +88,8 @@ function newSheet(name, symbol, panes) {
     symbolLinkIdx: 0,     // 0 = not linked, 1..4 = link colour group
     intervalLinkIdx: 0,
     interval: 'D',        // D W M Q Y
-    panes: panes || [newPane('afl', { formulaId: 'b:price-candle' }), newPane('afl', { formulaId: 'b:volume' })],
+    priceStyle: 'candle', // candle | bar | line | area  (what GetPriceStyle() returns)
+    panes: panes || [newPane('afl', { formulaId: 'b:price' }), newPane('afl', { formulaId: 'b:volume' })],
   };
 }
 
@@ -254,21 +255,53 @@ export class Workspace {
     return true;
   }
 
+  /** A formula "reference" is either a pane's own formula (key = pane id) or a layer inserted into a pane (key = layer id). */
+  findRef(sheetId, key) {
+    const s = this.get(sheetId); if (!s) return null;
+    for (const p of s.panes) {
+      if (p.kind !== 'afl') continue;
+      if (p.id === key) return p.params;
+      const l = (p.params.layers || []).find((x) => x.id === key);
+      if (l) return l;
+    }
+    return null;
+  }
+
   /** Remembers what the user did to a formula's on-chart controls (checked, slider value, text). No redraw needed. */
-  setPaneGuiState(sheetId, paneId, state) {
-    const p = this.getPane(sheetId, paneId);
-    if (!p || p.kind !== 'afl') return false;
-    p.params.gui = JSON.parse(JSON.stringify(state || {}));
+  setPaneGuiState(sheetId, key, state) {
+    const r = this.findRef(sheetId, key); if (!r) return false;
+    r.gui = JSON.parse(JSON.stringify(state || {}));
     this.save();
     return true;
   }
 
-  setPaneParamValues(sheetId, paneId, values) {
-    const p = this.getPane(sheetId, paneId);
-    if (!p || p.kind !== 'afl') return false;
-    p.params.values = { ...values };
+  setPaneParamValues(sheetId, key, values) {
+    const r = this.findRef(sheetId, key); if (!r) return false;
+    r.values = { ...values };
     this.save();
     return true;
+  }
+
+  /** "Insert" in AmiBroker: put another formula into an existing pane (e.g. a moving average on the price pane). */
+  addLayer(sheetId, paneId, formulaId, values = {}) {
+    const p = this.getPane(sheetId, paneId);
+    if (!p || p.kind !== 'afl') return null;
+    p.params.layers = p.params.layers || [];
+    const l = { id: uid('l'), formulaId, values: { ...values }, gui: {} };
+    p.params.layers.push(l); this.save(); return l;
+  }
+
+  removeLayer(sheetId, paneId, layerId) {
+    const p = this.getPane(sheetId, paneId);
+    if (!p || !p.params.layers) return false;
+    const i = p.params.layers.findIndex((l) => l.id === layerId);
+    if (i < 0) return false;
+    p.params.layers.splice(i, 1); this.save(); return true;
+  }
+
+  setPriceStyle(sheetId, style) {
+    const s = this.get(sheetId); if (!s || !['candle', 'bar', 'line', 'area'].includes(style)) return false;
+    s.priceStyle = style; this.save(); return true;
   }
 
   getPane(sheetId, paneId) {
@@ -303,22 +336,17 @@ export class Workspace {
 }
 
 // Older saved layouts used built-in pane kinds. Turn them into formula panes so every pane has editable parameters.
-const MIGRATE = { price: 'b:price-candle', volume: 'b:volume', delivery: 'b:delivery-qty', delpct: 'b:delivery-pct', rsi: 'b:rsi', macd: 'b:macd' };
+const MIGRATE = { price: 'b:price', volume: 'b:volume', delivery: 'b:nse-delivery-qty', delpct: 'b:nse-delivery-pct', rsi: 'b:rsi', macd: 'b:macd' };
+let layerSeq = 0;
 function migratePane(p) {
   const formulaId = MIGRATE[p.kind];
   if (!formulaId) return p;
-  const ov = p.overlays || [], values = {};
-  let id = formulaId;
-  if (p.kind === 'rsi' && p.params && p.params.period) values.Period = p.params.period;
-  if (p.kind === 'macd' && p.params) { values.Fast = p.params.fast || 12; values.Slow = p.params.slow || 26; values.Signal = p.params.signal || 9; }
-  if (p.kind === 'price' && ov.length) {
-    id = 'b:price-ma';
-    values['Average type'] = ov.every((o) => o.type === 'ema') ? 'EMA' : 'SMA';
-    for (let i = 0; i < 3; i++) values[`Period ${i + 1} (0 = off)`] = ov[i] ? ov[i].period : 0;
-    ov.slice(0, 3).forEach((o, i) => { values[`Color ${i + 1}`] = hexToColorNum(o.color); });
-  }
-  if ((p.kind === 'volume' || p.kind === 'delivery' || p.kind === 'delpct') && ov.length) values['Average period'] = ov[0].period;
-  return { id: p.id, kind: 'afl', weight: p.weight || (p.kind === 'price' ? 3 : 1), params: { formulaId: id, values }, overlays: [] };
+  const ov = p.overlays || [], values = {}, layers = [];
+  if (p.kind === 'rsi' && p.params && p.params.period) values.Periods = p.params.period;
+  if (p.kind === 'macd' && p.params) { values['Fast avg'] = p.params.fast || 12; values['Slow avg'] = p.params.slow || 26; values['Signal avg'] = p.params.signal || 9; }
+  // moving averages that were drawn on a price pane become inserted MA / EMA layers
+  if (p.kind === 'price') for (const o of ov) layers.push({ id: `lm${Date.now().toString(36)}${layerSeq++}`, formulaId: o.type === 'ema' ? 'b:ema' : 'b:ma', values: { Periods: Number(o.period) || 20, Color: hexToColorNum(o.color) }, gui: {} });
+  return { id: p.id, kind: 'afl', weight: p.weight || (p.kind === 'price' ? 3 : 1), params: { formulaId, values, layers }, overlays: [] };
 }
 function hexToColorNum(hex) {
   const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex));

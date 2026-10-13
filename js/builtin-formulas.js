@@ -1,439 +1,459 @@
-// Built-in formula library: the everyday charts and indicators, written in AFL itself.
-// The user can open any of them in the editor, change it and "Save As" a private copy.
-// kind: 'chart' (plots something) | 'system' (chart + Buy/Sell rules) | 'exploration' (Filter + columns)
-
+// Built-in formula library = AmiBroker's own formulas (Formula.pdf), in AmiBroker's groups:
+//   Averages · Bands · Basic Chart · Equity · Exploration · Indicators · Report Charts · Systems
+// plus two extras that AmiBroker users expect: "GUI" (the on-chart control tutorial) and "NSE Data" (delivery columns).
+// Every formula is real AFL: open it from Tools > Formula Editor, change it and "Save As" a copy of your own.
+//   kind:    'chart' (draws) | 'system' (Buy/Sell rules for the Backtester) | 'exploration' (Filter + AddColumn for the Scanner)
+//   overlay: true = it belongs on the price pane (moving averages, bands...), so "Add to chart" inserts it there
+//   needs:   data the formula expects, shown as a hint (market breadth, ~~~EQUITY ...)
+const R = String.raw;
 const f = (key, name, category, description, code, extra = {}) => ({ key, name, category, description, code: code.trim() + '\n', kind: 'chart', weight: 1, ...extra });
 
-const PV = 'Price & Volume';
-const TR = 'Trend & Moving Averages';
-const MO = 'Momentum';
-const VO = 'Volatility';
-const VD = 'Volume & Delivery';
-const SY = 'Systems (Buy / Sell rules)';
-const EX = 'Explorations (Scanner)';
+export const GROUPS = ['Averages', 'Bands', 'Basic Chart', 'Equity', 'Exploration', 'Indicators', 'Report Charts', 'Systems', 'GUI (on-chart controls)', 'NSE Data'];
 
-export const BUILTIN_FORMULAS = [
-  // ------------------------------------------------------------------ price & volume
-  f('price-candle', 'Price (Candlestick)', PV, 'Standard candlestick price chart', `
+// ---- Averages: one template, eight functions
+const avg = (key, fn, desc) => f(key, fn, 'Averages', desc, R`
+P = ParamField("Price field",-1);
+Periods = Param("Periods", 15, 2, 300, 1, 10 );
+Plot( ${fn}( P, Periods ), _DEFAULT_NAME(), ParamColor( "Color", colorCycle ), ParamStyle("Style") );`, { overlay: true, weight: 1 });
+
+const AVERAGES = [
+  avg('dema', 'DEMA', 'Double exponential moving average'),
+  f('multi-ma', 'Multi-Type Moving Average', 'Averages', 'One moving average whose type (simple, exponential, double, triple, Wilders, weighted) you pick in Parameters', R`
+P = ParamField("Field");
+Type = ParamList("Type", "Simple,Exponential,Double Exponential,Tripple Exponential,Wilders,Weighted");
+Periods = Param("Periods", 30, 2, 300 );
+Displacement = Param("Displacement", 15, -50, 50 );
+m = 0;
+
+if( Type == "Simple" )          m = MA( P, Periods );
+if( Type == "Exponential" )       m = EMA( P, Periods );
+if( Type == "Double Exponential" ) m = DEMA( P, Periods );
+if( Type == "Tripple Exponential" )   m = TEMA( P, Periods );
+if( Type == "Wilders" )         m = Wilders( P, Periods );
+if( Type == "Weighted" )        m = WMA( P, Periods );
+
+Plot( m, _DEFAULT_NAME(), ParamColor("Color", ColorCycle), ParamStyle("Style"), 0, 0, Displacement );`, { overlay: true }),
+  avg('ema', 'EMA', 'Exponential moving average'),
+  avg('linearreg', 'LinearReg', 'Linear regression line over the last N bars'),
+  avg('ma', 'MA', 'Simple moving average'),
+  avg('tema', 'TEMA', 'Triple exponential moving average'),
+  avg('tsf', 'TSF', 'Time series forecast (linear regression projected one bar ahead)'),
+  avg('wilders', 'Wilders', 'Wilder\'s smoothing'),
+  avg('wma', 'WMA', 'Linearly weighted moving average'),
+];
+
+const BANDS = [
+  f('bb-cloud', 'Bollinger Bands (Cloud)', 'Bands', 'Bollinger Bands with the area between the bands shaded', R`
+P = ParamField("Price field",-1);
+Periods = Param("Periods", 15, 2, 100, 1 );
+Width = Param("Width", 2, 0, 10, 0.05 );
+Color = ParamColor("Color", colorLightGrey );
+Style = ParamStyle("Style", styleLine | styleNoLabel ) | styleNoLabel;
+Plot( bbt = BBandTop( P, Periods, Width ), "BBTop" + _PARAM_VALUES(), Color, Style );
+Plot( bbb = BBandBot( P, Periods, Width ), "BBBot" + _PARAM_VALUES(), Color, Style );
+PlotOHLC( bbt, bbt, bbb, bbb, "", ColorBlend( Color, GetChartBkColor(), 0.8 ), styleNoLabel | styleCloud | styleNoRescale, Null, Null, Null, -1 );`, { overlay: true }),
+  f('bbands', 'Bollinger Bands', 'Bands', 'Upper and lower Bollinger Bands', R`
+P = ParamField("Price field",-1);
+Periods = Param("Periods", 15, 2, 300, 1 );
+Width = Param("Width", 2, 0, 10, 0.05 );
+Color = ParamColor("Color", colorCycle );
+Style = ParamStyle("Style");
+Plot( BBandTop( P, Periods, Width ), "BBTop" + _PARAM_VALUES(), Color, Style );
+Plot( BBandBot( P, Periods, Width ), "BBBot" + _PARAM_VALUES(), Color, Style );`, { overlay: true }),
+  f('keltner', 'Keltner Bands', 'Bands', 'Moving average +/- a multiple of ATR', R`
+P = ParamField("Price field",-1);
+Periods = Param("Periods", 15, 2, 300, 1 );
+Width = Param("Width", 2, 0, 10, 0.05 );
+Color = ParamColor("Color", colorCycle );
+Style = ParamStyle("Style", styleLine | styleNoLabel);
+
+CenterLine = MA( P, Periods );
+KTop   = CenterLine + Width * ATR( Periods );
+KBot = CenterLine - Width * ATR( Periods );
+
+Plot( KTop, "KBTop" + _PARAM_VALUES(), Color, Style );
+Plot( KBot, "KBBot" + _PARAM_VALUES(), Color, Style );`, { overlay: true }),
+  f('envelopes', 'Percentage Envelopes', 'Bands', 'Moving average +/- a fixed percentage', R`
+P = ParamField("Price field",-1);
+Periods = Param("Periods", 15, 2, 300, 1 );
+Width = Param("Width%", 2, 0, 10, 0.05 );
+Color = ParamColor("Color", colorCycle );
+Style = ParamStyle("Style", styleLine | styleNoLabel );
+CenterLine = MA( P, Periods );
+Plot( (1 + Width * 0.01) * CenterLine, "%EnvTop" + _PARAM_VALUES(), Color, Style );
+Plot( (1 - Width * 0.01) * CenterLine, "%EnvBot" + _PARAM_VALUES(), Color, Style );`, { overlay: true }),
+];
+
+const TITLE_OHLC = R`_N(Title = StrFormat("{{NAME}} - {{INTERVAL}} {{DATE}} Open %g, Hi %g, Lo %g, Close %g (%.1f%%) {{VALUES}}", O, H, L, C, SelectedValue( ROC( C, 1 ) ) ));`;
+
+const BASIC = [
+  f('gradient-price', 'Gradient Price', 'Basic Chart', 'Close line with a colour gradient filled under it', R`
+SetChartOptions(0,chartShowArrows|chartShowDates);
+_N(Title = StrFormat("{{NAME}} - {{INTERVAL}} {{DATE}} Open %g, Hi %g, Lo %g, Close %g (%.1f%%) {{VALUES}}", O, H, L, C, SelectedValue( ROC( C, 1 ) ) ));
+Ct = ParamColor("Top", colorLightOrange);
+Cb = ParamColor("Bottom", colorPaleGreen );
+SetGradientFill( Ct, Cb );
+Plot( C, "Close", ColorBlend( Cb, colorGrey50 ) , styleGradient | styleLine, Null, Null, 0, -1 );`, { weight: 3 }),
+  f('ichimoku', 'Ichimoku', 'Basic Chart', 'Ichimoku Kinko Hyo: standard and turning lines with the shaded cloud (Span 1 / Span 2)', R`
+prds = Param( "Standard Line Periods", 13, 5, 26, 1 );
+turn = Param( "Turning Line Periods", 3, 3, 10, 1 );
+delay = Param( "Delayed Line Periods", 12, 4, 25, 1 );
+span = Param( "Spans Periods", 16, 10, 52, 1 );
+
+TL = ( HHV( H, turn ) + LLV( L, turn ) ) / 2;
+SL = ( HHV( H, prds ) + LLV( L, prds ) ) / 2;
+DL = Ref( C, delay );
+Sp1 = ( SL + TL ) / 2;
+Sp2 = ( HHV( H, span ) + LLV( L, span ) ) / 2;
+
+_N( Title = StrFormat( "{{NAME}} - {{INTERVAL}} {{DATE}} Open %g, Hi %g, Lo %g, Close %g (%.1f%%) Vol " + WriteVal( V, 1.0 ) + " {{VALUES}}", O, H, L, C, SelectedValue( ROC( C, 1 ) ) ) );
+
+Plot( C, "Close", colorDefault, styleNoTitle | GetPriceStyle() );
+Plot( SL, "SL", colorRed, styleThick | styleNoLabel );
+Plot( TL, "TL", colorGreen, styleThick | styleNoLabel );
+color = IIf( Sp1 > Sp2, ParamColor( "Span1 Color", ColorRGB( 0, 255, 0 ) ), ParamColor( "Span2 Color", ColorRGB( 255, 104, 32 ) ) );
+PlotOHLC ( Sp1, Sp1, Sp2, Sp2, "Cloud", Color, styleCloud | styleNoLabel, Null, Null, delay, -2 );`, { weight: 3 }),
+  f('open-interest', 'Open Interest', 'Basic Chart', 'Open interest (futures data; the NSE cash data has none, so it shows zero)', R`
+Plot( OpenInt, _DEFAULT_NAME(), ParamColor("Color", colorCycle ), ParamStyle( "Style" ) );`),
+  f('price-ma-bb-vol', 'Price with Moving Averages, Bollinger Bands, Volume and Interpretation', 'Basic Chart', 'Price, three moving averages, Bollinger Bands with cloud and volume. Use "Commentary" in the pane menu for the written interpretation', R`
 _SECTION_BEGIN("Price");
-Plot(Close, "Price", colorDefault, styleCandle);
-_SECTION_END();`, { weight: 3 }),
+SetChartOptions(0,chartShowArrows|chartShowDates);
+_N(Title = StrFormat("{{NAME}} - {{INTERVAL}} {{DATE}} Open %g, Hi %g, Lo %g, Close %g (%.1f%%) Vol " +WriteVal( V, 1.0 ) +" {{VALUES}}", O, H, L, C, SelectedValue( ROC( C, 1 )) ));
+Plot( C, "Close", ParamColor("Color", colorDefault ), styleNoTitle | ParamStyle("Style") | GetPriceStyle() );
+_SECTION_END();
 
-  f('price-bar', 'Price (OHLC Bars)', PV, 'Open-High-Low-Close bars', `
-_SECTION_BEGIN("Price Bars");
-Plot(Close, "Price", colorDefault, styleBar);
-_SECTION_END();`, { weight: 3 }),
+_SECTION_BEGIN("MA");
+P = ParamField("Price field",-1);
+Periods = Param("Periods", 15, 2, 200, 1 );
+Plot( MA( P, Periods ), _DEFAULT_NAME(), ParamColor( "Color", colorCycle ), ParamStyle("Style", styleLine | styleNoLabel ) | styleNoRescale );
+_SECTION_END();
 
-  f('price-line', 'Price (Close Line)', PV, 'Simple line chart of the closing price', `
-_SECTION_BEGIN("Line");
-Plot(Close, "Close", ParamColor("Line color", colorSkyblue), styleLine | styleThick);
-_SECTION_END();`, { weight: 3 }),
+_SECTION_BEGIN("Mid MA");
+P = ParamField("Price field",-1);
+Periods = Param("Periods", 45, 2, 300, 1 );
+Plot( MA( P, Periods ), _DEFAULT_NAME(), ParamColor( "Color", colorCycle ), ParamStyle("Style", styleLine | styleNoLabel ) | styleNoRescale );
+_SECTION_END();
 
-  f('price-area', 'Price (Area)', PV, 'Closing price drawn as a filled area', `
-_SECTION_BEGIN("Area");
-Plot(Close, "Close", ParamColor("Area color", colorSkyblue), styleArea);
-_SECTION_END();`, { weight: 3 }),
+_SECTION_BEGIN("Long MA");
+P = ParamField("Price field",-1);
+Periods = Param("Periods", 100, 2, 400, 1 );
+Plot( MA( P, Periods ), _DEFAULT_NAME(), ParamColor( "Color", colorCycle ), ParamStyle("Style", styleLine | styleNoLabel ) | styleNoRescale );
+_SECTION_END();
 
-  f('price-heikin', 'Heikin-Ashi Candles', PV, 'Smoothed Heikin-Ashi candlesticks', `
-_SECTION_BEGIN("Heikin-Ashi");
-haClose = (Open + High + Low + Close) / 4;
-haOpen = haClose;
-haOpen[0] = (Open[0] + Close[0]) / 2;
-for (i = 1; i < BarCount; i++) {
-  haOpen[i] = (haOpen[i-1] + haClose[i-1]) / 2;
-}
-haHigh = Max(High, Max(haOpen, haClose));
-haLow  = Min(Low,  Min(haOpen, haClose));
-PlotOHLC(haOpen, haHigh, haLow, haClose, "Heikin-Ashi", colorDefault, styleCandle);
-_SECTION_END();`, { weight: 3 }),
+_SECTION_BEGIN("BBands");
+P = ParamField("Price field",-1);
+Periods = Param("Periods", 15, 2, 100, 1 );
+Width = Param("Width", 2, 0, 10, 0.05 );
+Color = ParamColor("Color", colorLightGrey );
+Color = ColorBlend( Color, GetChartBkColor(), 0.5 );
+Style = ParamStyle("Style", styleLine | styleNoLabel ) | styleNoRescale;;
+Plot( bbt = BBandTop( P, Periods, Width ), "BBTop" + _PARAM_VALUES(), Color, Style );
+Plot( bbb = BBandBot( P, Periods, Width ), "BBBot" + _PARAM_VALUES(), Color, Style );
+PlotOHLC( bbt, bbt, bbb, bbb, "", ColorBlend( Color, GetChartBkColor(), 0.7 ), styleNoLabel | styleCloud | styleNoRescale, Null, Null, Null, -1 );
+_SECTION_END();
 
-  f('volume', 'Volume', PV, 'Volume histogram (green = up day, red = down day) with a moving average', `
 _SECTION_BEGIN("Volume");
-avgPeriod = Param("Average period", 20, 2, 200, 1);
-Plot(Volume, "Volume", IIf(Close >= Open, ColorRGB(22,163,74), ColorRGB(220,38,38)), styleHistogram | styleThick);
-Plot(MA(Volume, avgPeriod), "Vol MA", colorOrange, styleLine);
-_SECTION_END();`),
+Color = ParamColor("Color", ColorRGB( 128, 128, 192 ) );
+Plot( Volume, _DEFAULT_NAME(), ColorBlend( Color, GetChartBkColor(), 0.5   ), styleNoTitle | ParamStyle( "Style", styleHistogram | styleOwnScale | styleThick | styleNoLabel, maskHistogram ), 2 );
+_SECTION_END();
 
-  f('price-volume', 'Price with Volume on same pane', PV, 'Candles with volume bars along the bottom (own scale)', `
-_SECTION_BEGIN("Price + Volume");
-Plot(Volume, "Volume", ColorRGB(71,85,105), styleHistogram | styleOwnScale | styleNoLabel);
-Plot(Close, "Price", colorDefault, styleCandle);
-_SECTION_END();`, { weight: 3 }),
+_SECTION_BEGIN("Price Interpretation");
+movshort = ParamField("Short Time MA", 8 );
+movmed = ParamField("Mid Time MA", 9 );
+movlong = ParamField("Long Time MA", 10 );
+btop = ParamField("BBTop", 11 );
+bbot = ParamField("BBBottom", 12 );
+if( Status("action") == actionCommentary )
+{
+width = btop - bbot;
+lslop = LinRegSlope( C, 30 ) + 100;
+lslo = LLV( lslop, 90 );
+lshi = HHV( lslop, 90 );
+lswidth = lshi - lslo;
+trend = 100*( lslop - lslo )/lswidth;
 
-  // ------------------------------------------------------------------ trend & MAs
-  f('price-ma', 'Price + Moving Averages', TR, 'Candles with three moving averages (type and periods are adjustable)', `
-_SECTION_BEGIN("Price + MAs");
-function avg(a, p, t) {
-  if (t == "EMA") return EMA(a, p);
-  if (t == "WMA") return WMA(a, p);
-  return MA(a, p);
+mawidth = MA( width, 100 );
+relwidth = 100*(width - mawidth)/mawidth;
+
+_N( tname = Name()+"("+FullName()+")" );
+
+printf("Price and moving averages:\n");
+printf( "%s", tname + " has closed " + WriteIf( C > movshort, "above" , "below" ) + " its Short time moving average. ");
+
+printf( "%s", "\nShort time moving average is currently " + WriteIf( movshort > movmed, "above", "below") + " mid-time, AND " + WriteIf( movshort > movlong, "above", "below" ) + " long time moving averages.");
+
+
+printf( "%s", "\nThe relationship between price and moving averages is: "+
+WriteIf( C > movshort AND movshort > movmed, "bullish",
+WriteIf( C < movshort AND movshort < movmed, "bearish", "neutral" ) ) + " in short-term, and "+
+WriteIf( movshort > movmed AND movmed > movlong , "bullish",
+WriteIf( movshort < movmed AND movmed < movlong, "bearish", "neutral" ) ) + " in mid-long term. ");
+
+printf("\n\nBollinger Bands:\n");
+printf("%s", tname+ " has closed " +
+WriteIf( C < bbot, "below the lower band by " +
+WriteVal( 100 *( bbot-C )/ width, 1.1 ) + "%. " +
+WriteIf( trend < 30, " This combined with the steep downtrend can suggest that the downward trend in prices has a good chance of continuing.   However, a short-term pull-back inside the bands is likely.",
+WriteIf( trend > 30 AND trend < 70, "Although prices have broken the lower band and a downside breakout is possible, the most likely scenario for "+tname+" is to continue within current trading range.", "" ) ), "" ) +
+
+WriteIf( C > btop, "above the upper band by " +
+WriteVal( 100 *( C- btop )/ width, 1.1 ) + "%. " +
+WriteIf( trend > 70, " This combined with the steep uptrend suggests that the upward trend in prices has a good chance of continuing.    However, a short-term pull-back inside the bands is likely.",
+WriteIf( trend > 30 AND trend < 70, "Although prices have broken the upper band and a upside breakout is possible, the most likely scenario for "+tname+" is to continue within current trading range.", "" ) ), "" ) +
+
+WriteIf( C < btop AND ( ( btop - C ) / width ) < 0.5,
+"below upper band by " +
+WriteVal( 100 *( btop - C )/ width, 1.1 ) + "%. ",
+WriteIf( C < btop AND C > bbot , "above bottom band by " +
+WriteVal( 100 *( C - bbot )/ width, 1.1 ) + "%. ", "" ) ));
+
+printf("%s", "\n"+
+WriteIf( ( trend > 30 AND trend < 70 AND ( C > btop OR C < bbot ) ) AND abs(relwidth) > 40,
+        "This picture becomes somewhat unclear due to the fact that Bollinger Bands are   currently",
+     "Bollinger Bands are " )+
+WriteVal( abs( relwidth ), 1.1 ) + "% " +
+WriteIf( relwidth > 0, "wider" , "narrower" ) +
+" than normal.");
+
+printf("\n");
+
+printf("%s",
+WriteIf( abs( relwidth ) < 40, "The current width of the bands (alone) does not suggest anything conclusive about the future volatility or movement of prices.","")+
+WriteIf( relwidth < -40, "The narrow width of the bands suggests low volatility as compared to " + tname + "'s normal range. Therefore, the probability of volatility increasing with a sharp price move has increased for the near-term. "+
+"The bands have been in this narrow range for " + WriteVal(BarsSince(Cross(-40,relwidth)),1.0) + " bars. The probability of a significant price move increases the longer the bands remain in this narrow range." ,"")+
+WriteIf( relwidth > 40, "The large width of the bands suggest high volatility as compared to " + tname + "'s normal range. Therefore, the probability of volatility decreasing and prices entering (or remaining in) a trading range has increased for the near-term. "+
+"The bands have been in this wide range for    " + WriteVal(BarsSince(Cross(relwidth,40)),1.0) + " bars.The probability of prices consolidating into a less volatile trading range increases the longer the bands remain in this wide range." ,""));
+
+printf("\n\nThis commentary is not a recommendation to buy or sell. Use at your own risk.");
 }
-type = ParamList("Average type", "SMA|EMA|WMA", "SMA");
-src  = ParamField("Apply to", 3);
-lineStyle = ParamStyle("Line style", styleThick, maskDefault);
-p1 = Param("Period 1 (0 = off)", 20, 0, 500, 1);
-p2 = Param("Period 2 (0 = off)", 50, 0, 500, 1);
-p3 = Param("Period 3 (0 = off)", 200, 0, 500, 1);
-Plot(Close, "Price", colorDefault, styleCandle);
-if (p1 > 0) Plot(avg(src, p1, type), type + " " + NumToStr(p1, 1.0), ParamColor("Color 1", colorOrange), lineStyle);
-if (p2 > 0) Plot(avg(src, p2, type), type + " " + NumToStr(p2, 1.0), ParamColor("Color 2", colorSkyblue), lineStyle);
-if (p3 > 0) Plot(avg(src, p3, type), type + " " + NumToStr(p3, 1.0), ParamColor("Color 3", colorViolet), lineStyle);
-_SECTION_END();`, { weight: 3 }),
+_SECTION_END();`, { weight: 3, commentary: true }),
+  f('plot-foreign', 'Plot Foreign', 'Basic Chart', 'Draws another symbol (type its name in Parameters) in this pane', R`
+Ticker = ParamStr("Symbol", "NIFTY" );
+PlotForeign( Ticker, Ticker, ParamColor("Color", colorCycle ), ParamStyle("Style") | GetPriceStyle() );`, { needs: 'Another symbol from your database' }),
+  f('price', 'Price', 'Basic Chart', 'The standard price chart. Candlestick / bar / line style comes from the price style setting (Tools menu) or Parameters', R`
+SetChartOptions(0,chartShowArrows|chartShowDates);
+_N(Title = StrFormat("{{NAME}} - {{INTERVAL}} {{DATE}} Open %g, Hi %g, Lo %g, Close %g (%.1f%%) {{VALUES}}", O, H, L, C, SelectedValue( ROC( C, 1 ) ) ));
+Plot( C, "Close", ParamColor("Color", colorDefault ), styleNoTitle | ParamStyle("Style") | GetPriceStyle() );`, { weight: 3 }),
+  f('relative-performance', 'Relative Performance', 'Basic Chart', 'Percent change since the first visible bar for this symbol and a list of others (comma separated in Parameters)', R`
+_N( TickerList = ParamStr("Tickers", "NIFTY,RELIANCE,TCS") );
+NumBars = 20;
+fvb = Status("firstvisiblebar");
+Plot( 100 * ( C - C[ fvb ] ) / C[ fvb ], Name(), colorBlue );
+for( i = 0; ( symbol = StrExtract( TickerList, i ) ) != ""; i++ )
+{
+    fc = Foreign( symbol, "C" );
 
-  f('price-ema-cross', 'Price + EMA Crossover', TR, 'Fast / slow EMA with buy and sell arrows where they cross', `
-_SECTION_BEGIN("EMA Crossover");
-fast = Param("Fast EMA", 9, 2, 200, 1);
-slow = Param("Slow EMA", 21, 2, 400, 1);
-Plot(Close, "Price", colorDefault, styleCandle);
-Plot(EMA(Close, fast), "Fast EMA", colorOrange, styleThick);
-Plot(EMA(Close, slow), "Slow EMA", colorSkyblue, styleThick);
-Buy  = Cross(EMA(Close, fast), EMA(Close, slow));
-Sell = Cross(EMA(Close, slow), EMA(Close, fast));
-PlotShapes(Buy  * shapeUpArrow,   colorBrightGreen, 0, Low);
-PlotShapes(Sell * shapeDownArrow, colorRed,         0, High);
-_SECTION_END();`, { weight: 3 }),
-
-  f('price-gui-ema', 'Price + EMA with on-chart controls', TR, 'Candles with an EMA you control from buttons on the chart: show/hide box, period slider, reset button', `
-_SECTION_BEGIN("On-chart controls");
-idShow = 1; idLen = 2; idReset = 3; idBand = 4;
-GuiCheckBox("EMA", idShow, 8, 8, 56, 22, notifyClicked);
-GuiCheckBox("Band", idBand, 66, 8, 62, 22, notifyClicked);
-if (GuiSlider(idLen, 132, 8, 150, 22, notifyEditChange) == guiNew) {
-  GuiSetRange(idLen, 2, 200, 1, 10);
-  GuiSetValue(idLen, 20);
-  GuiSetCheck(idShow, 1);
+    if( ! IsNull( fc[ 0 ] ) )
+    {
+        Plot( 100 * ( fc - fc[ fvb ] )/ fc[ fvb ], symbol, colorLightOrange + ( (2*i) % 15 ), styleLine );
+ }
 }
-GuiButton("Reset", idReset, 288, 8, 56, 22, notifyClicked);
-for (n = 0; id = GuiGetEvent(n, 0); n++) {
-  if (id == idReset) { GuiSetValue(idLen, 20); GuiSetCheck(idShow, 1); GuiSetCheck(idBand, 0); }
+PlotGrid( 0, colorYellow );
+_N( Title = "{{NAME}} - Relative Performance [%]: {{VALUES}}" );`, { needs: 'Other symbols from your database' }),
+  f('spread', 'Spread', 'Basic Chart', 'Difference or ratio between this symbol and a second symbol', R`
+_N( Symbol2= ParamStr("Symbol2", "TCS") );
+Mode = ParamToggle("Mode", "Difference (Symbol1-Symbol2)|Ratio (Symbol1/Symbol2)");
+
+SetForeign( Symbol2 );
+C2 = C;
+H2 = H;
+L2 = L;
+O2 = O;
+V2 = V;
+RestorePriceArrays();
+
+
+Color = ParamColor( "Color", colorDefault );
+Style = ParamStyle( "Style", styleLine, maskPrice );
+
+if( Mode == 0 )
+ PlotOHLC( O-O2, H-H2, L-L2, C-C2, "(" + Name()+" - "+Symbol2 + ") spread", Color, style );
+else
+ PlotOHLC( O/O2, H/H2, L/L2, C/C2, "(" + Name()+" / "+Symbol2 + ") spread", Color, style );`, { needs: 'A second symbol from your database' }),
+  f('volume', 'Volume', 'Basic Chart', 'Volume histogram, green on up days and red on down days', R`
+Plot( Volume, _DEFAULT_NAME(), IIf( C > O, ParamColor("Up Color", colorGreen ), ParamColor("Down Color", colorRed ) ), ParamStyle( "Style", styleHistogram | styleThick, maskHistogram ) );`),
+  f('vap-segments', 'Volume At Price (VAP)', 'Basic Chart', 'Price chart with a volume-at-price profile for each month (each day on intraday data)', R`
+_SECTION_BEGIN("Price");
+SetChartOptions(0,chartShowArrows|chartShowDates);
+_N(Title = StrFormat("{{NAME}} - {{INTERVAL}} {{DATE}} Open %g, Hi %g, Lo %g, Close %g (%.1f%%) {{VALUES}}", O, H, L, C, SelectedValue( ROC( C, 1 ) ) ));
+Plot( C, "Close", ParamColor("Color", colorDefault ), styleNoTitle | ParamStyle("Style") | GetPriceStyle() );
+_SECTION_END();
+
+
+_SECTION_BEGIN("VAP");
+segments = IIf( Interval() < inDaily, Day(), Month() );
+segments = segments != Ref( segments , -1 );
+
+PlotVAPOverlayA( segments , Param("Lines", 300, 100, 1000, 1 ), Param("Width", 80, 1, 100, 1 ), ParamColor("Color", colorGold ), ParamToggle("Side", "Left|Right" ) | 2 * ParamToggle("Style", "Fill|Lines", 0) | 4*ParamToggle("Z-order", "On top|Behind", 1 ) );
+Plot(segments, "", colorLightGrey, styleHistogram | styleOwnScale );
+_SECTION_END();`, { weight: 3 }),
+  f('vap', 'Volume At Price', 'Basic Chart', 'Volume-at-price profile over the visible bars, drawn on the price pane', R`
+PlotVAPOverlay( Param("Lines", 300, 100, 1000, 1 ), Param("Width", 5, 1, 100, 1 ), ParamColor("Color", colorCycle ), ParamToggle("Side", "Left|Right" ) | 4*ParamToggle("Z-order", "On top|Behind", 1 ) );`, { overlay: true }),
+  f('volume-single', 'Volume (Single Color)', 'Basic Chart', 'Volume histogram in one colour', R`
+Plot( Volume, _DEFAULT_NAME(), ParamColor("Color", colorBlueGrey ), ParamStyle( "Style", styleHistogram | styleOwnScale | styleThick, maskHistogram   ) );`),
+];
+
+const EQUITY = [
+  f('equity', 'Equity', 'Equity', 'Equity curve of the last backtest on this symbol, with a buy-and-hold line for comparison', R`
+#include @LastBacktestFormula
+// This comment is intentionally here. Do not edit/remove    */
+
+MaxGraph=0;GraphXSpace=5;
+GraphZOrder=1;
+Plot( Equity( 0, -2 ), "Equity", -8, styleArea );
+
+if( ParamToggle("Show Buy-and-Hold?", "No|Yes", 1 ) )
+{
+    /* now buy and hold simulation */
+    Short=Cover=0;
+
+    Buy=Status("firstbarintest");
+    Sell=Status("lastbarintest");
+    SetTradeDelays(0,0,0,0); PositionSize = -100;
+    ApplyStop(0,0,0,0);
+    ApplyStop(1,0,0,0);
+    ApplyStop(2,0,0,0);
+    Plot( Equity( 0, -2 ), "Buy&Hold", -9 );
+}`, { needs: 'Run a backtest first (Tools > Analysis)' }),
+  f('portfolio-equity', 'Portfolio Equity', 'Equity', 'Portfolio equity, cash, drawdown and linear regression from the last portfolio backtest (pseudo symbol ~~~EQUITY)', R`
+eqname = "~~~EQUITY";
+if( Name() != eqname ) SetForeign( eqname );
+eq = Close;
+Cash = Low;
+
+dr = eq - Highest(eq);
+bslh = HighestBars(eq);
+GraphZOrder=1;
+Plot(eq, "Portfolio Equity", colorLightBlue, styleArea );
+if( ParamToggle("Show Cash", "No|Yes", 1 ) ) Plot(cash, "Cash", colorGreen, styleArea );
+if( ParamToggle("Show Drawdown", "No|Yes", 1 ) ) Plot(dr, "Drawdown", colorDarkRed, styleArea );
+if( ParamToggle("Show #bars since last high", "No|Yes", 0 ) ) Plot(bslh, "#bars since last high", colorDarkYellow, styleLine | styleOwnScale, 0, 10 * LastValue( Highest( bslh ) ) );
+islastbar = Status("lastbarintest");
+isfirstbar = Status("firstbarintest");
+bar = BarIndex();
+firstbar = LastValue( ValueWhen( isfirstbar, bar ) );
+lastbar = LastValue( ValueWhen( islastbar, bar ) );
+al = LastValue( ValueWhen( islastbar, LinRegSlope( eq, Lastbar - firstbar + 1 ) ) );
+bl = LastValue( ValueWhen( islastbar, LinRegIntercept( eq, Lastbar - firstbar + 1 ) ) );
+Lr = al * ( BarIndex() - firstbar ) + bl;
+Lr = IIf( bar >= firstbar AND bar <= lastbar , Lr, Null );
+if( ParamToggle("Show lin. reg.", "No|Yes", 0 ) )Plot( Lr , "Linear Reg", colorRed, styleThick );`, { needs: 'Run a portfolio backtest first (Tools > Analysis)' }),
+];
+
+const EXPLORATION = [
+  f('xy-profit', 'XY Chart - Profit vs MAE/MFE', 'Exploration', 'Exploration that draws scatter charts of final trade profit against MAE, MFE and trade length', R`
+// XY chart coding example
+// This formula generates 2 X-Y scatter charts that display relationship between
+// final trade profit and MFE and MAE
+
+Buy = Cross( MACD(), Signal());
+Sell = Cross( Signal(), MACD() );
+Short = False;
+Cover = False;
+
+Eq = Equity( 1 ); // single-security equity      this evaluates stops (if you use them) and removes extra signals
+
+Entry = Buy OR Short;
+EqAtEntry = ValueWhen( Entry, Eq );
+Profit = 100 * ( Eq - EqAtEntry ) / EqAtEntry; // percent profit
+
+// MAE and MFE below use CLOSING equity, MAE and MFE in the report use high/low price
+MAE = 100 * ( LowestSince( Entry, Eq ) - EqAtEntry ) / EqAtEntry; // percent MAE
+MFE = 100 * ( HighestSince( Entry, Eq ) - EqAtEntry ) / EqAtEntry; // percent MAE
+
+bi = BarIndex();
+
+Len = bi - ValueWhen( Entry, bi );
+
+EntryPrice = ValueWhen( Entry, BuyPrice );
+// if you prefer MAE/MFE using high/low price
+// uncomment the lines below (long only Version)
+MAE = 100 * ( LowestSince( Entry, Low ) - EntryPrice ) / EntryPrice ; // percent MAE using low
+MFE = 100 * ( HighestSince( Entry, High ) - EntryPrice ) / EntryPrice ; // percent MAE using high
+
+Exit = Sell OR Cover;
+dt = DateTime();
+Clr = ColorHSB( Status("stocknum"), 255, 255 );
+for( bar = 0; bar < BarCount; bar++ )
+{
+     if( Exit[ bar ] )
+     {
+         // item text consists of two parts
+         // first part (before \t) is a item name displayed immediatelly on XY chart
+         // second part (after \t) is a tooltip hint text that is displayed in the tooltip
+         // when you hover on given item
+         // here we will only use hint text
+         HintText = "\t" + Name()+"@"+ DateTimeToStr( dt[ bar ] );
+
+         XYChartAddPoint( "Profit vs MAE", HintText, MAE[ bar ], Profit[ bar ],Clr );
+         XYChartAddPoint( "Profit vs MFE", HintText, MFE[ bar ], Profit[ bar ], Clr );
+         XYChartAddPoint( "Profit vs trade length", HintText, Len[ bar ], Profit[ bar ], Clr );
+     }
 }
-len = GuiGetValue(idLen);
-Plot(Close, "Price", colorDefault, styleCandle);
-if (GuiGetCheck(idShow)) Plot(EMA(Close, len), "EMA " + NumToStr(len, 1.0), colorOrange, styleThick);
-if (GuiGetCheck(idBand)) {
-  Plot(EMA(High, len), "High EMA", colorGrey50, styleDashed);
-  Plot(EMA(Low, len), "Low EMA", colorGrey50, styleDashed);
-}
-_SECTION_END();`, { weight: 3 }),
 
-  f('price-supertrend', 'Supertrend', TR, 'ATR based trend-following line with buy / sell arrows', `
-_SECTION_BEGIN("Supertrend");
-period = Param("ATR period", 10, 1, 100, 1);
-mult   = Param("Multiplier", 3, 0.5, 10, 0.5);
-a  = ATR(period);
-mid = (High + Low) / 2;
-upBand = mid - mult * a;
-dnBand = mid + mult * a;
-fu = upBand;
-fd = dnBand;
-trend = 1 + 0 * Close;
-for (i = 1; i < BarCount; i++) {
-  fu[i] = IIf(upBand[i] > fu[i-1] OR Close[i-1] < fu[i-1], upBand[i], fu[i-1]);
-  fd[i] = IIf(dnBand[i] < fd[i-1] OR Close[i-1] > fd[i-1], dnBand[i], fd[i-1]);
-  trend[i] = trend[i-1];
-  if (trend[i-1] == -1 AND Close[i] > fd[i-1]) trend[i] = 1;
-  if (trend[i-1] ==  1 AND Close[i] < fu[i-1]) trend[i] = -1;
-}
-st = IIf(trend == 1, fu, fd);
-Plot(Close, "Price", colorDefault, styleCandle);
-Plot(st, "Supertrend", IIf(trend == 1, colorBrightGreen, colorRed), styleThick);
-Buy  = trend == 1  AND Ref(trend, -1) == -1;
-Sell = trend == -1 AND Ref(trend, -1) == 1;
-PlotShapes(Buy  * shapeUpArrow,   colorBrightGreen, 0, Low);
-PlotShapes(Sell * shapeDownArrow, colorRed,         0, High);
-_SECTION_END();`, { weight: 3, kind: 'system' }),
+XYChartSetAxis( "Profit vs MAE", "[MAE]", "[Profit]" );
+XYChartSetAxis( "Profit vs MFE", "[MFE]", "[Profit]" );
+XYChartSetAxis( "Profit vs trade length", "[Length]", "[Profit]"   );
 
-  f('price-sar', 'Parabolic SAR', TR, 'Candles with the Parabolic SAR dots', `
-_SECTION_BEGIN("Parabolic SAR");
-acc = Param("Acceleration", 0.02, 0.005, 0.2, 0.005);
-mx  = Param("Maximum", 0.2, 0.05, 1, 0.05);
-Plot(Close, "Price", colorDefault, styleCandle);
-Plot(SAR(acc, mx), "SAR", colorYellow, styleDots | styleNoLine);
-_SECTION_END();`, { weight: 3 }),
+Filter = Exit;
+AddColumn( Eq, "Equity" );
+AddColumn( Profit, "Profit" );
+AddColumn( MAE, "MAE" );
+AddColumn( MFE, "MFE" );
+AddColumn( Len, "trade length" );`, { kind: 'exploration' }),
+  f('risk-yield', 'Risk-Yield Map', 'Exploration', 'Average gain (yield) against the standard deviation of gains (risk) for every symbol. Run it on WEEKLY data', R`
+// This is AFL equivalent of Risk-Yield map
+// Note that this exploration should be run on
+// WEEKLY data
+// it calculates average weekly gain (yield)
+// and standard deviation of gains (risk)
 
-  f('adx', 'ADX / +DI / -DI', TR, 'Trend strength (ADX) and directional indicators', `
-_SECTION_BEGIN("ADX");
-p = Param("Period", 14, 2, 100, 1);
-Plot(ADX(p), "ADX", colorWhite, styleThick);
-Plot(PDI(p), "+DI", colorBrightGreen, styleLine);
-Plot(MDI(p), "-DI", colorRed, styleLine);
-PlotGrid(25);
-_SECTION_END();`),
+Filter=Status("lastbarinrange");
+Length = SelectedValue( BarIndex() );
+Chg = ROC( C, 1 ); //one bar yield
+yield = MA( Chg, Length - 1);
+risk = StDev( Chg, Length - 1);
+AddColumn(yield,"yield");
+AddColumn(risk,"risk");
 
-  f('aroon', 'Aroon', TR, 'Aroon Up / Down - how recently the highest high and lowest low occurred', `
-_SECTION_BEGIN("Aroon");
-p = Param("Period", 25, 2, 200, 1);
-up = 100 * (p - HHVBars(High, p + 1)) / p;
-dn = 100 * (p - LLVBars(Low, p + 1)) / p;
-Plot(up, "Aroon Up", colorBrightGreen, styleThick);
-Plot(dn, "Aroon Down", colorRed, styleThick);
-PlotGrid(50);
-_SECTION_END();`),
+Clr = ColorHSB( 2 * Status("stocknum") % 255, 255, 255 );
 
-  // ------------------------------------------------------------------ momentum
-  f('rsi', 'RSI', MO, 'Relative Strength Index with 70 / 30 levels', `
-_SECTION_BEGIN("RSI");
-p = Param("Period", 14, 2, 100, 1);
-src = ParamField("Apply to", 3);
-Plot(RSIa(src, p), "RSI", ParamColor("RSI color", colorOrange), styleThick);
-PlotGrid(70, colorRed);
-PlotGrid(50, colorGrey40);
-PlotGrid(30, colorBrightGreen);
-_SECTION_END();`),
 
-  f('macd', 'MACD', MO, 'MACD line, signal line and histogram', `
-_SECTION_BEGIN("MACD");
-fast = Param("Fast", 12, 2, 100, 1);
-slow = Param("Slow", 26, 2, 200, 1);
-sig  = Param("Signal", 9, 2, 100, 1);
-m = MACD(fast, slow);
-s = Signal(fast, slow, sig);
-h = m - s;
-Plot(h, "Histogram", IIf(h >= 0, ColorRGB(22,163,74), ColorRGB(220,38,38)), styleHistogram | styleThick);
-Plot(m, "MACD", colorSkyblue, styleThick);
-Plot(s, "Signal", colorOrange, styleLine);
-PlotGrid(0, colorGrey40);
-_SECTION_END();`),
 
-  f('stoch', 'Stochastic', MO, 'Stochastic oscillator %K and %D', `
-_SECTION_BEGIN("Stochastic");
-p  = Param("Period", 14, 2, 100, 1);
-ks = Param("%K smoothing", 3, 1, 20, 1);
-ds = Param("%D smoothing", 3, 1, 20, 1);
-Plot(StochK(p, ks), "%K", colorSkyblue, styleThick);
-Plot(StochD(p, ks, ds), "%D", colorOrange, styleLine);
-PlotGrid(80, colorRed);
-PlotGrid(20, colorBrightGreen);
-_SECTION_END();`),
-
-  f('cci', 'CCI', MO, 'Commodity Channel Index', `
-_SECTION_BEGIN("CCI");
-p = Param("Period", 20, 2, 100, 1);
-Plot(CCI(p), "CCI", colorSkyblue, styleThick);
-PlotGrid(100, colorRed);
-PlotGrid(0, colorGrey40);
-PlotGrid(-100, colorBrightGreen);
-_SECTION_END();`),
-
-  f('willr', 'Williams %R', MO, 'Williams %R (0 to -100)', `
-_SECTION_BEGIN("Williams %R");
-p = Param("Period", 14, 2, 100, 1);
-w = -100 * (HHV(High, p) - Close) / (HHV(High, p) - LLV(Low, p));
-Plot(w, "%R", colorViolet, styleThick);
-PlotGrid(-20, colorRed);
-PlotGrid(-80, colorBrightGreen);
-_SECTION_END();`),
-
-  f('roc', 'Rate of Change (ROC)', MO, 'Percent change over N bars', `
-_SECTION_BEGIN("ROC");
-p = Param("Period", 12, 1, 200, 1);
-r = ROC(Close, p);
-Plot(r, "ROC", IIf(r >= 0, colorBrightGreen, colorRed), styleHistogram | styleThick);
-PlotGrid(0, colorGrey40);
-_SECTION_END();`),
-
-  // ------------------------------------------------------------------ volatility
-  f('price-bbands', 'Price + Bollinger Bands', VO, 'Candles with Bollinger Bands', `
-_SECTION_BEGIN("Bollinger Bands");
-p = Param("Period", 20, 2, 200, 1);
-w = Param("Width (std dev)", 2, 0.5, 5, 0.5);
-src = ParamField("Apply to", 3);
-Plot(Close, "Price", colorDefault, styleCandle);
-Plot(BBandTop(src, p, w), "Upper", colorSkyblue, styleLine);
-Plot(MA(src, p), "Middle", colorGrey50, styleDashed);
-Plot(BBandBot(src, p, w), "Lower", colorSkyblue, styleLine);
-_SECTION_END();`, { weight: 3 }),
-
-  f('price-keltner', 'Price + Keltner Channel', VO, 'EMA with ATR based channel', `
-_SECTION_BEGIN("Keltner Channel");
-p = Param("EMA period", 20, 2, 200, 1);
-a = Param("ATR period", 10, 1, 100, 1);
-m = Param("ATR multiplier", 2, 0.5, 5, 0.5);
-mid = EMA(Close, p);
-Plot(Close, "Price", colorDefault, styleCandle);
-Plot(mid + m * ATR(a), "Upper", colorOrange, styleLine);
-Plot(mid, "Middle", colorGrey50, styleDashed);
-Plot(mid - m * ATR(a), "Lower", colorOrange, styleLine);
-_SECTION_END();`, { weight: 3 }),
-
-  f('price-donchian', 'Price + Donchian Channel', VO, 'Highest high / lowest low channel', `
-_SECTION_BEGIN("Donchian Channel");
-p = Param("Period", 20, 2, 250, 1);
-Plot(Close, "Price", colorDefault, styleCandle);
-Plot(HHV(High, p), "Upper", colorBrightGreen, styleLine);
-Plot((HHV(High, p) + LLV(Low, p)) / 2, "Middle", colorGrey50, styleDashed);
-Plot(LLV(Low, p), "Lower", colorRed, styleLine);
-_SECTION_END();`, { weight: 3 }),
-
-  f('atr', 'ATR', VO, 'Average True Range', `
-_SECTION_BEGIN("ATR");
-p = Param("Period", 14, 1, 100, 1);
-Plot(ATR(p), "ATR", colorOrange, styleThick);
-_SECTION_END();`),
-
-  f('bb-pctb', 'Bollinger %B', VO, 'Where the close sits inside the Bollinger Bands (0 = lower band, 1 = upper band)', `
-_SECTION_BEGIN("Bollinger %B");
-p = Param("Period", 20, 2, 200, 1);
-w = Param("Width", 2, 0.5, 5, 0.5);
-up = BBandTop(Close, p, w);
-dn = BBandBot(Close, p, w);
-Plot((Close - dn) / (up - dn), "%B", colorSkyblue, styleThick);
-PlotGrid(1, colorRed);
-PlotGrid(0.5, colorGrey40);
-PlotGrid(0, colorBrightGreen);
-_SECTION_END();`),
-
-  f('bb-width', 'Bollinger Bandwidth', VO, 'Width of the Bollinger Bands as a % of the middle band (squeeze detector)', `
-_SECTION_BEGIN("Bandwidth");
-p = Param("Period", 20, 2, 200, 1);
-w = Param("Width", 2, 0.5, 5, 0.5);
-Plot(100 * (BBandTop(Close, p, w) - BBandBot(Close, p, w)) / MA(Close, p), "Bandwidth %", colorViolet, styleThick);
-_SECTION_END();`),
-
-  // ------------------------------------------------------------------ volume & delivery
-  f('obv', 'On Balance Volume', VD, 'Running total of volume on up days minus down days', `
-_SECTION_BEGIN("OBV");
-Plot(OBV(), "OBV", colorSkyblue, styleThick);
-_SECTION_END();`),
-
-  f('mfi', 'Money Flow Index', VD, 'Volume-weighted RSI', `
-_SECTION_BEGIN("MFI");
-p = Param("Period", 14, 2, 100, 1);
-Plot(MFI(p), "MFI", colorTeal, styleThick);
-PlotGrid(80, colorRed);
-PlotGrid(20, colorBrightGreen);
-_SECTION_END();`),
-
-  f('rel-volume', 'Relative Volume', VD, 'Today\'s volume divided by its N-day average (2 = twice normal)', `
-_SECTION_BEGIN("Relative Volume");
-p = Param("Average period", 20, 2, 200, 1);
-rv = Volume / Ref(MA(Volume, p), -1);
-Plot(rv, "Rel Volume", IIf(rv >= 2, colorOrange, colorGrey50), styleHistogram | styleThick);
-PlotGrid(1, colorGrey40);
-PlotGrid(2, colorOrange);
-_SECTION_END();`),
-
-  f('delivery-pct', 'Delivery %', VD, 'NSE delivery percentage (needs the delivery column in the data)', `
-_SECTION_BEGIN("Delivery %");
-p = Param("Average period", 20, 2, 200, 1);
-Plot(DelPct, "Delivery %", colorViolet, styleHistogram | styleThick);
-Plot(MA(DelPct, p), "Average", colorOrange, styleLine);
-_SECTION_END();`),
-
-  f('delivery-qty', 'Delivery Quantity', VD, 'NSE delivered quantity with moving average', `
-_SECTION_BEGIN("Delivery Qty");
-p = Param("Average period", 20, 2, 200, 1);
-Plot(Delivery, "Delivery", colorTeal, styleHistogram | styleThick);
-Plot(MA(Delivery, p), "Average", colorOrange, styleLine);
-_SECTION_END();`),
-
-  f('hi-lo-52w', '52-week High / Low', VD, 'Candles with the rolling 52-week (250 day) high and low', `
-_SECTION_BEGIN("52 Week High/Low");
-n = Param("Days", 250, 20, 1000, 10);
-Plot(Close, "Price", colorDefault, styleCandle);
-Plot(HHV(High, n), "High", colorBrightGreen, styleDashed);
-Plot(LLV(Low, n), "Low", colorRed, styleDashed);
-_SECTION_END();`, { weight: 3 }),
-
-  // ------------------------------------------------------------------ systems
-  f('sys-ema-cross', 'System: EMA Crossover', SY, 'Buy when the fast EMA crosses above the slow EMA, sell on the opposite cross', `
-_SECTION_BEGIN("System: EMA Crossover");
-fast = Param("Fast EMA", 9, 2, 200, 1);
-slow = Param("Slow EMA", 21, 2, 400, 1);
-Buy  = Cross(EMA(Close, fast), EMA(Close, slow));
-Sell = Cross(EMA(Close, slow), EMA(Close, fast));
-Short = Cover = 0;
-Plot(Close, "Price", colorDefault, styleCandle);
-Plot(EMA(Close, fast), "Fast", colorOrange, styleThick);
-Plot(EMA(Close, slow), "Slow", colorSkyblue, styleThick);
-PlotShapes(Buy  * shapeUpArrow,   colorBrightGreen, 0, Low);
-PlotShapes(Sell * shapeDownArrow, colorRed,         0, High);
-_SECTION_END();`, { weight: 3, kind: 'system' }),
-
-  f('sys-rsi', 'System: RSI Oversold Bounce', SY, 'Buy when RSI crosses back above the oversold level, sell when it reaches overbought', `
-_SECTION_BEGIN("System: RSI Bounce");
-p   = Param("RSI period", 14, 2, 50, 1);
-os  = Param("Oversold", 30, 5, 50, 1);
-ob  = Param("Overbought", 70, 50, 95, 1);
-r = RSI(p);
-Buy  = Cross(r, os);
-Sell = Cross(r, ob);
-Short = Cover = 0;
-Plot(Close, "Price", colorDefault, styleCandle);
-PlotShapes(Buy  * shapeUpArrow,   colorBrightGreen, 0, Low);
-PlotShapes(Sell * shapeDownArrow, colorRed,         0, High);
-_SECTION_END();`, { weight: 3, kind: 'system' }),
-
-  f('sys-breakout', 'System: Donchian Breakout', SY, 'Buy a new N-day high, sell a new M-day low (turtle style)', `
-_SECTION_BEGIN("System: Breakout");
-nIn  = Param("Entry: highest high of", 20, 5, 250, 1);
-nOut = Param("Exit: lowest low of", 10, 3, 120, 1);
-Buy  = Close > Ref(HHV(High, nIn), -1);
-Sell = Close < Ref(LLV(Low, nOut), -1);
-Short = Cover = 0;
-Plot(Close, "Price", colorDefault, styleCandle);
-Plot(Ref(HHV(High, nIn), -1), "Entry", colorBrightGreen, styleDashed);
-Plot(Ref(LLV(Low, nOut), -1), "Exit", colorRed, styleDashed);
-PlotShapes(Buy  * shapeUpArrow,   colorBrightGreen, 0, Low);
-PlotShapes(Sell * shapeDownArrow, colorRed,         0, High);
-_SECTION_END();`, { weight: 3, kind: 'system' }),
-
-  f('sys-macd', 'System: MACD Signal Cross', SY, 'Buy when MACD crosses above its signal line, sell when it crosses below', `
-_SECTION_BEGIN("System: MACD Cross");
-fast = Param("Fast", 12, 2, 100, 1);
-slow = Param("Slow", 26, 2, 200, 1);
-sig  = Param("Signal", 9, 2, 100, 1);
-m = MACD(fast, slow);
-s = Signal(fast, slow, sig);
-Buy  = Cross(m, s);
-Sell = Cross(s, m);
-Short = Cover = 0;
-Plot(Close, "Price", colorDefault, styleCandle);
-PlotShapes(Buy  * shapeUpArrow,   colorBrightGreen, 0, Low);
-PlotShapes(Sell * shapeDownArrow, colorRed,         0, High);
-_SECTION_END();`, { weight: 3, kind: 'system' }),
-
-  // ------------------------------------------------------------------ explorations
-  f('exp-summary', 'Exploration: Price & Volume Summary', EX, 'Lists close, % change, volume and RSI for every bar (a starting point for your own columns)', `
-_SECTION_BEGIN("Exploration: Summary");
+XYChartAddPoint( "Risk/Yield", Name(), risk[ Length ], yield[ Length ] , Clr );
+XYChartSetAxis("Risk/Yield", "Risk[%]", "Yield[%]");`, { kind: 'exploration' }),
+  f('exploration-basic', 'Basic Exploration (template)', 'Exploration', 'Starter exploration: lists every symbol with close, change %, volume and RSI. Edit the Filter to scan', R`
+// Exploration template. Filter decides which symbols/bars appear; AddColumn adds a column.
 minVol = Param("Minimum volume", 0, 0, 100000000, 1000);
 rsiPeriod = Param("RSI period", 14, 2, 100, 1);
-Filter = Volume > minVol;
+Filter = Status("lastbarinrange") AND Volume > minVol;
 AddColumn(Close, "Close", 1.2);
 AddColumn(ROC(Close, 1), "Chg %", 1.2);
 AddColumn(Volume, "Volume", 1.0);
-AddColumn(RSI(rsiPeriod), "RSI", 1.1);
-_SECTION_END();`, { kind: 'exploration' }),
-
-  f('exp-52w-high', 'Scan: Closing at 52-week High', EX, 'Finds stocks that close at a new 250-day high', `
-_SECTION_BEGIN("Scan: 52-week high");
+AddColumn(RSI(rsiPeriod), "RSI", 1.1);`, { kind: 'exploration' }),
+  f('scan-52w-high', 'Scan: Closing at 52-week High (template)', 'Exploration', 'Scan for symbols whose last bar closes at a new 250-bar high', R`
 days   = Param("Days (250 = 1 year)", 250, 20, 1000, 10);
 minVol = Param("Minimum volume", 0, 0, 100000000, 1000);
-Filter = Close >= HHV(High, days) AND Volume > minVol;
+Filter = Status("lastbarinrange") AND Close >= HHV(High, days) AND Volume > minVol;
 AddColumn(Close, "Close", 1.2);
 AddColumn(ROC(Close, 1), "Chg %", 1.2);
-AddColumn(Volume, "Volume", 1.0);
-_SECTION_END();`, { kind: 'exploration' }),
-
-  f('exp-delivery-spike', 'Scan: Delivery % Spike', EX, 'Delivery % is 1.5x its 20-day average on above-average volume (NSE)', `
-_SECTION_BEGIN("Scan: Delivery spike");
-p    = Param("Average period", 20, 2, 200, 1);
-mult = Param("Delivery % multiple", 1.5, 1, 10, 0.1);
-Filter = DelPct > mult * MA(DelPct, p) AND Volume > MA(Volume, p);
-AddColumn(Close, "Close", 1.2);
-AddColumn(DelPct, "Delivery %", 1.1);
-AddColumn(MA(DelPct, p), "Avg Del %", 1.1);
-AddColumn(Volume / MA(Volume, p), "Rel Vol", 1.2);
-_SECTION_END();`, { kind: 'exploration' }),
-
-  f('exp-volume-breakout', 'Scan: Volume Breakout', EX, 'Close above the 20-day high with at least 2x average volume', `
-_SECTION_BEGIN("Scan: Volume breakout");
-days = Param("Breakout above highest high of", 20, 5, 250, 1);
-p    = Param("Volume average period", 20, 2, 200, 1);
-mult = Param("Volume multiple", 2, 1, 20, 0.5);
-Filter = Close > Ref(HHV(High, days), -1) AND Volume > mult * MA(Volume, p);
-AddColumn(Close, "Close", 1.2);
-AddColumn(ROC(Close, 1), "Chg %", 1.2);
-AddColumn(Volume / MA(Volume, p), "Rel Vol", 1.2);
-_SECTION_END();`, { kind: 'exploration' }),
+AddColumn(Volume, "Volume", 1.0);`, { kind: 'exploration' }),
 ];
+
+import { INDICATORS } from './builtin-indicators.js';
+import { REPORTS_SYSTEMS } from './builtin-systems.js';
+
+export const BUILTIN_FORMULAS = [
+  ...AVERAGES, ...BANDS, ...BASIC, ...EQUITY, ...EXPLORATION, ...INDICATORS(f, R), ...REPORTS_SYSTEMS(f, R),
+];
+
+// Old formula ids (saved in earlier layouts) mapped to their AmiBroker replacement, so saved sheets keep working.
+export const ALIASES = {
+  'price-candle': 'price', 'price-bar': 'price', 'price-line': 'price', 'price-area': 'price', 'price-heikin': 'price',
+  'price-volume': 'price', 'price-ma': 'ma', 'price-ema-cross': 'ma', 'price-supertrend': 'ma', 'price-sar': 'sar', 'adx': 'adx',
+  'aroon': 'adx', 'macd': 'macd', 'stoch': 'stochk', 'cci': 'cci', 'willr': 'percent-r', 'roc': 'roc', 'price-bbands': 'bbands',
+  'price-keltner': 'keltner', 'price-donchian': 'bbands', 'atr': 'atr', 'bb-pctb': 'bbands', 'bb-width': 'bbands', 'obv': 'obv', 'mfi': 'mfi',
+  'rel-volume': 'volume', 'hi-lo-52w': 'price', 'sys-ema-cross': 'sys-macd', 'sys-rsi': 'sys-macd', 'sys-breakout': 'sys-macd',
+  'sys-macd': 'sys-macd', 'exp-summary': 'exploration-basic', 'exp-52w-high': 'scan-52w-high', 'exp-volume-breakout': 'scan-52w-high',
+  'exp-delivery-spike': 'nse-delivery-spike', 'delivery-pct': 'nse-delivery-pct', 'delivery-qty': 'nse-delivery-qty',
+};

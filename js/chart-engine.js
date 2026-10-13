@@ -8,6 +8,8 @@ import { paneTitle, overlayTitle } from './workspace.js';
 import { aflEngine, colorToHex, shapeKind } from './afl-engine.js';
 import { formulaStore } from './formula-store.js';
 import { INTERVALS } from './timeframe.js';
+import { pseudoStore } from './pseudo-store.js';
+import { CloudPrimitive, VapPrimitive } from './chart-primitives.js';
 
 const COLORS = { up: '#22c55e', down: '#ef4444', grid: '#1e293b', border: '#334155', text: '#94a3b8', bg: '#020617' };
 const DEFAULT_BARS_SHOWN = 250;   // a fresh chart opens on about one year; "Fit" shows everything
@@ -78,6 +80,7 @@ export class ChartEngine {
       timeScale: { borderColor: COLORS.border, timeVisible: false, rightOffset: 4 },
     });
     this.chart = chart;
+    this.firstVisible = prevRange ? Math.max(0, Math.floor(prevRange.from)) : Math.max(0, this.arrays.t.length - DEFAULT_BARS_SHOWN);
 
     sheet.panes.forEach((pane, idx) => this._buildPane(chart, LWC, pane, idx));
 
@@ -185,25 +188,58 @@ export class ChartEngine {
     }
   }
 
-  // ---- a pane driven by an AFL formula ----
+  // ---- a pane driven by one or more AFL formulas (the pane's own formula + layers inserted into it) ----
+  _foreignMap() {
+    const m = {};
+    for (const [k, v] of Object.entries(this.foreign || {})) m[k] = v;
+    for (const nm of pseudoStore.names()) m[nm] = pseudoStore.get(nm);
+    return m;
+  }
+
   _buildAflPane(chart, LWC, pane, idx) {
-    const a = this.arrays, t = a.t;
-    const info = { errors: [], params: [], legend: [], notes: [] };
-    this.paneInfo.set(pane.id, info);
-    const f = formulaStore.get(pane.params.formulaId);
-    if (!f) { info.errors.push('The formula for this pane was deleted. Tap the pane title to remove the pane or choose another formula.'); return; }
+    const refs = [{ key: pane.id, ref: pane.params, primary: true }, ...(pane.params.layers || []).map((l) => ({ key: l.id, ref: l }))];
+    const shared = { first: null, nextColor: 0, markers: [], grids: [], anchorSeries: null, opts: null };
+    const paneInfo = { errors: [], params: [], legend: [], notes: [], gui: [], layers: [] };
+    this.paneInfo.set(pane.id, paneInfo);
+    for (const r of refs) this._buildLayer(chart, LWC, pane, idx, r, shared, paneInfo);
+    this._finishPane(chart, LWC, pane, idx, shared, paneInfo);
+  }
 
-    const res = aflEngine.run(f.code, a, { symbol: this.sheet ? this.sheet.symbol : '', params: pane.params.values || {}, triggers: this.triggers[pane.id] || {}, guiState: pane.params.gui || {}, guiEvents: this.guiEvents[pane.id] || [], guiKnown: this.guiKnown[pane.id] || [], interval: (this.sheet && this.sheet.interval) || 'D', intervalName: INTERVALS[(this.sheet && this.sheet.interval) || 'D'] });
-    info.errors = res.errors; info.params = res.params; info.title = res.title;
-    info.gui = res.gui || [];
-    this.guiKnown[pane.id] = info.gui.map((c) => c.id);
-    if (res.guiState && JSON.stringify(res.guiState) !== JSON.stringify(pane.params.gui || {}) && this.onGuiState) this.onGuiState(pane.id, res.guiState);
+  _futureTimes(k) {
+    const t = this.arrays.t, out = []; if (!t.length || k <= 0) return out;
+    const d = new Date(t[t.length - 1] + 'T00:00:00Z');
+    while (out.length < k) { d.setUTCDate(d.getUTCDate() + 1); const w = d.getUTCDay(); if (w !== 0 && w !== 6) out.push(d.toISOString().slice(0, 10)); }
+    return out;
+  }
 
-    const PALETTE = ['#38bdf8', '#f59e0b', '#a78bfa', '#f472b6', '#34d399', '#f87171', '#fbbf24', '#e2e8f0'];
-    let nextColor = 0;
+  _buildLayer(chart, LWC, pane, idx, { key, ref, primary }, shared, paneInfo) {
+    const a = this.arrays, t = a.t, N = t.length;
+    const info = { errors: [], params: [], legend: [], notes: [], key, formulaId: ref.formulaId };
+    if (!primary) this.paneInfo.set(key, info);
+    const f = formulaStore.get(ref.formulaId);
+    if (!f) { info.errors.push('The formula for this pane was deleted. Tap the pane title to remove the pane or choose another formula.'); paneInfo.errors.push(...info.errors); return; }
+    const sheet = this.sheet || {};
+    const res = aflEngine.run(f.code, a, {
+      symbol: sheet.symbol || '', formulaName: f.name, params: ref.values || {}, triggers: this.triggers[key] || {}, guiState: ref.gui || {},
+      guiEvents: this.guiEvents[key] || [], guiKnown: this.guiKnown[key] || [], interval: sheet.interval || 'D', intervalName: INTERVALS[sheet.interval || 'D'],
+      priceStyle: sheet.priceStyle || 'candle', foreign: this._foreignMap(), firstVisible: this.firstVisible || 0, action: 1,
+      lastBacktestFormula: this.lastBacktestFormula || '', baseIndex: this.baseIndex || 'NIFTY',
+    });
+    info.errors = res.errors; info.params = res.params; info.title = res.title; info.gui = res.gui || []; info.text = res.text; info.res = res;
+    this.guiKnown[key] = info.gui.map((c) => c.id);
+    if (res.guiState && JSON.stringify(res.guiState) !== JSON.stringify(ref.gui || {}) && this.onGuiState) this.onGuiState(key, res.guiState);
+    if (primary) Object.assign(paneInfo, { params: res.params, title: res.title, text: res.text, res });
+    paneInfo.errors.push(...res.errors); paneInfo.gui.push(...info.gui.map((c) => ({ ...c, _key: key })));
+    paneInfo.layers.push(info);
+    if (res.text && !paneInfo.notes.length) { /* text output is shown from the pane menu */ }
+    for (const need of res.needSymbols || []) this._requestForeign(need);
+    const missing = (res.needSymbols || []).filter((x) => !(this.foreign && this.foreign[x]) && !pseudoStore.has(x));
+    if (missing.length) paneInfo.notes.push(`Needs data for: ${missing.join(', ')}. ${this.foreignFailed && missing.some((m) => this.foreignFailed.has(m)) ? 'It could not be loaded (check the symbol name).' : 'Loading...'}`);
+
+    const PAL = ['#38bdf8', '#f59e0b', '#a78bfa', '#f472b6', '#34d399', '#f87171', '#fbbf24', '#e2e8f0'];
     const baseColor = (c) => {
-      if (c instanceof Float64Array) { for (let i = c.length - 1; i >= 0; i--) { const h = colorToHex(c[i]); if (h) return h; } return PALETTE[nextColor++ % PALETTE.length]; }
-      return colorToHex(c) || PALETTE[nextColor++ % PALETTE.length];
+      if (c instanceof Float64Array) { for (let i = c.length - 1; i >= 0; i--) { const h = colorToHex(c[i]); if (h) return h; } return PAL[shared.nextColor++ % PAL.length]; }
+      return colorToHex(c) || PAL[shared.nextColor++ % PAL.length];
     };
     const pointColor = (c, i) => (c instanceof Float64Array ? colorToHex(c[i]) : null);
     const format = (data, name) => {
@@ -214,47 +250,72 @@ export class ChartEngine {
       if (mx < 10) return { type: 'price', precision: 3, minMove: 0.001 };
       return { type: 'price', precision: 2, minMove: 0.01 };
     };
+    // time of bar j after an XShift (positive = into the future)
+    const maxShift = Math.max(0, ...res.plots.map((p) => Math.max(0, p.xshift || 0)));
+    const fut = this._futureTimes(maxShift);
+    const timeAt = (j) => (j < N ? t[j] : fut[j - N]);
+    const series = (vals, shift, mk) => {
+      const out = [];
+      const k = shift || 0, from = Math.max(0, -k);
+      for (let i = from; i < N; i++) { const j = i + k, tm = timeAt(j); if (tm === undefined) continue; out.push(mk(tm, i)); }
+      return out;
+    };
 
-    let first = null;
-    res.plots.forEach((p, k) => {
+    const ordered = res.plots.map((p, k) => ({ p, k })).sort((x, y) => (x.p.zorder || 0) - (y.p.zorder || 0));
+    ordered.forEach(({ p, k }) => {
       if (p.hidden || (p.noLine && p.kind === 'line' && !p.dots)) return;
-      const isOhlc = p.kind === 'candle' || p.kind === 'bar';
-      const color = isOhlc ? (colorToHex(typeof p.color === 'number' ? p.color : -1) || '#94a3b8') : baseColor(p.color);
-      const common = { priceLineVisible: false, lastValueVisible: !p.noLabel && p.kind !== 'hist' };
-      if (p.ownScale) common.priceScaleId = `own_${pane.id}_${k}`;
+      const lid = `${key}_${k}`;
+      const sc = p.left ? { priceScaleId: 'left' } : {};
+      const common = { priceLineVisible: false, lastValueVisible: !p.noLabel && p.kind !== 'hist', ...sc };
+      if (p.ownScale) common.priceScaleId = `own_${lid}`;
+      const limits = (p.minY !== undefined || p.maxY !== undefined || p.noRescale)
+        ? { autoscaleInfoProvider: (orig) => { if (p.noRescale) return null; const o = orig(); if (!o) return o; return { ...o, priceRange: { minValue: p.minY !== undefined ? p.minY : o.priceRange.minValue, maxValue: p.maxY !== undefined ? p.maxY : o.priceRange.maxValue } }; } } : {};
       let s;
+      if (p.kind === 'cloud') {
+        const colors = Array.from({ length: N }, (_, i) => pointColor(p.color, i) || colorToHex(typeof p.color === 'number' ? p.color : -1) || '#94a3b8');
+        const k0 = p.xshift || 0, top = new Float64Array(N + maxShift + 1).fill(NaN), bot = new Float64Array(N + maxShift + 1).fill(NaN), cc = [];
+        for (let i = 0; i < N; i++) { const j = i + k0; if (j >= 0 && j < top.length) { top[j] = p.top[i]; bot[j] = p.bottom[i]; cc[j] = colors[i]; } }
+        const times = Array.from({ length: N + fut.length }, (_, j) => timeAt(j));
+        shared.cloudQueue = shared.cloudQueue || [];
+        shared.cloudQueue.push({ times, top: top.subarray(0, times.length), bottom: bot.subarray(0, times.length), colors: cc, behind: (p.zorder || 0) < 0 });
+        return;
+      }
       if (p.kind === 'candle' || p.kind === 'bar') {
         const o = p.ohlc, scalar = typeof p.color === 'number' ? colorToHex(p.color) : null;
         const up = scalar || COLORS.up, down = scalar || COLORS.down;
-        const data = t.map((time, i) => {
-          if (!Number.isFinite(o.c[i]) || !Number.isFinite(o.o[i]) || !Number.isFinite(o.h[i]) || !Number.isFinite(o.l[i])) return { time };
+        const data = series(null, p.xshift, (time, i) => {
+          if (![o.c[i], o.o[i], o.h[i], o.l[i]].every(Number.isFinite)) return { time };
           const pt = { time, open: o.o[i], high: o.h[i], low: o.l[i], close: o.c[i] };
           const pc = pointColor(p.color, i);
           if (pc) { pt.color = pc; pt.wickColor = pc; pt.borderColor = pc; }
           return pt;
         });
         s = p.kind === 'candle'
-          ? chart.addSeries(LWC.CandlestickSeries, { ...common, lastValueVisible: true, priceLineVisible: true, upColor: up, downColor: down, borderVisible: false, wickUpColor: up, wickDownColor: down }, idx)
-          : chart.addSeries(LWC.BarSeries, { ...common, lastValueVisible: true, priceLineVisible: true, upColor: up, downColor: down }, idx);
+          ? chart.addSeries(LWC.CandlestickSeries, { ...common, ...limits, lastValueVisible: true, priceLineVisible: true, upColor: up, downColor: down, borderVisible: false, wickUpColor: up, wickDownColor: down }, idx)
+          : chart.addSeries(LWC.BarSeries, { ...common, ...limits, lastValueVisible: true, priceLineVisible: true, upColor: up, downColor: down }, idx);
         s.setData(data);
         if (!this.mainSeries) this.mainSeries = s;
       } else if (p.kind === 'hist') {
-        s = chart.addSeries(LWC.HistogramSeries, { ...common, color, priceFormat: format(p.data, p.name) }, idx);
-        s.setData(t.map((time, i) => {
+        const color = baseColor(p.color);
+        s = chart.addSeries(LWC.HistogramSeries, { ...common, ...limits, color, priceFormat: format(p.data, p.name) }, idx);
+        s.setData(series(null, p.xshift, (time, i) => {
           if (!Number.isFinite(p.data[i])) return { time };
           const pc = pointColor(p.color, i);
           return pc ? { time, value: p.data[i], color: pc } : { time, value: p.data[i] };
         }));
-      } else if (p.kind === 'area') {
-        s = chart.addSeries(LWC.AreaSeries, { ...common, lineColor: color, topColor: color + '55', bottomColor: color + '08', lineWidth: p.thick ? 3 : 2, priceFormat: format(p.data, p.name) }, idx);
-        s.setData(t.map((time, i) => (Number.isFinite(p.data[i]) ? { time, value: p.data[i] } : { time })));
+      } else if (p.kind === 'area' || p.kind === 'gradient') {
+        const color = baseColor(p.color), g = p.kind === 'gradient' && p.gradient ? p.gradient : null;
+        const top = g ? (colorToHex(g.top) || color) : color, bottom = g ? (colorToHex(g.bottom) || color) : color;
+        s = chart.addSeries(LWC.AreaSeries, { ...common, ...limits, lineColor: p.kind === 'gradient' ? color : color, topColor: g ? top + 'aa' : color + '55', bottomColor: g ? bottom + '33' : color + '08', lineWidth: p.thick ? 3 : 2, priceFormat: format(p.data, p.name) }, idx);
+        s.setData(series(null, p.xshift, (time, i) => (Number.isFinite(p.data[i]) ? { time, value: p.data[i] } : { time })));
       } else {
+        const color = baseColor(p.color);
         s = chart.addSeries(LWC.LineSeries, {
-          ...common, color, lineWidth: p.thick ? 2 : 1, crosshairMarkerVisible: false, priceFormat: format(p.data, p.name),
+          ...common, ...limits, color, lineWidth: p.thick ? 2 : 1, crosshairMarkerVisible: false, priceFormat: format(p.data, p.name),
           lineStyle: p.dashed ? 2 : 0, lineType: p.step ? 1 : 0,
           ...(p.dots ? { lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2 } : {}),
         }, idx);
-        s.setData(t.map((time, i) => {
+        s.setData(series(null, p.xshift, (time, i) => {
           if (!Number.isFinite(p.data[i])) return { time };
           const pc = pointColor(p.color, i);
           return pc ? { time, value: p.data[i], color: pc } : { time, value: p.data[i] };
@@ -263,41 +324,75 @@ export class ChartEngine {
       if (p.ownScale) {
         try { s.priceScale().applyOptions({ scaleMargins: p.kind === 'hist' ? { top: 0.78, bottom: 0 } : { top: 0.1, bottom: 0.1 }, visible: false }); } catch (e) { /* ignore */ }
       }
-      if (!first) first = s;
-      if (p.name && !isOhlc && !(p.kind === 'hist' && p.ownScale)) info.legend.push({ name: p.name, color });
+      if (!shared.first && !p.ownScale && !p.noRescale) shared.first = s;
+      shared.anchorSeries = shared.anchorSeries || s;
+      const isOhlc = p.kind === 'candle' || p.kind === 'bar';
+      if (p.name && !isOhlc && !p.noTitle && !(p.kind === 'hist' && p.ownScale)) paneInfo.legend.push({ name: p.name, color: baseColor(p.color) });
+      if (shared.legendOwner === undefined) shared.legendOwner = true;
     });
 
-    // horizontal grid lines, and arrows from PlotShapes
-    const anchor = () => {
-      if (first) return first;
-      first = chart.addSeries(LWC.LineSeries, { lineVisible: false, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }, idx);
-      first.setData(t.map((time, i) => (Number.isFinite(a.c[i]) ? { time, value: a.c[i] } : { time })));
-      return first;
-    };
-    for (const g of res.grids) {
-      try { anchor().createPriceLine({ price: g.level, color: colorToHex(g.color) || '#475569', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); } catch (e) { /* ignore */ }
-    }
-    const markers = [];
+    shared.grids.push(...res.grids);
+    shared.vap = (shared.vap || []).concat(res.vap || []);
+    if (res.options && res.options.chartoptions) shared.chartoptions = res.options.chartoptions;
     for (const sh of res.shapes) {
-      for (let i = 0; i < t.length; i++) {
+      for (let i = 0; i < N; i++) {
         const code = Math.round(sh.shapes[i]);
         if (!(code > 0)) continue;
-        const kind = shapeKind(code);
-        const down = !!kind.down;
+        const kind = shapeKind(code), down = !!kind.down;
         const pos = sh.position === 'above' ? 'aboveBar' : sh.position === 'below' ? 'belowBar' : (down ? 'aboveBar' : 'belowBar');
         const col = colorToHex(sh.color instanceof Float64Array ? sh.color[i] : sh.color) || (down ? COLORS.down : COLORS.up);
-        markers.push(kind.text !== undefined
+        shared.markers.push(kind.text !== undefined
           ? { time: t[i], position: pos, shape: 'circle', color: col, text: kind.text, size: 0.5 }
           : { time: t[i], position: pos, shape: kind.shape, color: col, size: 1 });
       }
     }
-    if (markers.length) {
-      const m = markers.length > 4000 ? markers.slice(-4000) : markers;
-      try { (LWC.createSeriesMarkers || (() => {}))(anchor(), m); } catch (e) { info.notes.push('Arrows could not be drawn: ' + e.message); }
+    if (!res.plots.length && !res.shapes.length && !res.grids.length && !res.vap.length && !res.errors.length) {
+      if (res.usesSignals || (res.vars && res.vars.positionscore)) info.notes.push('This formula has trading rules only (no chart). Run it from Tools > Analysis.');
+      else if (res.filter || res.columns.length) info.notes.push('This formula is an Exploration / Scan. Run it from Tools > Analysis.');
+      else if (res.text) info.notes.push('This formula writes text. Open the pane menu and choose "Text output".');
+      else info.notes.push('This formula draws nothing on a chart.');
+      paneInfo.notes.push(...info.notes);
     }
-    if (!res.plots.length && !markers.length && !res.grids.length && !res.errors.length) {
-      info.notes.push('This formula draws nothing on a chart. It is meant for Scanner / Exploration.');
+  }
+
+  _finishPane(chart, LWC, pane, idx, shared, paneInfo) {
+    const a = this.arrays, t = a.t;
+    const anchor = () => {
+      if (shared.first) return shared.first;
+      if (shared.anchorSeries) return shared.anchorSeries;
+      shared.first = chart.addSeries(LWC.LineSeries, { lineVisible: false, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false }, idx);
+      shared.first.setData(t.map((time, i) => (Number.isFinite(a.c[i]) ? { time, value: a.c[i] } : { time })));
+      return shared.first;
+    };
+    const co = shared.chartoptions || [];
+    const gridFlags = Number(co[2]) || 0;
+    const grids = [...shared.grids];
+    if (gridFlags & 1) grids.push({ level: 30, color: 15 }); if (gridFlags & 4) grids.push({ level: 70, color: 15 }); if (gridFlags & 2) grids.push({ level: 50, color: 15 }); if (gridFlags & 8) grids.push({ level: 50, color: 15 });
+    for (const g of grids) {
+      try { anchor().createPriceLine({ price: g.level, color: colorToHex(g.color) || '#475569', lineWidth: 1, lineStyle: 2, axisLabelVisible: false }); } catch (e) { /* ignore */ }
     }
+    if ((Number(co[1]) || 0) & 4) { try { chart.priceScale('right', idx).applyOptions({ mode: 1 }); } catch (e) { /* log scale not available */ } }
+    if (shared.markers.length) {
+      const m = shared.markers.length > 4000 ? shared.markers.slice(-4000) : shared.markers;
+      try { (LWC.createSeriesMarkers || (() => {}))(anchor(), m); } catch (e) { paneInfo.notes.push('Arrows could not be drawn: ' + e.message); }
+    }
+    for (const c of shared.cloudQueue || []) {
+      try { anchor().attachPrimitive(new CloudPrimitive({ ...c })); } catch (e) { paneInfo.notes.push('Cloud could not be drawn: ' + e.message); }
+    }
+    for (const v of shared.vap || []) {
+      try { anchor().attachPrimitive(new VapPrimitive({ times: t, high: a.h, low: a.l, volume: a.v, spec: v, color: colorToHex(v.color) || '#fbbf24' })); } catch (e) { paneInfo.notes.push('Volume-at-price could not be drawn: ' + e.message); }
+    }
+  }
+
+  // other symbols a formula asked for (Foreign, SetForeign, PlotForeign, RelStrength...): load once, then redraw
+  _requestForeign(sym) {
+    this.foreign = this.foreign || {}; this.foreignAsked = this.foreignAsked || new Set(); this.foreignFailed = this.foreignFailed || new Set();
+    if (this.foreign[sym] || this.foreignAsked.has(sym) || pseudoStore.has(sym) || !this.loadForeign) return;
+    this.foreignAsked.add(sym);
+    Promise.resolve(this.loadForeign(sym)).then((bars) => {
+      if (bars && bars.t && bars.t.length) { this.foreign[sym] = bars; if (this.onForeignLoaded) this.onForeignLoaded(sym); }
+      else { this.foreignFailed.add(sym); if (this.onForeignLoaded) this.onForeignLoaded(sym); }
+    }).catch(() => { this.foreignFailed.add(sym); if (this.onForeignLoaded) this.onForeignLoaded(sym); });
   }
 
   // ---- small tappable titles over each pane ----
@@ -340,7 +435,9 @@ export class ChartEngine {
 
   // ---- on-chart GUI controls (GuiButton, GuiCheckBox, GuiSlider, GuiEdit, GuiRadio, GuiDateTime) ----
   _guiControl(def, pane, info, base) {
-    const st = (pane.params.gui && pane.params.gui[def.id]) || {};
+    const key = def._key || pane.id;
+    const ref = key === pane.id ? pane.params : ((pane.params.layers || []).find((l) => l.id === key) || pane.params);
+    const st = (ref.gui && ref.gui[def.id]) || {};
     const box = document.createElement('div');
     box.className = 'gui-ctl';
     box.style.left = `${base.left + def.x}px`;
@@ -352,12 +449,12 @@ export class ChartEngine {
 
     // remember what the user did, then tell the formula (only for the actions it asked to hear about)
     const act = (patch, code, others = {}) => {
-      const all = JSON.parse(JSON.stringify(pane.params.gui || {}));
+      const all = JSON.parse(JSON.stringify(ref.gui || {}));
       for (const [id, pt] of Object.entries(others)) all[id] = { ...(all[id] || {}), ...pt };
       all[def.id] = { ...(all[def.id] || {}), ...patch };
-      pane.params.gui = all;
-      if (this.onGuiState) this.onGuiState(pane.id, all);
-      if ((def.flags & code) && this.onGuiEvent) this.onGuiEvent(pane.id, { id: def.id, code });
+      ref.gui = all;
+      if (this.onGuiState) this.onGuiState(key, all);
+      if ((def.flags & code) && this.onGuiEvent) this.onGuiEvent(key, { id: def.id, code });
     };
     const NOTIFY_CLICKED = 1, NOTIFY_HITRETURN = 8, NOTIFY_EDITCHANGE = 16;
     let input;

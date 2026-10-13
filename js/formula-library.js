@@ -3,8 +3,9 @@
 import { el, openModal, toast, BTN, INPUT } from './ui.js';
 import { formulaStore } from './formula-store.js';
 import { host } from './host.js';
+import { placeFormula, openPlacePicker } from './pane-ui.js';
 
-const KIND_LABEL = { system: 'Buy/Sell', exploration: 'Scanner' };
+const KIND_LABEL = { system: 'Backtest', exploration: 'Scan / Explore' };
 
 export function openLibrary({ mode = 'manage', onPick = null } = {}) {
   openModal(mode === 'open' ? 'Open formula' : 'Formula Library', (body, close) => {
@@ -44,6 +45,7 @@ export function openLibrary({ mode = 'manage', onPick = null } = {}) {
       if (KIND_LABEL[f.kind]) head.appendChild(el('span', 'px-1.5 py-0.5 rounded text-[9px] bg-sky-900/60 text-sky-300 shrink-0', KIND_LABEL[f.kind]));
       r.appendChild(head);
       if (f.description) r.appendChild(el('div', 'text-[11px] text-slate-400 mt-0.5', f.description));
+      if (f.needs) r.appendChild(el('div', 'text-[10px] text-amber-400/80 mt-0.5', 'Needs: ' + f.needs));
 
       const act = el('div', 'flex flex-wrap gap-1 mt-1.5');
       const b = (label, fn, extra = '') => { const x = el('button', BTN + ' !px-2 !py-1 ' + extra, label); x.type = 'button'; x.onclick = (e) => { e.stopPropagation(); fn(); }; act.appendChild(x); };
@@ -51,9 +53,11 @@ export function openLibrary({ mode = 'manage', onPick = null } = {}) {
         b('Open', () => { close(); onPick && onPick(f); });
       } else {
         if (f.kind !== 'exploration') {
-          b('＋ Add to chart', () => { host.addFormulaPane(f.id); close(); toast(`Added "${f.name}"`); });
+          b(f.overlay ? '＋ Add to price pane' : '＋ Add to chart', () => { placeFormula(f.id); close(); toast(`Added "${f.name}"`); });
+          b('⤵ Insert into…', () => { close(); openPlacePicker(f.id); });
           b('▢ New sheet', () => { host.newFormulaSheet(f.id); close(); });
         }
+        if (f.kind === 'exploration' || f.kind === 'system') b('▶ Analysis…', async () => { close(); (await import('./analysis.js')).openAnalysis({ formulaId: f.id }); });
         b('✎ Edit', async () => { const { openFormulaEditor } = await import('./formula-editor.js'); close(); openFormulaEditor({ formulaId: f.id }); });
         if (!f.builtin) b('Delete', () => {
           if (!window.confirm(`Delete "${f.name}"?`)) return;

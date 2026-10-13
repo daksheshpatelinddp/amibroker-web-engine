@@ -1,16 +1,29 @@
 // The "Tools" menu in the top bar. Everything formula-related is reached from here.
 import { el, openModal } from './ui.js';
 import { AFL_REFERENCE } from './afl-reference.js';
+import { host } from './host.js';
 
 const ITEMS = [
   { icon: '📝', label: 'Formula Editor…', hint: 'Write, open, edit and save AFL', run: async () => (await import('./formula-editor.js')).openFormulaEditor() },
   { icon: '📚', label: 'Formula Library…', hint: 'Built-in charts & indicators + your own', run: async () => (await import('./formula-library.js')).openLibrary({ mode: 'manage' }) },
   { icon: '✨', label: 'AI Formula Assistant…', hint: 'Describe it in plain English', run: async () => (await import('./ai-assistant.js')).openAIAssistant() },
   { sep: true },
-  { icon: '🔎', label: 'Scanner · Exploration · Backtest', hint: 'Coming next (formulas are ready for it)', disabled: true },
+  { icon: '🔎', label: 'Analysis: Scan · Explore · Backtest · Optimize…', hint: 'Run any formula over many symbols', run: async () => (await import('./analysis.js')).openAnalysis() },
+  { icon: '🕯', label: 'Price style…', hint: 'Candles, OHLC bars, line or area for Price formulas', run: async () => openPriceStyle() },
   { sep: true },
   { icon: '❓', label: 'AFL Reference', hint: 'Functions you can use', run: () => openReference() },
 ];
+
+function openPriceStyle() {
+  const ws = host.ws(), sheet = ws.active();
+  openModal('Price style', (b, close) => {
+    b.appendChild(el('div', 'text-[11px] text-slate-400', 'Used by every formula that draws price with GetPriceStyle() (Price, Ichimoku, Plot Foreign...).'));
+    [['candle', 'Candlesticks'], ['bar', 'OHLC bars'], ['line', 'Close line'], ['area', 'Area']].forEach(([k, label]) => {
+      const x = el('button', (sheet.priceStyle || 'candle') === k ? 'w-full px-3 py-2 rounded bg-sky-600 text-white text-xs' : 'w-full px-3 py-2 rounded bg-slate-800 border border-slate-700 text-slate-100 text-xs', label);
+      x.type = 'button'; x.onclick = () => { ws.setPriceStyle(sheet.id, k); host.relayout(); close(); }; b.appendChild(x);
+    });
+  }, { stack: true });
+}
 
 export function openReference() {
   openModal('AFL quick reference', (b) => {

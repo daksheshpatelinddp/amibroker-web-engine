@@ -359,3 +359,85 @@ export function swingSeries(a, pct, n, isPeak, wantBars) {
   }
   return out;
 }
+
+// ======================================================================= more AmiBroker indicators
+export const linearReg = (a, n) => { const s = linRegSlope(a, n), i = linRegIntercept(a, n); return i.map((v, k) => v + s[k] * (per(n) - 1)); };
+
+// AMA: out[i] = out[i-1] + k * (a[i] - out[i-1]); k may be a number or an array
+export function ama(a, k) {
+  const out = newArr(a.length); let prev = NaN;
+  for (let i = 0; i < a.length; i++) {
+    const kk = isArr(k) ? k[i] : k, v = a[i];
+    if (Number.isNaN(v)) continue;
+    prev = Number.isNaN(prev) ? v : prev + kk * (v - prev);
+    out[i] = prev;
+  }
+  return out;
+}
+export function accDist(h, l, c, v) {
+  const out = newArr(h.length); let s = 0;
+  for (let i = 0; i < h.length; i++) { const r = h[i] - l[i]; s += r > 0 ? ((c[i] - l[i]) - (h[i] - c[i])) / r * v[i] : 0; out[i] = s; }
+  return out;
+}
+export function chaikin(h, l, c, v, r1, r2) { const ad = accDist(h, l, c, v), a = ema(ad, r1), b = ema(ad, r2); return a.map((x, i) => x - b[i]); }
+function volIndex(c, v, negative) {
+  const out = newArr(c.length); let p = 100;
+  for (let i = 0; i < c.length; i++) {
+    if (i > 0 && c[i - 1] !== 0 && (negative ? v[i] < v[i - 1] : v[i] > v[i - 1])) p *= c[i] / c[i - 1];
+    out[i] = p;
+  }
+  return out;
+}
+export const nvi = (c, v) => volIndex(c, v, true);
+export const pvi = (c, v) => volIndex(c, v, false);
+export function osc(a, f, s) { const x = ma(a, f), y = ma(a, s); return x.map((v, i) => (v ? 100 * (v - y[i]) / v : NaN)); }
+export function rmi(c, p, m) {
+  m = per(m) || 1; const L = c.length, up = newArr(L, 0), dn = newArr(L, 0);
+  for (let i = m; i < L; i++) { const d = c[i] - c[i - m]; if (d > 0) up[i] = d; else dn[i] = -d; }
+  const a = wilders(up, p), b = wilders(dn, p), out = newArr(L);
+  for (let i = m; i < L; i++) out[i] = a[i] + b[i] > 0 ? 100 * a[i] / (a[i] + b[i]) : NaN;
+  return out;
+}
+export function rwi(h, l, c, minP, maxP, which) {
+  const L = h.length, tr = trueRange(h, l, c), out = newArr(L);
+  minP = per(minP); maxP = per(maxP);
+  for (let i = 0; i < L; i++) {
+    let best = NaN;
+    for (let n = minP; n <= maxP && i - n >= 0; n++) {
+      let s = 0; for (let j = i - n + 1; j <= i; j++) s += tr[j];
+      const atrN = s / n; if (!(atrN > 0)) continue;
+      const hi = (h[i] - l[i - n]) / (atrN * Math.sqrt(n)), lo = (h[i - n] - l[i]) / (atrN * Math.sqrt(n));
+      const v = which === 'hi' ? hi : which === 'lo' ? lo : Math.max(hi, lo);
+      if (Number.isNaN(best) || v > best) best = v;
+    }
+    out[i] = best;
+  }
+  return out;
+}
+export function ultimate(h, l, c, r1, r2, r3) {
+  const L = h.length, bp = newArr(L), tr = newArr(L);
+  for (let i = 1; i < L; i++) { const lo = Math.min(l[i], c[i - 1]), hi = Math.max(h[i], c[i - 1]); bp[i] = c[i] - lo; tr[i] = hi - lo; }
+  const avg = (k) => { const a = sum(bp, k), b = sum(tr, k); return a.map((v, i) => (b[i] > 0 ? v / b[i] : NaN)); };
+  const a1 = avg(r1), a2 = avg(r2), a3 = avg(r3);
+  return a1.map((v, i) => 100 * (4 * v + 2 * a2[i] + a3[i]) / 7);
+}
+export function trix(c, p) { return roc(ema(ema(ema(c, p), p), p), 1); }
+export function relStrength(c, base) {
+  const out = newArr(c.length); let k = NaN;
+  for (let i = 0; i < c.length; i++) {
+    const r = c[i] / base[i]; if (!Number.isFinite(r)) continue;
+    if (Number.isNaN(k)) k = r; out[i] = 100 * r / k;
+  }
+  return out;
+}
+export function median(a, n) {
+  n = per(n); const out = newArr(a.length); if (Number.isNaN(n)) return out;
+  for (let i = n - 1; i < a.length; i++) { const w = Array.from(a.subarray(i - n + 1, i + 1)).sort((x, y) => x - y); out[i] = n % 2 ? w[(n - 1) / 2] : (w[n / 2 - 1] + w[n / 2]) / 2; }
+  return out;
+}
+export function percentRank(a, n) {
+  n = per(n); const out = newArr(a.length); if (Number.isNaN(n)) return out;
+  for (let i = n - 1; i < a.length; i++) { let k = 0; for (let j = i - n + 1; j <= i; j++) if (a[j] < a[i]) k++; out[i] = 100 * k / (n - 1 || 1); }
+  return out;
+}
+export function resampleHelper() {}

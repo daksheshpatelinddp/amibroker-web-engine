@@ -1,6 +1,6 @@
 // FormulaStore: the user's saved formulas (browser storage) + the built-in library.
 // Built-in ids start with "b:" and are read-only. User ids start with "u:".
-import { BUILTIN_FORMULAS } from './builtin-formulas.js';
+import { BUILTIN_FORMULAS, ALIASES, GROUPS } from './builtin-formulas.js';
 
 const KEY = 'amibroker_formulas_v1';
 let counter = 0;
@@ -30,9 +30,15 @@ class FormulaStore {
   }
 
   all() { return [...this.builtin, ...this.user]; }
-  get(id) { return this.all().find((f) => f.id === id) || null; }
+  get(id) {
+    const hit = this.all().find((f) => f.id === id);
+    if (hit) return hit;
+    // saved layouts from older versions point at formulas that were replaced by AmiBroker's own
+    const key = String(id).startsWith('b:') ? String(id).slice(2) : null;
+    return key && ALIASES[key] ? this.builtin.find((f) => f.key === ALIASES[key]) || null : null;
+  }
   isBuiltin(id) { return String(id).startsWith('b:'); }
-  categories() { return [...new Set(this.builtin.map((f) => f.category))]; }
+  categories() { const order = GROUPS; return [...new Set(this.builtin.map((f) => f.category))].sort((a, b) => order.indexOf(a) - order.indexOf(b)); }
 
   uniqueName(name) {
     const used = new Set(this.user.map((f) => f.name.toLowerCase()));

@@ -199,7 +199,7 @@ export function openFormulaEditor(opts = {}) {
   function doCheck() {
     const bars = host.getBars();
     if (!bars || !bars.t || !bars.t.length) { showMessage('error', ['Load a chart first, then check the formula against it.']); return null; }
-    const res = aflEngine.run(ta.value, bars, { symbol: host.symbol() });
+    const res = aflEngine.run(ta.value, bars, { symbol: host.symbol(), formulaName: 'Formula', priceStyle: 'candle' });
     result = res;
     if (res.errors.length) {
       const goto = res.errorLine > 0 ? el('button', 'mt-1 px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-200', `Go to line ${res.errorLine}`) : null;
@@ -212,6 +212,9 @@ export function openFormulaEditor(opts = {}) {
     if (res.shapes.length) lines.push(`${res.shapes.length} arrow/shape series (${res.shapes.reduce((s, x) => s + count(x.shapes), 0)} marks).`);
     if (res.usesSignals) lines.push(`Signals: Buy ${count(res.buy)}, Sell ${count(res.sell)}${res.short ? `, Short ${count(res.short)}` : ''}${res.cover ? `, Cover ${count(res.cover)}` : ''}.`);
     if (res.filter) lines.push(`Scan filter true on ${count(res.filter)} bar(s); ${res.columns.length} column(s).`);
+    if (res.usesSignals) lines.push('Buy/Sell rules found: run Scan, Backtest or Optimize from Tools > Analysis.');
+    if (res.optParams && res.optParams.length) lines.push(`Optimize() values: ${res.optParams.map((p) => `${p.name} ${p.min}..${p.max} step ${p.step}`).join(', ')} (Tools > Analysis > Optimize).`);
+    if (res.needSymbols && res.needSymbols.length) lines.push(`Uses other symbols: ${res.needSymbols.join(', ')}.`);
     if (res.params.length) lines.push(`Parameters: ${res.params.map((p) => p.name).join(', ')} (change them from the pane's ⋯ menu).`);
     if (!res.plots.length && !res.shapes.length) lines.push('Nothing to draw: fine for a Scanner / Exploration formula.');
     showMessage('ok', lines);

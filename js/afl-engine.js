@@ -3,6 +3,7 @@
 //   aflEngine.run(code, bars, { symbol, params }) returns plots, shapes, Buy/Sell/Filter/columns, errors...
 import * as L from './afl-lib.js';
 import { isArr, newArr, toArr } from './afl-lib.js';
+import { addExtras } from './afl-extra.js';
 
 export class AFLError extends Error {
   constructor(msg, line) { super(line ? `Line ${line}: ${msg}` : msg); this.line = line || 0; this.plain = msg; }
@@ -266,8 +267,8 @@ export function hexToColor(hex) {
 
 export const STYLE = {
   Line: 1, Histogram: 2, Thick: 4, Dots: 8, NoLine: 16, Dashed: 32, Candle: 64, Bar: 128, NoDraw: 256, Staircase: 512,
-  SwingDots: 1024, NoRescale: 2048, NoLabel: 4096, LeftAxisScale: 8192, OwnScale: 16384, Area: 32768, ClipMinMax: 65536,
-  Gradient: 131072, Cloud: 262144, Default: 1,
+  SwingDots: 1024, NoRescale: 2048, NoLabel: 4096, PointAndFigure: 8192, Area: 16384, OwnScale: 32768, LeftAxisScale: 65536,
+  NoTitle: 131072, ClipMinMax: 262144, Cloud: 524288, Gradient: 1048576, Default: 1,
 };
 export const SHAPE = {
   None: 0, UpArrow: 1, DownArrow: 2, HollowUpArrow: 3, HollowDownArrow: 4, SmallUpTriangle: 5, SmallDownTriangle: 6,
@@ -317,7 +318,7 @@ function strFormat(fmt, args) {
 // ======================================================================= interpreter
 const MAX_STEPS = 30_000_000;
 const SPECIAL = ['buy', 'sell', 'short', 'cover', 'filter', 'title', 'buyprice', 'sellprice', 'shortprice', 'coverprice',
-  'positionsize', 'positionscore', 'graphxspace', 'maxgraphsize'];
+  'positionsize', 'positionscore', 'graphxspace', 'maxgraphsize', 'graphzorder', 'maxgraph', 'mingraph'];
 
 class Interp {
   constructor(bars, opts, res) {
@@ -353,9 +354,18 @@ class Interp {
     c.set('colorcycle', -2);
     Object.entries({ notifyClicked: 1, notifySetFocus: 2, notifyKillFocus: 4, notifyHitReturn: 8, notifyEditChange: 16,
       notifyMouseEnter: 32, notifyMouseLeave: 64, guiNew: 1, guiExisting: 2 }).forEach(([k, v]) => c.set(k.toLowerCase(), v));
-    Object.entries({ stopTypeLoss: 1, stopTypeProfit: 2, stopTypeTrailing: 3, stopTypeNBar: 4, stopModeDisable: 0, stopModePoint: 1,
-      stopModePercent: 2, stopModeRisk: 3, stopModeBars: 4, spsValue: 1, spsPercentOfEquity: 2, spsShares: 3, spsNoChange: 4,
-      spsPercentOfPosition: 5, maskDefault: 0, maskAll: 0xffffff, maskPrice: 1, maskHistogram: 2 }).forEach(([k, v]) => c.set(k.toLowerCase(), v));
+    Object.entries({ stopTypeLoss: 0, stopTypeProfit: 1, stopTypeTrailing: 2, stopTypeNBar: 3, stopModeDisable: 0, stopModePercent: 1,
+      stopModeBars: 1, stopModePoint: 2, stopModeRisk: 3, spsNoChange: 0, spsValue: 1, spsPercentOfEquity: 2, spsPercentOfPosition: 3,
+      spsShares: 4, maskDefault: 0, maskAll: 0xffffff, maskPrice: 1, maskHistogram: 2, maskNone: 0,
+      actionIndicator: 1, actionCommentary: 2, actionScan: 3, actionExplore: 4, actionBacktest: 5, actionOptimize: 6, actionPortfolio: 7,
+      backtestRegular: 0, backtestRotational: 1, backtestRegularRaw: 2, backtestRegularRawMulti: 3,
+      inDaily: 86400, inWeekly: 604800, inMonthly: 2592000, inQuarterly: 7776000, inYearly: 31536000, inHourly: 3600, inMinute: 60, in1Minute: 60,
+      chartShowArrows: 1, chartShowDates: 2, chartLogarithmic: 4, chartGrid30: 1, chartGrid50: 2, chartGrid70: 4, chartGridMiddle: 8,
+      chartGridPercent: 16, chartWrapTitle: 16, chartNoGaps: 8, chartHideQuoteMarker: 32,
+      xshift: 0, enableTextOutput: 0 }).forEach(([k, v]) => c.set(k.toLowerCase(), v));
+    for (const k of ['buyprice', 'sellprice', 'shortprice', 'coverprice']) c.set(k, C);   // default trade prices = Close
+    c.set('openint', newArr(n, 0)); c.set('openinterest', newArr(n, 0));
+    for (const nm of ['xshift', 'enabletextoutput']) c.delete(nm);
     this.consts = c;
   }
 
@@ -386,6 +396,8 @@ class Interp {
   // ---- variables
   lookup(name, raw, line) {
     if (this.scope.has(name)) return this.scope.get(name);
+    if (this.scope !== this.globals && this.globals.has(name)) return this.globals.get(name);   // functions can read global variables
+    if ((name === 'openint' || name === 'openinterest') && this.globals.has('oi')) return this.globals.get('oi');   // OI = ... redefines open interest
     if (this.consts.has(name)) return this.consts.get(name);
     this.fail(`Variable '${raw}' used without having been initialized`, line);
   }
@@ -731,11 +743,19 @@ function buildFunctions(E) {
   };
 
   // --- parameters (appear in the Parameters dialog; the user's value replaces the default)
+  // a parameter is identified by section + name, so every _SECTION_BEGIN block can have its own "Periods", "Color"...
+  const keyOf = (name) => (E.section ? `${E.section} · ${name}` : name);
   const paramVal = (name, def) => {
-    const v = E.opts.params && E.opts.params[name];
+    const v = E.opts.params && E.opts.params[keyOf(name)];
     return v === undefined || v === null || v === '' ? def : v;
   };
-  const register = (prm) => { if (!E.res.params.some((x) => x.name === prm.name)) E.res.params.push(prm); };
+  const register = (prm) => {
+    prm.key = keyOf(prm.name); prm.section = E.section || '';
+    const old = E.res.params.find((x) => x.key === prm.key);
+    if (old) { Object.assign(old, { items: prm.items || old.items }); return old; }
+    E.res.params.push(prm); return prm;
+  };
+  const withValue = (prm, v) => { prm.value = v; return v; };
   const pad2 = (n) => String(n).padStart(2, '0');
   const parseTime = (s) => {
     const m = /^\s*(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(s));
@@ -751,60 +771,68 @@ function buildFunctions(E) {
   };
   F.param = (a) => {
     const name = String(a[0]), def = S(a[1], 0), min = S(a[2], 0), max = S(a[3], 100), step = S(a[4], 1), sincr = S(a[5], 0);
-    register({ name, type: 'number', def, min, max, step, sincr });
+    const prm = register({ name, type: 'number', def, min, max, step, sincr });
     const v = Number(paramVal(name, def));
-    return Number.isFinite(v) ? v : def;
+    return withValue(prm, Number.isFinite(v) ? v : def);
   };
+  const splitItems = (x) => { const t = String(x === undefined ? '' : x); return t.includes('|') ? t.split('|') : t.split(','); };
   F.paramtoggle = (a) => {
-    const name = String(a[0]), items = String(a[1] === undefined ? 'No|Yes' : a[1]).split('|'), def = S(a[2], 0);
-    register({ name, type: 'list', items, def });
+    const name = String(a[0]), items = splitItems(a[1] === undefined ? 'No|Yes' : a[1]), def = S(a[2], 0);
+    const prm = register({ name, type: 'list', items, def });
     const v = Number(paramVal(name, def));
-    return Number.isFinite(v) ? v : def;
+    return withValue(prm, Number.isFinite(v) ? v : def);
   };
   F.paramlist = (a) => {
-    const name = String(a[0]), items = String(a[1]).split('|'); let def = a[2];
+    const name = String(a[0]), items = splitItems(a[1]); let def = a[2];
     if (typeof def !== 'string') def = items[Math.max(0, Math.min(items.length - 1, S(def, 0)))];
-    register({ name, type: 'text', items, def });
+    const prm = register({ name, type: 'text', items, def });
     const v = String(paramVal(name, def));
-    return items.includes(v) ? v : def;
+    return withValue(prm, items.includes(v) ? v : def);
   };
   let cycle = 0;
   F.paramcolor = (a) => {
     const name = String(a[0]);
     let def = S(a[1], 55);
     if (def === -2) def = [9, 13, 11, 44, 41, 38, 43, 10][cycle++ % 8];   // colorCycle: orange, blue, green, turquoise, gold, violet, bright green, dark yellow
-    register({ name, type: 'color', def });
+    const prm = register({ name, type: 'color', def });
     const v = Number(paramVal(name, def));
-    return Number.isFinite(v) ? v : def;
+    return withValue(prm, Number.isFinite(v) ? v : def);
   };
   F.paramstyle = (a) => {
     const name = String(a[0]), def = S(a[1], 1), mask = S(a[2], 0);
-    register({ name, type: 'style', def, mask });
-    const v = Number(paramVal(name, def)); return Number.isFinite(v) ? v : def;
+    const prm = register({ name, type: 'style', def, mask });
+    const v = Number(paramVal(name, def)); return withValue(prm, Number.isFinite(v) ? v : def);
   };
-  // ParamField: pick the price array. -1/3 = Close (default), 0 Open, 1 High, 2 Low, 4 (H+L+C)/3, 5 Volume, 6 OI, 7 Delivery, 8 Delivery %
+  // ParamField: 0 Open, 1 High, 2 Low, 3 Close, 4 Volume, 5 Open Interest, 6 Average, 7.. = the arrays plotted so far by this formula
+  // (that is how AmiBroker's "Price with Moving Averages" reads its own MA lines), 100/101 = Delivery qty / %. -1 = default (Close).
   F.paramfield = (a) => {
-    const name = String(a[0]), def = a[1] === undefined ? 3 : S(a[1], 3);
-    register({ name, type: 'field', def, items: ['Close', 'Open', 'High', 'Low', 'Average (H+L+C)/3', 'Volume', 'Open Interest', 'Delivery qty', 'Delivery %'], codes: [3, 0, 1, 2, 4, 5, 6, 7, 8] });
-    let f = Number(paramVal(name, def)); if (!Number.isFinite(f)) f = 3;
+    const name = String(a[0]), def = a[1] === undefined ? -1 : S(a[1], -1);
+    const items = ['Open', 'High', 'Low', 'Close', 'Volume', 'Open Interest', 'Average'], codes = [0, 1, 2, 3, 4, 5, 6];
+    E.res.plots.forEach((pl, k) => { if (pl.data && pl.kind !== 'cloud') { items.push(`#${k + 1} ${pl.name || 'plot'}`); codes.push(7 + k); } });
+    items.push('Delivery qty', 'Delivery %'); codes.push(100, 101);
+    const prm = register({ name, type: 'field', def: def < 0 ? 3 : def, items, codes });
+    prm.items = items; prm.codes = codes;
+    let f = Number(paramVal(name, def)); if (!Number.isFinite(f) || f < 0) f = 3;
+    withValue(prm, Math.trunc(f));
     switch (Math.trunc(f)) {
-      case 0: return E.O; case 1: return E.H; case 2: return E.Lw;
-      case 4: return Float64Array.from(E.H, (h, i) => (h + E.Lw[i] + E.C[i]) / 3);
-      case 5: return E.V; case 6: return newArr(n(), 0);
-      case 7: return E.consts.get('delivery'); case 8: return E.consts.get('delpct');
-      default: return E.C;
+      case 0: return E.O; case 1: return E.H; case 2: return E.Lw; case 4: return E.V; case 5: return newArr(n(), 0);
+      case 6: return Float64Array.from(E.H, (h, i) => (h + E.Lw[i]) / 2);
+      case 100: return E.consts.get('delivery'); case 101: return E.consts.get('delpct');
+      default:
+        if (f >= 7 && E.res.plots[f - 7] && E.res.plots[f - 7].data) return E.res.plots[f - 7].data;
+        return E.C;
     }
   };
   // ParamTrigger: a button. Returns 1 only for the one redraw caused by pressing it, otherwise 0.
   F.paramtrigger = (a) => {
     const name = String(a[0]), label = a[1] === undefined ? name : String(a[1]);
-    register({ name, type: 'trigger', label });
-    return E.opts.triggers && E.opts.triggers[name] ? 1 : 0;
+    const prm = register({ name, type: 'trigger', label });
+    return E.opts.triggers && E.opts.triggers[prm.key] ? 1 : 0;
   };
   F.paramstr = (a) => {
     const name = String(a[0]), def = a[1] === undefined ? '' : String(a[1]);
-    register({ name, type: 'str', def });
-    return String(paramVal(name, def));
+    const prm = register({ name, type: 'str', def });
+    return withValue(prm, String(paramVal(name, def)));
   };
   F.paramtime = (a) => {
     const name = String(a[0]), def = a[1] === undefined ? '00:00:00' : String(a[1]), fmt = S(a[2], 0);
@@ -821,42 +849,8 @@ function buildFunctions(E) {
   };
   F.colorrgb = (a) => S(a[0], 0) + S(a[1], 0) * 256 + S(a[2], 0) * 65536;
   F.rgb = F.colorrgb;
-  F.colorblend = (a) => S(a[0], 0);
 
-  // --- plotting
   const copy = (v) => (isArr(v) ? Float64Array.from(v) : v);
-  const kindOf = (style) => ((style & STYLE.Histogram) ? 'hist' : (style & STYLE.Candle) ? 'candle' : (style & STYLE.Bar) ? 'bar'
-    : (style & STYLE.Area) ? 'area' : 'line');
-  const flags = (style) => ({
-    thick: !!(style & STYLE.Thick), dashed: !!(style & STYLE.Dashed), dots: !!(style & STYLE.Dots),
-    noLine: !!(style & STYLE.NoLine) || !!(style & STYLE.NoDraw), hidden: !!(style & STYLE.NoDraw), step: !!(style & STYLE.Staircase),
-    ownScale: !!(style & STYLE.OwnScale), noLabel: !!(style & STYLE.NoLabel), left: !!(style & STYLE.LeftAxisScale),
-  });
-  F.plot = (a) => {
-    const style = S(a[3], 1);
-    const kind = kindOf(style);
-    const p = { kind, name: a[1] === undefined ? '' : String(a[1]), data: copy(A(a[0])), color: copy(a[2] === undefined ? -1 : a[2]), ...flags(style) };
-    if (kind === 'candle' || kind === 'bar') p.ohlc = { o: E.O, h: E.H, l: E.Lw, c: p.data };
-    E.res.plots.push(p); return 0;
-  };
-  F.plotohlc = (a) => {
-    const style = S(a[6], STYLE.Candle);
-    const kind = (style & STYLE.Bar) ? 'bar' : 'candle';
-    E.res.plots.push({
-      kind, name: a[4] === undefined ? '' : String(a[4]), color: copy(a[5] === undefined ? -1 : a[5]),
-      data: copy(A(a[3])), ohlc: { o: copy(A(a[0])), h: copy(A(a[1])), l: copy(A(a[2])), c: copy(A(a[3])) }, ...flags(style),
-    });
-    return 0;
-  };
-  F.plotshapes = (a) => {
-    const shapes = copy(A(a[0]));
-    let pos = 'auto';
-    if (a[3] !== undefined && isArr(a[3])) { if (a[3] === E.Lw) pos = 'below'; else if (a[3] === E.H) pos = 'above'; }
-    E.res.shapes.push({ shapes, color: copy(a[1] === undefined ? -1 : a[1]), position: pos, offset: S(a[4], 0) });
-    return 0;
-  };
-  F.plotgrid = (a) => { E.res.grids.push({ level: S(a[0], 0), color: a[1] === undefined ? 15 : a[1] }); return 0; };
-
   // --- analysis columns
   F.addcolumn = (a) => {
     E.res.columns.push({ name: a[1] === undefined ? 'Column' : String(a[1]), data: copy(A(a[0])), format: S(a[2], 1.2), text: false });
@@ -866,7 +860,7 @@ function buildFunctions(E) {
     E.res.columns.push({ name: a[1] === undefined ? 'Text' : String(a[1]), data: String(a[0]), format: 0, text: true });
     return 0;
   };
-  return F;
+  return addExtras(F, E, { A, S, STYLE, truthy, strFormat, toStr, colorToHex });
 }
 
 Interp.prototype.binary2 = function (a, b, f) {
@@ -881,7 +875,7 @@ Interp.prototype.binary2 = function (a, b, f) {
 export class AFLEngine {
   /** All function and constant names the interpreter knows (used by the help text and tests). */
   functionNames() {
-    const dummy = new Interp({ t: ['2000-01-01'], o: [1], h: [1], l: [1], c: [1], v: [1] }, {}, { params: [], plots: [], shapes: [], grids: [], columns: [], options: {}, stops: [], gui: [], guiState: null });
+    const dummy = new Interp({ t: ['2000-01-01'], o: [1], h: [1], l: [1], c: [1], v: [1] }, {}, { params: [], plots: [], shapes: [], grids: [], columns: [], options: {}, stops: [], gui: [], guiState: null, vap: [], xy: {}, text: '', optParams: [] });
     return Object.keys(dummy.lib).filter((k) => !k.endsWith('_'));
   }
 
@@ -893,9 +887,12 @@ export class AFLEngine {
     const res = {
       plots: [], shapes: [], grids: [], columns: [], params: [], errors: [], title: '',
       buy: null, sell: null, short: null, cover: null, filter: null, vars: {}, usesSignals: false, options: {}, stops: [], gui: [], guiState: null,
+      vap: [], xy: {}, text: '', optParams: [], needSymbols: [], notes: [],
+      vap: [], xy: {}, text: '', optParams: [], needSymbols: [], notes: [],
     };
     if (!bars || !bars.t || bars.t.length === 0) { res.errors.push('No data loaded'); return res; }
     let ast;
+    code = String(code || '').replace(/^\s*#include\s+@LastBacktestFormula.*$/mg, () => opts.lastBacktestFormula || '');
     try { ast = parse(String(code || '')); }
     catch (e) { res.errors.push(e.message); res.errorLine = e.line || 0; return res; }
 
@@ -906,6 +903,8 @@ export class AFLEngine {
       else { res.errors.push(`Internal error: ${e && e.message ? e.message : e}`); res.errorLine = it.line; }
     }
     res.guiState = it.guiState;
+    res.needSymbols = [...(it.needSymbols || [])];
+    res.gradient = it.gradient || null;
     const g = it.globals, n = it.n;
     const sig = (k) => (g.has(k) ? toArr(g.get(k), n) : null);
     res.buy = sig('buy'); res.sell = sig('sell'); res.short = sig('short'); res.cover = sig('cover');
