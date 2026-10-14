@@ -5,6 +5,7 @@ import { host } from './host.js';
 import { chartEngine } from './chart-engine.js';
 import { pseudoStore } from './pseudo-store.js';
 import { colorToHex } from './afl-engine.js';
+import { categoryStore, TYPES } from './category-store.js';
 import { makeSession, scan, explore, backtest, optimize, buildBreadth, toCSV, METRICS } from './analysis-core.js';
 
 const MODES = { scan: 'Scan', explore: 'Explore', backtest: 'Backtest', optimize: 'Optimize' };
@@ -103,13 +104,29 @@ export function openAnalysis({ formulaId = null, mode = null } = {}) {
 
     // what to apply to
     const apply = el('select', INPUT + ' w-full');
-    [['current', 'Current symbol only'], ['first', 'First N symbols of the database'], ['list', 'My list of symbols']].forEach(([v, l]) => { const o = el('option', '', l); o.value = v; apply.appendChild(o); });
+    [['current', 'Current symbol only'], ['first', 'First N symbols of the database'], ['category', 'A category / watchlist…'], ['list', 'My list of symbols']].forEach(([v, l]) => { const o = el('option', '', l); o.value = v; apply.appendChild(o); });
     const nIn = el('input', INPUT + ' w-full'); nIn.type = 'number'; nIn.value = 30; nIn.min = 1; nIn.max = 3000;
-    const listIn = el('input', INPUT + ' w-full'); listIn.placeholder = 'RELIANCE, TCS, INFY'; listIn.autocomplete = 'off';
+    const listIn = el('input', INPUT + ' w-full'); listIn.placeholder = 'RELIANCE, TCS, or a watchlist name'; listIn.autocomplete = 'off';
+    const catSel = el('select', INPUT + ' w-full'); const catInfo = el('div', 'text-[10px] text-slate-400');
+    const fillCats = (keep) => {
+      const st = categoryStore(), all = host.symbols(); catSel.innerHTML = '';
+      for (const t of TYPES) {
+        const opts = st.options(all, { withEmpty: false, types: [t.id] }); if (!opts.length) continue;
+        const g = document.createElement('optgroup'); g.label = t.label;
+        opts.forEach((o) => { const op = el('option', '', `${o.name} (${o.count})`); op.value = o.key; g.appendChild(op); }); catSel.appendChild(g);
+      }
+      if (!catSel.options.length) { const op = el('option', '', 'No lists yet — tap Manage'); op.value = ''; catSel.appendChild(op); }
+      if (keep) catSel.value = keep; showCat();
+    };
+    const showCat = () => { const n = catSel.value ? categoryStore().resolve(catSel.value, host.symbols()).length : 0; catInfo.textContent = catSel.value ? `${n} symbols will be analysed (symbols missing from the database are skipped)` : ''; };
+    catSel.onchange = showCat;
+    const manage = el('button', BTN + ' w-full', 'Manage categories & watchlists…'); manage.type = 'button';
+    manage.onclick = async () => { const { openCategories } = await import('./categories-ui.js'); openCategories({ onPick: (key) => { apply.value = 'category'; toggleInputs(); fillCats(key); } }); };
+    const catBox = el('div', 'space-y-1 col-span-2'); catBox.appendChild(catSel); catBox.appendChild(catInfo); catBox.appendChild(manage);
     const row1 = el('div', 'grid grid-cols-2 gap-2');
     row1.appendChild(labeled('Apply to', apply)); const nWrap = labeled('N symbols / list', el('div')); nWrap.lastChild.replaceWith(nIn); row1.appendChild(nWrap);
-    body.appendChild(row1);
-    const toggleInputs = () => { nIn.style.display = apply.value === 'first' ? '' : 'none'; listIn.style.display = apply.value === 'list' ? '' : 'none'; };
+    body.appendChild(row1); body.appendChild(catBox);
+    const toggleInputs = () => { nIn.style.display = apply.value === 'first' ? '' : 'none'; listIn.style.display = apply.value === 'list' ? '' : 'none'; catBox.style.display = apply.value === 'category' ? '' : 'none'; if (apply.value === 'category') fillCats(catSel.value); };
     nWrap.appendChild(listIn); apply.onchange = toggleInputs; toggleInputs();
 
     const fromIn = el('input', INPUT + ' w-full'); fromIn.type = 'date';
@@ -145,7 +162,8 @@ export function openAnalysis({ formulaId = null, mode = null } = {}) {
 
     const symbolsToUse = () => {
       if (apply.value === 'current') return [host.symbol()];
-      if (apply.value === 'list') return listIn.value.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+      if (apply.value === 'category') return catSel.value ? categoryStore().resolve(catSel.value, host.symbols()) : [];
+      if (apply.value === 'list') { const st = categoryStore(); const out = []; for (const w of listIn.value.split(/[,\n]+/).map((x) => x.trim()).filter(Boolean)) { const hit = /\s/.test(w) || st.find(w) ? st.find(w) : null; if (hit && hit.type !== 'all') out.push(...st.resolve(`${hit.type}|${hit.name}`, host.symbols())); else out.push(...w.split(/\s+/)); } return [...new Set(out.map((x) => x.toUpperCase()))]; }
       return host.symbols().slice(0, Math.max(1, Number(nIn.value) || 30));
     };
     const overrides = () => {
@@ -160,6 +178,7 @@ export function openAnalysis({ formulaId = null, mode = null } = {}) {
     const setBusy = (b) => { Object.values(buttons).forEach((x) => { x.disabled = b; x.classList.toggle('opacity-50', b); }); bre.disabled = b; stopBtn.classList.toggle('hidden', !b); };
     const onProgress = (i, n, s) => { progress.textContent = n ? `${i} / ${n}  ${s}` : ''; };
 
+    const saveBtn = (syms, name) => { const u = [...new Set(syms)]; const b = el('button', BTN + ' w-full', `★ Save these ${u.length} symbols as a watchlist…`); b.type = 'button'; b.onclick = async () => { const { saveSymbolsAsWatchlist } = await import('./categories-ui.js'); await saveSymbolsAsWatchlist(u, name || 'Analysis results'); }; return b; };
     const run = async (mode) => {
       const f = formulaStore.get(fsel.value); if (!f) { toast('Choose a formula'); return; }
       const symbols = symbolsToUse(); if (!symbols.length) { toast('No symbols to analyse'); return; }
@@ -171,12 +190,12 @@ export function openAnalysis({ formulaId = null, mode = null } = {}) {
           const r = await scan({ ...common, lastBars: Math.max(1, Number(lastN.value) || 1) });
           showErrors(r.errors);
           if (!r.rows.length) out.appendChild(el('div', 'text-xs text-slate-400', 'No signals. A scan needs Buy / Sell / Short / Cover rules in the formula (or use Explore for Filter + AddColumn).'));
-          else out.appendChild(table(['Symbol', 'Date', 'Signal', 'Close'], r.rows.map((x) => [x.symbol, x.date, x.signal, x.close]), { onRow: (row) => host.openSymbol && host.openSymbol(row[0]) }));
+          else { out.appendChild(saveBtn(r.rows.map((x) => x.symbol), f.name + ' scan')); out.appendChild(table(['Symbol', 'Date', 'Signal', 'Close'], r.rows.map((x) => [x.symbol, x.date, x.signal, x.close]), { onRow: (row) => host.openSymbol && host.openSymbol(row[0]) })); }
         } else if (mode === 'explore') {
           const r = await explore(common);
           showErrors(r.errors);
           if (!r.rows.length && !Object.keys(r.xy).length) out.appendChild(el('div', 'text-xs text-slate-400', 'Nothing passed the Filter. An exploration needs Filter = condition; and AddColumn(...).'));
-          else out.appendChild(table(['Symbol', 'Date', ...r.columns], r.rows.map((x) => [x.symbol, x.date, ...r.columns.map((c) => x.values[c])]), { onRow: (row) => host.openSymbol && host.openSymbol(row[0]) }));
+          else { out.appendChild(saveBtn(r.rows.map((x) => x.symbol), f.name + ' exploration')); out.appendChild(table(['Symbol', 'Date', ...r.columns], r.rows.map((x) => [x.symbol, x.date, ...r.columns.map((c) => x.values[c])]), { onRow: (row) => host.openSymbol && host.openSymbol(row[0]) })); }
           for (const [name, c] of Object.entries(r.xy)) out.appendChild(scatter(name, c));
         } else if (mode === 'backtest') {
           const r = await backtest({ ...common, overrides: overrides() });

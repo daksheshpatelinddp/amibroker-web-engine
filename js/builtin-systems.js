@@ -279,6 +279,18 @@ AddColumn( Close, "Close", 1.2 );
 AddColumn( MA( C, 10 ), "MA10", 1.2 );
 AddColumn( MA( C, 50 ), "MA50", 1.2 );`, { kind: 'exploration' }),
 
+    f('scan-watchlist', 'Scan: Only symbols in a watchlist / favorites (template)', 'Systems', 'Shows how a formula can look at categories: InWatchListName, InFavorites, InSector, InGroup. Change the watchlist name in the Param', R`
+// Only symbols that are in the watchlist you name (make lists in Tools > Symbols, Categories, Watchlists)
+list = ParamStr( "Watchlist name", "Swing" );
+useFav = ParamToggle( "Or use Favorites", "No|Yes", 0 );
+member = IIf( useFav, InFavorites(), InWatchListName( list ) );
+Buy  = Cross( C, MA( C, 20 ) );
+Sell = Cross( MA( C, 20 ), C );
+Filter = member AND Status("lastbarinrange") AND C > MA( C, 50 );
+AddColumn( Close, "Close", 1.2 );
+AddColumn( ROC( C, 20 ), "ROC 20", 1.2 );
+AddTextColumn( list, "Watchlist" );`, { kind: 'exploration' }),
+
     // ------------------------------------------------------------------ GUI tutorial (kept from the previous version)
     f('gui-demo', 'GUI Controls Demo - buttons, check boxes, slider on the chart', 'GUI (on-chart controls)', 'Learn the Gui* functions: a check box, slider and button drawn on the chart that change what is plotted. Read the comments in the formula', R`
 // ======================================================================

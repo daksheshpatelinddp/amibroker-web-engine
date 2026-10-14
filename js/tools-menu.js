@@ -9,6 +9,7 @@ const ITEMS = [
   { icon: '✨', label: 'AI Formula Assistant…', hint: 'Describe it in plain English', run: async () => (await import('./ai-assistant.js')).openAIAssistant() },
   { sep: true },
   { icon: '🔎', label: 'Analysis: Scan · Explore · Backtest · Optimize…', hint: 'Run any formula over many symbols', run: async () => (await import('./analysis.js')).openAnalysis() },
+  { icon: '🗂', label: 'Symbols · Categories · Watchlists…', hint: 'Groups, sectors, watchlists, favorites; import TXT / TLS', run: async () => (await import('./categories-ui.js')).openCategories() },
   { icon: '🕯', label: 'Price style…', hint: 'Candles, OHLC bars, line or area for Price formulas', run: async () => openPriceStyle() },
   { sep: true },
   { icon: '❓', label: 'AFL Reference', hint: 'Functions you can use', run: () => openReference() },
@@ -61,4 +62,5 @@ export function initToolsMenu(rootId = 'tools-root') {
   document.addEventListener('pointerdown', (e) => { if (!root.contains(e.target)) hide(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
   root.appendChild(btn); root.appendChild(menu);
+  import('./categories-ui.js').then((m) => m.initFavoriteStar()).catch((e) => console.warn('Favorite star failed', e));
 }

@@ -35,6 +35,7 @@ LOGIC / SERIES
  Max(a,b)  Min(a,b)  Abs  Sqrt  Log  Log10  Exp  Int  Floor  Ceil  Round(x,decimals)  Sign  Sin  Cos  Tan  Atan  Mod(a,b)
  Nz(x) (Null to 0)  IsNull(x)  LastValue(array)  BeginValue(array)  BarIndex()
 OTHER SYMBOLS: Foreign("SYMBOL","C")  (fields O H L C V)  SetForeign("SYMBOL") ... RestorePriceArrays()  PlotForeign("SYMBOL","name",color,style)
+CATEGORIES: InWatchList(n) InWatchListName("name") InFavorites() InGroup(n) InMarket(n) InSector(n) InIndustry(n) InIndex(n)  GroupID() MarketID() SectorID() IndustryID()  CategoryGetSymbols(categoryWatchlist,n) (comma list)  CategoryGetName(cat,n)  CategoryFind("name",cat)  CategoryAddSymbol("SYM",cat,n)  CategoryRemoveSymbol  (cat = categoryMarket categoryGroup categorySector categoryIndustry categoryWatchlist categoryFavorite categoryIndex categoryAll; n = position in the list, starting at 0)
 DATE / SYMBOL: DateTime() DateTimeToStr(x) DateNum() (YYMMDD from 1900)  Day()  Month()  Year()  DayOfWeek() (0=Sunday)  Name()  Interval() (seconds per bar: daily 86400)
 STATUS: Status("action") (actionIndicator actionCommentary actionScan actionExplore actionBacktest actionOptimize)  Status("firstvisiblebar") Status("lastbarinrange") Status("stocknum")
 VARIABLES / TEXT: VarSet("name",x)  VarGet("name")  printf("%s",text)  WriteIf(cond,"a","b")  StrExtract(list,i)  StrFind StrMid StrLeft StrRight StrReplace StrToNum

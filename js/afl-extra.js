@@ -3,6 +3,8 @@
 import * as L from './afl-lib.js';
 import { isArr, newArr } from './afl-lib.js';
 import { singleEquity, optionsFromResult } from './bt-core.js';
+import { categoryStore } from './category-store.js';
+import { host } from './host.js';
 
 const BASE_FIELDS = ['Open', 'High', 'Low', 'Close', 'Volume', 'Open Interest', 'Average'];
 
@@ -278,6 +280,30 @@ export function addExtras(F, E, H) {
   };
   F.xychartsetaxis = (a) => { const c = xy(String(a[0])); c.xLabel = String(a[1] === undefined ? 'X' : a[1]); c.yLabel = String(a[2] === undefined ? 'Y' : a[2]); return 0; };
   F.gettextwidth = () => 0;
+  // ------------------------------------------------------------------ categories / watchlists (AmiBroker: InWatchList, CategoryGetSymbols ...)
+  const CAT = ['markets', 'groups', 'sectors', 'industries', 'watchlists', 'favorites', 'indexes', 'all'];
+  const catType = (c) => CAT[S(c)] || 'watchlists';
+  const catNames = (type) => categoryStore().names(type).filter((x) => x !== '(Unassigned)');
+  const catName = (type, num) => catNames(type)[S(num)];
+  const me = () => String(E.opts.symbol || '').toUpperCase();
+  const inCat = (type, name) => (name !== undefined && categoryStore().categoriesOf(me()).some((c) => c.type === type && c.name === name) ? 1 : 0);
+  F.inwatchlist = (a) => inCat('watchlists', catName('watchlists', a[0]));
+  F.inwatchlistname = (a) => { const h = categoryStore().find(String(a[0]), 'watchlists'); return h ? inCat('watchlists', h.name) : 0; };
+  F.ingroup = (a) => inCat('groups', catName('groups', a[0]));
+  F.inmarket = (a) => inCat('markets', catName('markets', a[0]));
+  F.insector = (a) => inCat('sectors', catName('sectors', a[0]));
+  F.inindustry = (a) => inCat('industries', catName('industries', a[0]));
+  F.inindex = (a) => inCat('indexes', catName('indexes', a[0]));
+  F.infavorites = () => (categoryStore().isFavorite(me()) ? 1 : 0);
+  F.categorygetname = (a) => catName(catType(a[0]), a[1]) || '';
+  F.categorygetsymbols = (a) => { const t = catType(a[0]), st = categoryStore(), nm = t === 'all' ? 'ALL' : t === 'favorites' ? 'Favorites' : catName(t, a[1]); return nm === undefined ? '' : st.members(t, nm, E.opts.allSymbols || host.symbols() || []).join(','); };
+  F.getcategorysymbols = F.categorygetsymbols;
+  F.categoryfind = (a) => { const t = catType(a[1]); const i = catNames(t).findIndex((x) => x.toLowerCase() === String(a[0]).toLowerCase()); return i; };
+  F.categoryaddsymbol = (a) => { const t = catType(a[1]), nm = t === 'favorites' ? 'Favorites' : catName(t, a[2]); return nm === undefined ? 0 : (categoryStore().addSymbols(t, nm, [String(a[0] || me())]) ? 1 : 0); };
+  F.categoryremovesymbol = (a) => { const t = catType(a[1]), nm = t === 'favorites' ? 'Favorites' : catName(t, a[2]); return nm === undefined ? 0 : (categoryStore().removeSymbols(t, nm, [String(a[0] || me())]) ? 1 : 0); };
+  F.categorysetname = (a) => { const t = catType(a[1]), old = catName(t, a[2]); return old === undefined ? 0 : (categoryStore().rename(t, old, String(a[0])) ? 1 : 0); };
+  const idOf = (type) => { const c = categoryStore().categoriesOf(me()).find((x) => x.type === type); return c ? Math.max(0, catNames(type).indexOf(c.name)) : 0; };
+  F.groupid = () => idOf('groups'); F.marketid = () => idOf('markets'); F.sectorid = () => idOf('sectors'); F.industryid = () => idOf('industries');
   F.lastvalue = (a) => { const v = a[0]; return isArr(v) ? v[v.length - 1] : v; };
   F.selectedvalue = (a) => { const v = a[0]; if (!isArr(v)) return v; const i = E.opts.selectedBar !== undefined ? E.opts.selectedBar : v.length - 1; return v[i]; };
   return F;
