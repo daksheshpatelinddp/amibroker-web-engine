@@ -1,1 +1,1 @@
-{ "type": "module", "private": true, "scripts": { "test": "node tests/afl-test.mjs && node tests/analysis-test.mjs && node tests/chart-mock-test.mjs" } }
+{ "type": "module", "private": true, "scripts": { "test": "node tests/afl-test.mjs && node tests/analysis-test.mjs && node tests/chart-mock-test.mjs && node tests/category-test.mjs" } }
