@@ -93,6 +93,10 @@ TRADING RULES (scanner / exploration / backtest)
  BuyPrice = Close; SellPrice = Close; (optional)   PositionSize = -10;  (-10 means 10% of equity)
  Filter = condition;                                   (scan / exploration: only bars where this is true are listed)
  AddColumn(array,"name",1.2);   AddTextColumn("text","name");     (exploration result columns)
+ AddColumn(array,"name",format,fg,bg,width) format: 1.2 digits | formatChar | formatDateTime;  AddMultiTextColumn(array,"a\nb\nc","name");
+ AddRankColumn();  SetSortColumns(2,-4) (column 2 up, column 4 down);  AddSummaryRows(1+2+4+8+16)  total,min,max,average,count;  Exclude = 1 hides a row
+ OptimizerSetEngine("spso");  OptimizerSetOption("Runs",100);  ApplyStop(type,mode,amount,exitAtStop,volatile,reEntryDelay,validFrom,validTo)
+ Futures: PointValue, MarginDeposit, RoundLotSize, TickSize variables
  SetOption("InitialEquity",100000) "MaxOpenPositions" "CommissionMode" (1 %, 2 per trade, 3 per share) "CommissionAmount" "WorstRankHeld" "AllowPositionShrinking" ...
  SetTradeDelays(buy,sell,short,cover)  SetPositionSize(size, spsPercentOfEquity | spsValue | spsShares)  PositionSize = -25 (25% of equity)
  ApplyStop(stopTypeLoss|stopTypeProfit|stopTypeTrailing|stopTypeNBar, stopModePercent|stopModePoint, amount, exitAtStop)

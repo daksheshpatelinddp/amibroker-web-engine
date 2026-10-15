@@ -5,6 +5,7 @@ import { isArr, newArr } from './afl-lib.js';
 import { singleEquity, optionsFromResult } from './bt-core.js';
 import { categoryStore } from './category-store.js';
 import { host } from './host.js';
+import { addAnalysis } from './afl-analysis.js';
 
 const BASE_FIELDS = ['Open', 'High', 'Low', 'Close', 'Volume', 'Open Interest', 'Average'];
 
@@ -306,5 +307,6 @@ export function addExtras(F, E, H) {
   F.groupid = () => idOf('groups'); F.marketid = () => idOf('markets'); F.sectorid = () => idOf('sectors'); F.industryid = () => idOf('industries');
   F.lastvalue = (a) => { const v = a[0]; return isArr(v) ? v[v.length - 1] : v; };
   F.selectedvalue = (a) => { const v = a[0]; if (!isArr(v)) return v; const i = E.opts.selectedBar !== undefined ? E.opts.selectedBar : v.length - 1; return v[i]; };
+  addAnalysis(F, E, H);
   return F;
 }

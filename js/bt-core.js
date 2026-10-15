@@ -1,115 +1,154 @@
 // Back-testing core. Pure functions (no DOM, no AFL): turns Buy/Sell/Short/Cover signals into trades,
 // sizes them in a portfolio and reports the statistics.  Follows AmiBroker's two-pass design:
-//   pass 1 (per symbol)  -> rawTrades(): honour trade delays, prices, stops; remove redundant signals
-//   pass 2 (portfolio)   -> portfolio(): rank by PositionScore, apply MaxOpenPositions, position size, cash, commission
+//   pass 1 (per symbol)  -> rawTrades(): trade delays, trade prices, built-in stops, hold-min-bars; removes redundant signals
+//   pass 2 (portfolio)   -> portfolio(): rank by PositionScore, MaxOpenPositions/Long/Short, position size, cash, margin, commission, interest
 //   rotational mode      -> rotational(): rebalance every bar by PositionScore
+//   individual mode      -> individual(): every symbol gets its own account
+import { computeStats } from './bt-report.js';
 
 const truthy = (x) => x !== 0 && x !== undefined && !Number.isNaN(x);
 const at = (arr, i, d) => (arr && typeof arr === 'object' ? arr[i] : (arr === undefined ? d : arr));
+const dayNum = (d) => Date.parse(d) / 86400000;
 
 export const DEFAULT_OPTIONS = {
-  initialEquity: 100000, maxOpenPositions: 10, commissionMode: 0, commissionAmount: 0, allowSameBarExit: 1,
-  allowPositionShrinking: 0, activateStopsImmediately: 0, priceBounds: 1, minShares: 1, roundLotSize: 0,
-  worstRankHeld: 0, reverseEntrySignalForce: 0, holdMinBars: 0, interestRate: 0, marginRequirement: 100,
-  tradeDelays: [0, 0, 0, 0], positionSize: { size: 100, type: 2 }, mode: 0,
+  initialEquity: 100000, positions: 'both', futuresMode: 0, minShares: 1, minPosValue: 0, accountMargin: 100, roundLotSize: 0, tickSize: 0,
+  commissionMode: 0, commissionAmount: 0, commissionTable: null, interestRate: 0,
+  allowPositionShrinking: 0, activateStopsImmediately: 0, reverseEntrySignalForce: 1, allowSameBarExit: 1, priceBounds: 1,
+  tradePrices: { buy: 'close', sell: 'close', short: 'close', cover: 'close' }, tradeDelays: [0, 0, 0, 0], stops: [],
+  maxOpenPositions: 10, maxOpenLong: 0, maxOpenShort: 0, separateLongShortRank: 0, worstRankHeld: 0, positionSize: { size: 100, type: 2 },
+  limitVolPct: 0, noVolLimitIfZero: 1, usePrevBarEquity: 0, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0,
+  riskFree: 5, mode: 0, reportMode: 0,
 };
 
-/** Merge the SetOption()/SetTradeDelays()/SetPositionSize() calls recorded by the AFL engine into a full option set. */
-export function optionsFromResult(res, overrides = {}) {
-  const o = { ...DEFAULT_OPTIONS, tradeDelays: [...DEFAULT_OPTIONS.tradeDelays], positionSize: { ...DEFAULT_OPTIONS.positionSize } };
-  const map = { initialequity: 'initialEquity', maxopenpositions: 'maxOpenPositions', commissionmode: 'commissionMode',
-    commissionamount: 'commissionAmount', allowsamebarexit: 'allowSameBarExit', allowpositionshrinking: 'allowPositionShrinking',
-    activatestopsimmediately: 'activateStopsImmediately', pricebounds: 'priceBounds', minshares: 'minShares', roundlotsize: 'roundLotSize',
-    worstrankheld: 'worstRankHeld', reverseentrysignalforce: 'reverseEntrySignalForce', holdminbars: 'holdMinBars',
-    interestrate: 'interestRate', marginrequirement: 'marginRequirement' };
+const FORMULA_KEYS = {
+  initialequity: 'initialEquity', maxopenpositions: 'maxOpenPositions', maxopenlong: 'maxOpenLong', maxopenshort: 'maxOpenShort',
+  separatelongshortrank: 'separateLongShortRank', commissionmode: 'commissionMode', commissionamount: 'commissionAmount',
+  allowsamebarexit: 'allowSameBarExit', allowpositionshrinking: 'allowPositionShrinking', activatestopsimmediately: 'activateStopsImmediately',
+  pricebounds: 'priceBounds', priceboundchecking: 'priceBounds', minshares: 'minShares', minposvalue: 'minPosValue', roundlotsize: 'roundLotSize', ticksize: 'tickSize',
+  worstrankheld: 'worstRankHeld', reverseentrysignalforce: 'reverseEntrySignalForce', reversesignalforcesexit: 'reverseEntrySignalForce',
+  holdminbars: 'holdMinBars', holdmindays: 'holdMinDays', earlyexitbars: 'earlyExitBars', earlyexitdays: 'earlyExitDays', earlyexitfee: 'earlyExitFee',
+  interestrate: 'interestRate', marginrequirement: 'accountMargin', accountmargin: 'accountMargin', futuresmode: 'futuresMode',
+  usepreviousbarequityforpossizing: 'usePrevBarEquity', portfolioreportmode: 'reportMode',
+};
+
+/**
+ * Merge, in AmiBroker's order of priority:  Settings window (base)  <  the formula's SetOption / SetTradeDelays / SetPositionSize  <  overrides.
+ */
+export function optionsFromResult(res, overrides = {}, base = {}) {
+  const o = { ...DEFAULT_OPTIONS, ...base, tradeDelays: [...(base.tradeDelays || DEFAULT_OPTIONS.tradeDelays)], tradePrices: { ...DEFAULT_OPTIONS.tradePrices, ...(base.tradePrices || {}) },
+    positionSize: { ...(base.positionSize || DEFAULT_OPTIONS.positionSize) }, stops: [...(base.stops || [])] };
   const r = (res && res.options) || {};
-  for (const [k, v] of Object.entries(r)) if (map[k] && Number.isFinite(Number(v))) o[map[k]] = Number(v);
+  for (const [k, v] of Object.entries(r)) { const key = FORMULA_KEYS[k]; if (!key) continue; const x = typeof v === 'boolean' ? (v ? 1 : 0) : Number(v); if (Number.isFinite(x)) o[key] = x; }
   if (Array.isArray(r.tradedelays)) for (let i = 0; i < 4; i++) if (Number.isFinite(r.tradedelays[i])) o.tradeDelays[i] = r.tradedelays[i];
   if (r.positionsizeset) o.positionSize = { ...r.positionsizeset };
   if (Number.isFinite(r.backtestmode)) o.mode = r.backtestmode;
   return { ...o, ...overrides };
 }
 
+const priceAt = (b, f, i) => (f === 'open' ? b.o[i] : f === 'high' ? b.h[i] : f === 'low' ? b.l[i] : f === 'avg' ? (b.h[i] + b.l[i]) / 2 : b.c[i]);
+
+/** Stops from the Settings window are replaced by ApplyStop() calls of the same type in the formula. */
+function mergeStops(fromSettings, fromFormula) {
+  const f = fromFormula || [], have = new Set(f.map((s) => s.type));
+  return [...(fromSettings || []).filter((s) => !have.has(s.type)), ...f];
+}
+
 /**
  * Pass 1. bars: {t,o,h,l,c}; sig: {buy,sell,short,cover (arrays|null), buyPrice,... (array|scalar|undefined), stops:[...]}
- * Returns raw trades [{dir:1|-1, ei, xi, ep, xp, reason}]. An open trade at the end is closed on the last bar (flag open:true).
+ * Returns raw trades [{dir:1|-1, ei, xi, ep, xp, reason}]. A trade still open on the last bar is closed there (open:true).
  */
 export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   const n = bars.t.length, trades = [];
-  const [dB, dS, dSh, dC] = opt.tradeDelays;
+  const [dB, dS, dSh, dC] = opt.tradeDelays || [0, 0, 0, 0];
+  const tp = { ...DEFAULT_OPTIONS.tradePrices, ...(opt.tradePrices || {}) };
   const sg = (arr, i) => (arr && i >= 0 && i < n ? truthy(arr[i]) : false);
-  const price = (arr, i, d) => {
+  const px = (arr, field, i) => {
     let p = at(arr, i, undefined);
-    if (p === undefined || Number.isNaN(p)) p = d;
+    if (p === undefined || Number.isNaN(p)) p = priceAt(bars, field, i);
     if (opt.priceBounds) p = Math.min(bars.h[i], Math.max(bars.l[i], p));
     return p;
   };
-  const stops = sig.stops || [];
-  let pos = null;
+  const sellPx = (i) => px(sig.sellPrice, tp.sell, i), coverPx = (i) => px(sig.coverPrice, tp.cover, i);
+  const buyPx = (i) => px(sig.buyPrice, tp.buy, i), shortPx = (i) => px(sig.shortPrice, tp.short, i);
+  const exitPx = (dir, i) => (dir > 0 ? sellPx(i) : coverPx(i));
+  const stops = mergeStops(opt.stops, sig.stops);
+  const tick = opt.tickSize > 0 ? opt.tickSize : 0, snap = (x) => (tick ? Math.round(x / tick) * tick : x);
+  const longOK = opt.positions !== 'short', shortOK = opt.positions !== 'long';
+  const holdBars = opt.holdMinBars || 0, holdDays = opt.holdMinDays || 0;
+  let pos = null, blockUntil = -1;
+
+  const close = (i, p, why) => { trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
+  const open = (dir, i, p) => { const sb = i - (dir > 0 ? dB : dSh); pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: Math.max(0, sb) }; };
+
   for (let i = 0; i < n; i++) {
     if (!(bars.c[i] > 0)) continue;
-    // ---- stops (active from the bar after entry unless ActivateStopsImmediately)
-    if (pos && (i > pos.ei || opt.activateStopsImmediately)) {
-      const dir = pos.dir;
-      pos.hi = Math.max(pos.hi, bars.h[i]); pos.lo = Math.min(pos.lo, bars.l[i]);
-      for (const s of stops) {
-        const amt = at(s.amountArr || s.amount, i, s.amount);
-        if (!(s.mode > 0 || s.type === 3)) continue;
-        let level = NaN, hit = false;
-        if (s.type === 3) {                                  // N-bar stop: exit at close after N bars
-          if (i - pos.ei >= amt) { pos.exit = { i, p: bars.c[i], why: 'nbar' }; }
-        } else {
-          const pct = s.mode === 1 || s.mode === 3, base = s.type === 2 ? (dir > 0 ? pos.hi : pos.lo) : pos.ep;
-          const off = pct ? base * amt / 100 : amt;
-          if (s.type === 0) level = dir > 0 ? pos.ep - (pct ? pos.ep * amt / 100 : amt) : pos.ep + (pct ? pos.ep * amt / 100 : amt);
-          else if (s.type === 1) level = dir > 0 ? pos.ep + (pct ? pos.ep * amt / 100 : amt) : pos.ep - (pct ? pos.ep * amt / 100 : amt);
-          else level = dir > 0 ? base - off : base + off;
-          if (s.type === 1) hit = dir > 0 ? bars.h[i] >= level : bars.l[i] <= level;
-          else hit = dir > 0 ? bars.l[i] <= level : bars.h[i] >= level;
-          if (hit && !pos.exit) {
-            let p = level;
-            if (s.exitAtStop === 0 || s.exitAtStop === undefined) p = bars.c[i];               // exit at the usual exit price of that bar
-            else if (s.type !== 1) p = dir > 0 ? Math.min(level, bars.o[i]) : Math.max(level, bars.o[i]); // gap beyond the stop: open price
-            pos.exit = { i, p, why: ['loss', 'profit', 'trail'][s.type] };
+    const dir = pos ? pos.dir : 0;
+    if (pos) { pos.hi = Math.max(pos.hi, bars.h[i]); pos.lo = Math.min(pos.lo, bars.l[i]); }
+    const held = pos ? i - pos.ei : 0;
+    const blocked = pos && (held < holdBars || (holdDays > 0 && dayNum(bars.t[i]) - dayNum(bars.t[pos.ei]) < holdDays));
+    // ---- a stop that fired last bar with ExitAtStop = 2 exits now at the normal price
+    if (pos && !blocked && pos.pending) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(dir, i), why); blockUntil = i + re; }
+    // ---- built-in stops (active from the bar after entry unless ActivateStopsImmediately)
+    if (pos && !blocked && (i > pos.ei || opt.activateStopsImmediately)) {
+      const order = [0, 1, 2, 3];
+      for (const type of order) {
+        for (const s of stops.filter((x) => x.type === type)) {
+          if (!pos) break;
+          if (!(s.mode > 0 || type === 3)) continue;
+          const k = i - pos.ei, from = s.validFrom || 0, to = s.validTo === undefined ? -1 : s.validTo;
+          if (k < from || (to >= 0 && k > to)) continue;
+          const amt = s.amountArr ? (s.volatile ? s.amountArr[i] : s.amountArr[pos.sigBar]) : s.amount;
+          if (!Number.isFinite(amt)) continue;
+          if (type === 3) { if (k >= amt) { close(i, exitPx(dir, i), 'nbar'); blockUntil = i + (s.reentry || 0); } continue; }
+          const pct = s.mode === 1, risk = s.mode === 3;
+          let level;
+          if (type === 0) level = dir > 0 ? pos.ep - (pct ? pos.ep * amt / 100 : amt) : pos.ep + (pct ? pos.ep * amt / 100 : amt);
+          else if (type === 1) level = dir > 0 ? pos.ep + (pct ? pos.ep * amt / 100 : amt) : pos.ep - (pct ? pos.ep * amt / 100 : amt);
+          else {
+            const base = dir > 0 ? pos.hi : pos.lo;
+            if (risk) { const gain = dir > 0 ? pos.hi - pos.ep : pos.ep - pos.lo; if (!(gain > 0)) continue; level = dir > 0 ? pos.ep + gain * (1 - amt / 100) : pos.ep - gain * (1 - amt / 100); }
+            else level = dir > 0 ? base - (pct ? base * amt / 100 : amt) : base + (pct ? base * amt / 100 : amt);
+          }
+          level = snap(level);
+          const eas = s.exitAtStop === undefined ? 0 : s.exitAtStop;
+          const why = ['loss', 'profit', 'trail'][type];
+          if (eas === 0) {                                  // only the trade price is compared with the stop
+            const p = exitPx(dir, i), hit = type === 1 ? (dir > 0 ? p >= level : p <= level) : (dir > 0 ? p <= level : p >= level);
+            if (hit) { close(i, p, why); blockUntil = i + (s.reentry || 0); }
+          } else {
+            const hit = type === 1 ? (dir > 0 ? bars.h[i] >= level : bars.l[i] <= level) : (dir > 0 ? bars.l[i] <= level : bars.h[i] >= level);
+            if (!hit) continue;
+            if (eas === 2) { pos.pending = why; pos.pendingReentry = s.reentry || 0; }
+            else {
+              let p = level;
+              if (type !== 1) p = dir > 0 ? Math.min(level, bars.o[i]) : Math.max(level, bars.o[i]);     // gap beyond the stop: filled at the open
+              else p = dir > 0 ? Math.max(level, bars.o[i]) : Math.min(level, bars.o[i]);
+              p = Math.min(bars.h[i], Math.max(bars.l[i], p));
+              close(i, p, why); blockUntil = i + (s.reentry || 0);
+            }
           }
         }
+        if (!pos) break;
       }
-      if (pos.exit) { trades.push({ dir, ei: pos.ei, xi: pos.exit.i, ep: pos.ep, xp: pos.exit.p, reason: pos.exit.why, hi: pos.hi, lo: pos.lo }); pos = null; }
     }
-    // ---- exits by signal
-    if (pos && i - pos.ei >= (opt.holdMinBars || 0)) {
-      const ex = pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC);
-      if (ex) {
-        const p = pos.dir > 0 ? price(sig.sellPrice, i, bars.c[i]) : price(sig.coverPrice, i, bars.c[i]);
-        trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: 'signal', hi: pos.hi, lo: pos.lo }); pos = null;
-      }
+    // ---- exits by signal, and exits forced by a reverse entry signal
+    if (pos && !blocked) {
+      const exitSig = pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC);
+      const revSig = opt.reverseEntrySignalForce && (pos.dir > 0 ? (shortOK && sg(sig.short, i - dSh)) : (longOK && sg(sig.buy, i - dB)));
+      if (exitSig) close(i, exitPx(pos.dir, i), 'signal');
+      else if (revSig) close(i, exitPx(pos.dir, i), 'reverse');
     }
     // ---- entries
-    if (!pos) {
-      const lg = sg(sig.buy, i - dB), sh = sg(sig.short, i - dSh);
-      let dir = 0; if (lg) dir = 1; else if (sh) dir = -1;
-      if (dir) {
-        const p = dir > 0 ? price(sig.buyPrice, i, bars.c[i]) : price(sig.shortPrice, i, bars.c[i]);
-        pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: dir > 0 ? i - dB : i - dSh };
-        if (opt.allowSameBarExit && (dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC))) {
-          const xp = dir > 0 ? price(sig.sellPrice, i, bars.c[i]) : price(sig.coverPrice, i, bars.c[i]);
-          trades.push({ dir, ei: i, xi: i, ep: p, xp, reason: 'signal', hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null;
-        }
-      }
-    } else if (pos && opt.reverseEntrySignalForce) {
-      const rev = pos.dir > 0 ? sg(sig.short, i - dSh) : sg(sig.buy, i - dB);
-      if (rev) {
-        const p = bars.c[i];
-        trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: 'reverse', hi: pos.hi, lo: pos.lo });
-        const nd = -pos.dir; pos = { dir: nd, ei: i, ep: p, hi: p, lo: p, sigBar: i };
+    if (!pos && i >= blockUntil) {
+      const lg = longOK && sg(sig.buy, i - dB), sh = shortOK && sg(sig.short, i - dSh);
+      const d = lg ? 1 : sh ? -1 : 0;
+      if (d) {
+        const p = d > 0 ? buyPx(i) : shortPx(i); open(d, i, p);
+        if (opt.allowSameBarExit && (d > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC))) close(i, exitPx(d, i), 'signal');
       }
     }
-    if (pos && pos.sigBar === undefined) pos.sigBar = i;
-    if (pos && pos.entryTagged !== true) { pos.entryTagged = true; pos.sb = pos.sigBar; }
   }
-  if (pos) trades.push({ dir: pos.dir, ei: pos.ei, xi: n - 1, ep: pos.ep, xp: bars.c[n - 1], reason: 'open', open: true, hi: pos.hi, lo: pos.lo });
-  // remember where the entry signal was, so PositionScore / PositionSize can be read from that bar
-  for (const t of trades) t.sigBar = Math.max(0, t.ei - (t.dir > 0 ? opt.tradeDelays[0] : opt.tradeDelays[2]));
+  if (pos) trades.push({ dir: pos.dir, ei: pos.ei, xi: n - 1, ep: pos.ep, xp: bars.c[n - 1], reason: 'open', open: true, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar });
   return trades;
 }
 
@@ -119,31 +158,48 @@ export function singleEquity(bars, sig, opt = DEFAULT_OPTIONS) {
   let cash = opt.initialEquity; const tr = rawTrades(bars, sig, opt);
   let k = 0, cur = null;
   for (let i = 0; i < n; i++) {
-    while (k < tr.length && tr[k].ei === i && !cur) { cur = { ...tr[k], sh: cash / tr[k].ep }; k++; }
+    while (k < tr.length && tr[k].ei === i && !cur) {
+      if (tr[k].xi === i) { cash += tr[k].dir * (cash / tr[k].ep) * (tr[k].xp - tr[k].ep); k++; continue; }
+      cur = { ...tr[k], sh: cash / tr[k].ep }; k++;
+    }
     if (cur && cur.xi === i) { cash += cur.dir * cur.sh * (cur.xp - cur.ep); cur = null; }
     eq[i] = cash + (cur ? cur.dir * cur.sh * (bars.c[i] - cur.ep) : 0);
-    // a trade that closes on its entry bar was consumed above
-    while (k < tr.length && tr[k].ei === i && !cur && tr[k].xi === i) { cash += tr[k].dir * (cash / tr[k].ep) * (tr[k].xp - tr[k].ep); k++; }
   }
   return { equity: eq, trades: tr };
 }
 
-const commission = (opt, value, shares) => {
-  const a = opt.commissionAmount || 0;
-  if (opt.commissionMode === 1) return Math.abs(value) * a / 100;
+/** Commission: mode 1 % of trade, 2 per trade, 3 per share, 0 = the commission table (tiers) when one is defined. */
+export function commissionFor(opt, value, shares) {
+  const a = opt.commissionAmount || 0, v = Math.abs(value);
+  if (opt.commissionMode === 1) return v * a / 100;
   if (opt.commissionMode === 2) return a;
   if (opt.commissionMode === 3) return Math.abs(shares) * a;
+  const t = opt.commissionTable;
+  if (opt.commissionMode === 0 && t) {
+    const tiers = [...(t.tiers || [])].filter((x) => x && ((x.min || 0) > 0 || (x.max || 0) > 0));
+    const basis = (x) => (x.basis === 'shares' ? Math.abs(shares) : v);
+    const tier = tiers.find((x) => basis(x) >= (x.min || 0) && ((x.max || 0) === 0 || basis(x) <= x.max)) || t.default;
+    if (tier) {
+      let c = tier.type === 'share' ? Math.abs(shares) * (tier.amount || 0) : tier.type === 'pct' ? v * (tier.amount || 0) / 100 : (tier.amount || 0);
+      if (tier.minComm > 0) c = Math.max(c, tier.minComm); if (tier.maxComm > 0) c = Math.min(c, tier.maxComm);
+      return c;
+    }
+  }
   return 0;
-};
+}
+
+const lotOf = (u, opt) => (u.roundLot > 0 ? u.roundLot : opt.roundLotSize > 0 ? opt.roundLotSize : 0);
+const roundShares = (sh, lot) => (lot > 0 ? Math.floor(sh / lot + 1e-9) * lot : Math.floor(sh + 1e-9));
 
 /**
- * Pass 2. universe: [{ symbol, bars, trades, score(arr|undefined), size(arr|undefined) }]
- * Returns { trades, equityCurve:[{t,equity,cash,exposure}], stats }.
+ * Pass 2. universe: [{ symbol, bars, trades, score(arr|undefined), size(arr|undefined), pointValue, marginDeposit, roundLot }]
+ * Returns { trades, equityCurve:[{t,equity,cash,exposure,open,events}], stats }.
  */
-export function portfolio(universe, opt = DEFAULT_OPTIONS, benchmark = null) {
+export function portfolio(universe, opt = DEFAULT_OPTIONS) {
   const dates = [...new Set(universe.flatMap((u) => u.bars.t))].sort();
   const idxMap = universe.map((u) => new Map(u.bars.t.map((d, i) => [d, i])));
-  let cash = opt.initialEquity;
+  const fut = !!opt.futuresMode;
+  let cash = opt.initialEquity, prevEq = cash, prevDate = null;
   const open = [], done = [], curve = [];
   const entriesByDate = new Map();
   universe.forEach((u, ui) => {
@@ -152,64 +208,95 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS, benchmark = null) {
       entriesByDate.get(d).push({ ui, tr, score: at(u.score, tr.sigBar, 0) });
     }
   });
-  const px = (ui, d, f) => { const i = idxMap[ui].get(d); return i === undefined ? undefined : universe[ui].bars[f][i]; };
   const lastPx = (p, d) => { const i = idxMap[p.ui].get(d); if (i !== undefined) p.last = universe[p.ui].bars.c[i]; return p.last; };
-  const round = (sh) => { if (opt.roundLotSize > 0) sh = Math.floor(sh / opt.roundLotSize) * opt.roundLotSize; else sh = Math.floor(sh); return sh; };
+  const valueOf = (p, price) => (fut ? p.margin * p.sh + p.dir * p.sh * p.pv * (price - p.ep) : p.dir * p.sh * price);
+  const notional = (p, price) => (fut ? p.margin * p.sh : p.sh * price);
 
   for (const d of dates) {
-    // exits that happen on this date (use the raw trade's own exit bar)
+    const events = [];
+    // interest on uninvested cash (annual rate, per calendar day)
+    if (opt.interestRate && prevDate && cash > 0) cash += cash * opt.interestRate / 100 * Math.max(0, dayNum(d) - dayNum(prevDate)) / 365;
+    prevDate = d;
+    // exits that happen on this date
     for (let k = open.length - 1; k >= 0; k--) {
       const p = open[k], xd = universe[p.ui].bars.t[p.tr.xi];
-      if (xd === d && !(p.tr.open)) {
-        const c = commission(opt, p.sh * p.tr.xp, p.sh);
-        cash += p.dir * p.sh * p.tr.xp - c;                    // long: sell proceeds, short: buy-back cost
-        done.push(finish(p, universe, p.tr.xp, p.tr.xi, c));
+      if (xd === d && !p.tr.open) {
+        const val = notional(p, p.tr.xp);
+        let c = commissionFor(opt, val, p.sh);
+        c += earlyFee(p, p.tr, universe[p.ui].bars.t, opt, val);
+        cash += valueOf(p, p.tr.xp) - c;
+        done.push(finish(p, universe, p.tr.xp, p.tr.xi, c)); events.push(`${p.dir > 0 ? 'Sell' : 'Cover'} ${universe[p.ui].symbol} @ ${p.tr.xp.toFixed(2)} x ${p.sh}`);
         open.splice(k, 1);
       }
     }
     // entries on this date, best score first
-    const cands = (entriesByDate.get(d) || []).sort((a, b) => b.score - a.score);
+    let cands = (entriesByDate.get(d) || []);
+    const byScore = (a, b) => Math.abs(b.score) - Math.abs(a.score);
+    if (opt.separateLongShortRank) {
+      const L = cands.filter((c) => c.tr.dir > 0).sort(byScore), Sh = cands.filter((c) => c.tr.dir < 0).sort(byScore), mix = [];
+      for (let k = 0; k < Math.max(L.length, Sh.length); k++) { if (L[k]) mix.push(L[k]); if (Sh[k]) mix.push(Sh[k]); }
+      cands = mix;
+    } else cands = [...cands].sort(byScore);
     for (const cd of cands) {
       if (open.length >= opt.maxOpenPositions) break;
       const u = universe[cd.ui], tr = cd.tr;
-      let eq = cash; for (const p of open) eq += p.dir * p.sh * (lastPx(p, d) ?? p.ep);   // equity = cash + signed position values
+      if (tr.dir > 0 && opt.maxOpenLong > 0 && open.filter((p) => p.dir > 0).length >= opt.maxOpenLong) continue;
+      if (tr.dir < 0 && opt.maxOpenShort > 0 && open.filter((p) => p.dir < 0).length >= opt.maxOpenShort) continue;
+      let eq = cash; for (const p of open) eq += valueOf(p, lastPx(p, d) ?? p.ep);
+      const sizeEq = opt.usePrevBarEquity ? prevEq : eq;
+      const pv = u.pointValue > 0 ? u.pointValue : 1;
+      let margin = 0; if (fut) { const md = u.marginDeposit || 0; margin = md > 0 ? md : md < 0 ? -md / 100 * tr.ep * pv : tr.ep * pv; }
       let value, shares = 0;
       const sz = at(u.size, tr.sigBar, NaN);
-      if (Number.isFinite(sz) && sz !== 0) value = sz > 0 ? sz : -sz / 100 * eq;
+      if (Number.isFinite(sz) && sz !== 0) value = sz > 0 ? sz : -sz / 100 * sizeEq;
       else {
         const ps = opt.positionSize || { size: 100, type: 2 };
-        value = ps.type === 1 ? ps.size : ps.type === 2 || ps.type === 3 ? ps.size / 100 * eq : NaN;
+        value = ps.type === 1 ? ps.size : ps.type === 2 || ps.type === 3 ? ps.size / 100 * sizeEq : NaN;
         if (ps.type === 4) shares = ps.size;
       }
-      if (!shares) shares = round(value / tr.ep);
-      if (shares < Math.max(1, opt.minShares || 1)) continue;
-      let cost = shares * tr.ep;
-      if (tr.dir > 0 && cost + commission(opt, cost, shares) > cash) {
+      const lot = lotOf(u, opt);
+      if (!shares) shares = roundShares(value / (fut ? margin : tr.ep), lot);
+      if (opt.limitVolPct > 0) { const vol = u.bars.v ? u.bars.v[tr.ei] : 0; if (vol > 0 || !opt.noVolLimitIfZero) shares = Math.min(shares, roundShares(vol * opt.limitVolPct / 100, lot)); }
+      if (shares < Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) continue;
+      const cost = (n) => (fut ? margin * n : n * tr.ep);
+      const bp = eq * 100 / (opt.accountMargin || 100) - open.reduce((s, p) => s + notional(p, p.last ?? p.ep), 0);
+      if (cost(shares) + commissionFor(opt, cost(shares), shares) > bp + 1e-9) {
         if (!opt.allowPositionShrinking) continue;
-        shares = round((cash - commission(opt, cash, 0)) / tr.ep); if (shares < 1) continue; cost = shares * tr.ep;
+        let n2 = shares; while (n2 > 0 && cost(n2) + commissionFor(opt, cost(n2), n2) > bp) n2 = roundShares(n2 * 0.999 - (lot > 0 ? lot : 1), lot);
+        shares = n2; if (shares < Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) continue;
       }
-      const c = commission(opt, cost, shares);
-      cash -= tr.dir * cost + c;                                // long pays, short receives the proceeds
-      open.push({ ui: cd.ui, tr, dir: tr.dir, sh: shares, ep: tr.ep, ed: d, entryCommission: c, last: tr.ep });
-      if (tr.xi === tr.ei) { // exited on the same bar
-        const p = open.pop(), c2 = commission(opt, p.sh * tr.xp, p.sh);
-        cash += p.dir * p.sh * tr.xp - c2;
-        done.push(finish(p, universe, tr.xp, tr.xi, c2));
+      if (opt.minPosValue > 0 && shares * tr.ep < opt.minPosValue) continue;
+      const c = commissionFor(opt, cost(shares), shares);
+      const p = { ui: cd.ui, tr, dir: tr.dir, sh: shares, ep: tr.ep, ed: d, entryCommission: c, last: tr.ep, pv, margin };
+      cash -= (fut ? margin * shares : tr.dir * shares * tr.ep) + c;
+      open.push(p); events.push(`${tr.dir > 0 ? 'Buy' : 'Short'} ${u.symbol} @ ${tr.ep.toFixed(2)} x ${shares}`);
+      if (tr.xi === tr.ei) {                                            // exited on the same bar
+        open.pop(); const val = notional(p, tr.xp); let c2 = commissionFor(opt, val, p.sh); c2 += earlyFee(p, tr, u.bars.t, opt, val);
+        cash += valueOf(p, tr.xp) - c2; done.push(finish(p, universe, tr.xp, tr.xi, c2)); events.push(`${tr.dir > 0 ? 'Sell' : 'Cover'} ${u.symbol} @ ${tr.xp.toFixed(2)} x ${shares}`);
       }
     }
-    // mark to market: equity = cash + signed value of all positions
     let eqv = cash, invested = 0;
-    for (const p of open) { const l = lastPx(p, d) || p.ep; eqv += p.dir * p.sh * l; invested += p.sh * l; }
-    curve.push({ t: d, equity: eqv, cash, exposure: eqv > 0 ? 100 * invested / eqv : 0, open: open.length });
+    for (const p of open) { const l = lastPx(p, d) || p.ep; eqv += valueOf(p, l); invested += notional(p, l); }
+    curve.push({ t: d, equity: eqv, cash, exposure: eqv > 0 ? 100 * invested / eqv : 0, open: open.length, events });
+    prevEq = eqv;
   }
   // positions still open at the end are marked at the last close
   for (const p of open) done.push(finish(p, universe, p.last ?? p.ep, p.tr.xi, 0, true));
-  return { trades: done.sort((a, b) => (a.entryDate < b.entryDate ? -1 : a.entryDate > b.entryDate ? 1 : 0)), equityCurve: curve, stats: stats(done, curve, opt, benchmark) };
+  done.sort((a, b) => (a.entryDate < b.entryDate ? -1 : a.entryDate > b.entryDate ? 1 : 0));
+  return { trades: done, equityCurve: curve, stats: computeStats(done, curve, opt) };
+}
+
+/** Fee for leaving a trade early (EarlyExitBars / EarlyExitDays with EarlyExitFee %). */
+function earlyFee(p, tr, t, opt, value) {
+  if (!(opt.earlyExitFee > 0)) return 0;
+  const bars = tr.xi - tr.ei, days = dayNum(t[tr.xi]) - dayNum(t[tr.ei]);
+  const early = (opt.earlyExitBars > 0 && bars < opt.earlyExitBars) || (opt.earlyExitDays > 0 && days < opt.earlyExitDays);
+  return early ? value * opt.earlyExitFee / 100 : 0;
 }
 
 function finish(p, universe, xp, xi, exitCommission, still = false) {
-  const u = universe[p.ui], dir = p.dir, tr = p.tr;
-  const gross = dir * p.sh * (xp - p.ep), cost = (p.entryCommission || 0) + (exitCommission || 0);
+  const u = universe[p.ui], dir = p.dir, tr = p.tr, pv = p.pv || 1;
+  const gross = dir * p.sh * pv * (xp - p.ep), cost = (p.entryCommission || 0) + (exitCommission || 0);
   const mae = dir > 0 ? (tr.lo - p.ep) / p.ep * 100 : (p.ep - tr.hi) / p.ep * 100;
   const mfe = dir > 0 ? (tr.hi - p.ep) / p.ep * 100 : (p.ep - tr.lo) / p.ep * 100;
   return {
@@ -219,17 +306,33 @@ function finish(p, universe, xp, xi, exitCommission, still = false) {
   };
 }
 
+/** Individual backtest: each symbol trades with its own account (AmiBroker "Individual Backtest"). */
+export function individual(universe, opt = DEFAULT_OPTIONS) {
+  const per = universe.map((u) => ({ symbol: u.symbol, ...portfolio([u], opt) }));
+  const trades = per.flatMap((p) => p.trades).sort((a, b) => (a.entryDate < b.entryDate ? -1 : 1));
+  // combined curve: sum of the accounts day by day (carry the last value forward)
+  const dates = [...new Set(per.flatMap((p) => p.equityCurve.map((c) => c.t)))].sort();
+  const last = per.map(() => null), pos = per.map(() => 0), curve = [];
+  for (const d of dates) {
+    let eq = 0, exp = 0;
+    per.forEach((p, k) => { while (pos[k] < p.equityCurve.length && p.equityCurve[pos[k]].t <= d) { last[k] = p.equityCurve[pos[k]]; pos[k]++; } eq += last[k] ? last[k].equity : opt.initialEquity; exp += last[k] ? last[k].exposure : 0; });
+    curve.push({ t: d, equity: eq, exposure: per.length ? exp / per.length : 0, open: 0, events: [] });
+  }
+  const o2 = { ...opt, initialEquity: opt.initialEquity * per.length };
+  return { trades, equityCurve: curve, perSymbol: per, stats: computeStats(trades, curve, o2) };
+}
+
 /** Rotational mode: every bar rank the symbols by PositionScore, hold the best MaxOpenPositions. */
-export function rotational(universe, opt = DEFAULT_OPTIONS, benchmark = null) {
+export function rotational(universe, opt = DEFAULT_OPTIONS) {
   const dates = [...new Set(universe.flatMap((u) => u.bars.t))].sort();
   const idxMap = universe.map((u) => new Map(u.bars.t.map((d, i) => [d, i])));
-  const delay = opt.tradeDelays[0] || 0;
+  const delay = (opt.tradeDelays || [0])[0] || 0;
   let cash = opt.initialEquity; const open = [], done = [], curve = [];
   const maxPos = Math.max(1, opt.maxOpenPositions), worst = opt.worstRankHeld > 0 ? opt.worstRankHeld : maxPos;
   const priceOf = (ui, d) => { const i = idxMap[ui].get(d); return i === undefined ? undefined : i; };
+  const tp = { ...DEFAULT_OPTIONS.tradePrices, ...(opt.tradePrices || {}) };
   for (let di = 0; di < dates.length; di++) {
     const d = dates[di];
-    // rank, using the score from `delay` bars ago
     const ranked = [];
     universe.forEach((u, ui) => {
       const i = priceOf(ui, d); if (i === undefined) return;
@@ -238,74 +341,37 @@ export function rotational(universe, opt = DEFAULT_OPTIONS, benchmark = null) {
     });
     ranked.sort((a, b) => b.s - a.s);
     const rankOf = new Map(ranked.map((r, k) => [r.ui, k + 1]));
-    // sell what dropped out
     for (let k = open.length - 1; k >= 0; k--) {
       const p = open[k], r = rankOf.get(p.ui), i = priceOf(p.ui, d);
       if (i === undefined) continue;
       if (r === undefined || r > worst) {
-        const u = universe[p.ui], xp = at(u.sellPrice, i, u.bars.c[i]) ?? u.bars.c[i], c = commission(opt, p.sh * xp, p.sh);
+        const u = universe[p.ui], xp = at(u.sellPrice, i, priceAt(u.bars, tp.sell, i)) ?? u.bars.c[i], c = commissionFor(opt, p.sh * xp, p.sh);
         cash += p.sh * xp - c;
         done.push(finish({ ...p, tr: { ...p.tr, xi: i } }, universe, xp, i, c));
         open.splice(k, 1);
       }
     }
-    // buy the best ones we do not hold
     for (const r of ranked) {
       if (open.length >= maxPos) break;
       if (open.some((p) => p.ui === r.ui)) continue;
-      if (r.s <= 0) continue;
-      const u = universe[r.ui], ep = at(u.buyPrice, r.i, u.bars.c[r.i]) ?? u.bars.c[r.i];
+      const u = universe[r.ui], ep = at(u.buyPrice, r.i, priceAt(u.bars, tp.buy, r.i)) ?? u.bars.c[r.i];
       let eq = cash; for (const p of open) { const i = priceOf(p.ui, d); eq += p.sh * (i === undefined ? p.ep : universe[p.ui].bars.c[i]); }
-      const ps = opt.positionSize || { size: 100 / maxPos, type: 2 };
+      const ps = opt.positionSize && opt.positionSize.size ? opt.positionSize : { size: 100 / maxPos, type: 2 };
+      const size = opt.positionSize === DEFAULT_OPTIONS.positionSize || (opt.positionSize.size === 100 && opt.positionSize.type === 2) ? { size: 100 / maxPos, type: 2 } : ps;
       const sz = at(u.size, r.i, NaN);
-      let value = Number.isFinite(sz) && sz !== 0 ? (sz > 0 ? sz : -sz / 100 * eq) : (ps.type === 1 ? ps.size : ps.size / 100 * eq);
-      let shares = ps.type === 4 && !Number.isFinite(sz) ? ps.size : Math.floor(value / ep);
+      const value = Number.isFinite(sz) && sz !== 0 ? (sz > 0 ? sz : -sz / 100 * eq) : (size.type === 1 ? size.size : size.size / 100 * eq);
+      let shares = size.type === 4 && !Number.isFinite(sz) ? size.size : roundShares(value / ep, lotOf(u, opt));
       if (shares < 1) continue;
-      let c = commission(opt, shares * ep, shares);
-      if (shares * ep + c > cash) { if (!opt.allowPositionShrinking) continue; shares = Math.floor((cash - c) / ep); if (shares < 1) continue; c = commission(opt, shares * ep, shares); }
+      let c = commissionFor(opt, shares * ep, shares);
+      if (shares * ep + c > cash) { if (!opt.allowPositionShrinking) continue; shares = Math.floor((cash - c) / ep); if (shares < 1) continue; c = commissionFor(opt, shares * ep, shares); }
       cash -= shares * ep + c;
-      open.push({ ui: r.ui, dir: 1, sh: shares, ep, ed: d, entryCommission: c, last: ep, tr: { dir: 1, ei: r.i, xi: r.i, ep, lo: ep, hi: ep, reason: 'rank' } });
+      open.push({ ui: r.ui, dir: 1, sh: shares, ep, ed: d, entryCommission: c, last: ep, pv: 1, tr: { dir: 1, ei: r.i, xi: r.i, ep, lo: ep, hi: ep, reason: 'rank' } });
     }
-    let posVal = 0, inv = 0;
+    let posVal = 0;
     for (const p of open) { const i = priceOf(p.ui, d); if (i !== undefined) { p.last = universe[p.ui].bars.c[i]; p.tr.hi = Math.max(p.tr.hi, universe[p.ui].bars.h[i]); p.tr.lo = Math.min(p.tr.lo, universe[p.ui].bars.l[i]); } posVal += p.sh * p.last; }
-    const eqv = cash + posVal; inv = posVal;
-    curve.push({ t: d, equity: eqv, cash, exposure: eqv > 0 ? 100 * inv / eqv : 0, open: open.length });
+    const eqv = cash + posVal;
+    curve.push({ t: d, equity: eqv, cash, exposure: eqv > 0 ? 100 * posVal / eqv : 0, open: open.length, events: [] });
   }
   for (const p of open) done.push(finish({ ...p, tr: { ...p.tr, xi: universe[p.ui].bars.t.length - 1, open: true } }, universe, p.last, universe[p.ui].bars.t.length - 1, 0, true));
-  return { trades: done, equityCurve: curve, stats: stats(done, curve, opt, benchmark) };
-}
-
-function stats(trades, curve, opt, benchmark) {
-  const closed = trades.filter((t) => !t.open || true);
-  const wins = closed.filter((t) => t.profit > 0), loss = closed.filter((t) => t.profit <= 0);
-  const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
-  const gp = sum(wins, (t) => t.profit), gl = -sum(loss, (t) => t.profit);
-  const eq = curve.map((c) => c.equity), n = eq.length;
-  const init = opt.initialEquity, end = n ? eq[n - 1] : init;
-  let peak = -Infinity, maxDD = 0, maxDDPct = 0;
-  for (const v of eq) { if (v > peak) peak = v; const dd = peak - v; if (dd > maxDD) maxDD = dd; const p = peak > 0 ? dd / peak * 100 : 0; if (p > maxDDPct) maxDDPct = p; }
-  const years = n > 1 ? (Date.parse(curve[n - 1].t) - Date.parse(curve[0].t)) / (365.25 * 86400000) : 0;
-  const cagr = years > 0 && end > 0 ? (Math.pow(end / init, 1 / years) - 1) * 100 : 0;
-  const rets = []; for (let i = 1; i < n; i++) if (eq[i - 1] > 0) rets.push(eq[i] / eq[i - 1] - 1);
-  const mean = rets.length ? sum(rets, (x) => x) / rets.length : 0;
-  const sd = rets.length > 1 ? Math.sqrt(sum(rets, (x) => (x - mean) ** 2) / (rets.length - 1)) : 0;
-  const downside = rets.length ? Math.sqrt(sum(rets.filter((x) => x < 0), (x) => x * x) / rets.length) : 0;
-  const perYear = years > 0 ? n / years : 252;
-  const sharpe = sd > 0 ? mean / sd * Math.sqrt(perYear) : 0, sortino = downside > 0 ? mean / downside * Math.sqrt(perYear) : 0;
-  const net = sum(closed, (t) => t.profit);
-  const avg = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
-  const streak = (fn) => { let best = 0, cur = 0; for (const t of closed) { if (fn(t)) { cur++; best = Math.max(best, cur); } else cur = 0; } return best; };
-  return {
-    initialCapital: init, endingCapital: end, netProfit: end - init, netProfitPct: init ? (end / init - 1) * 100 : 0, cagr,
-    exposure: n ? avg(curve.map((c) => c.exposure)) : 0, maxDrawdown: maxDD, maxDrawdownPct: maxDDPct,
-    sharpe, sortino, ulcer: 0, profitFactor: gl > 0 ? gp / gl : (gp > 0 ? Infinity : 0), recoveryFactor: maxDD > 0 ? (end - init) / maxDD : 0,
-    carMdd: maxDDPct > 0 ? cagr / maxDDPct : 0, riskAdjReturn: maxDDPct > 0 ? (end / init - 1) * 100 / maxDDPct : 0,
-    trades: closed.length, winners: wins.length, losers: loss.length, winPct: closed.length ? 100 * wins.length / closed.length : 0,
-    avgProfit: closed.length ? net / closed.length : 0, avgProfitPct: avg(closed.map((t) => t.pctProfit)),
-    avgWin: avg(wins.map((t) => t.profit)), avgLoss: avg(loss.map((t) => t.profit)), avgWinPct: avg(wins.map((t) => t.pctProfit)), avgLossPct: avg(loss.map((t) => t.pctProfit)),
-    largestWin: wins.length ? Math.max(...wins.map((t) => t.profit)) : 0, largestLoss: loss.length ? Math.min(...loss.map((t) => t.profit)) : 0,
-    avgBars: avg(closed.map((t) => t.bars)), maxConsecWins: streak((t) => t.profit > 0), maxConsecLosses: streak((t) => t.profit <= 0),
-    commissionPaid: sum(closed, (t) => t.commission || 0), openTrades: closed.filter((t) => t.open).length,
-    benchmarkPct: benchmark ? benchmark : null,
-  };
+  return { trades: done, equityCurve: curve, stats: computeStats(done, curve, opt) };
 }

@@ -357,7 +357,7 @@ class Interp {
     Object.entries({ stopTypeLoss: 0, stopTypeProfit: 1, stopTypeTrailing: 2, stopTypeNBar: 3, stopModeDisable: 0, stopModePercent: 1,
       stopModeBars: 1, stopModePoint: 2, stopModeRisk: 3, spsNoChange: 0, spsValue: 1, spsPercentOfEquity: 2, spsPercentOfPosition: 3,
       spsShares: 4, maskDefault: 0, maskAll: 0xffffff, maskPrice: 1, maskHistogram: 2, maskNone: 0,
-      categoryMarket: 0, categoryGroup: 1, categorySector: 2, categoryIndustry: 3, categoryWatchlist: 4, categoryFavorite: 5, categoryIndex: 6, categoryAll: 7,
+      formatChar: -9001, formatDateTime: -9002, categoryMarket: 0, categoryGroup: 1, categorySector: 2, categoryIndustry: 3, categoryWatchlist: 4, categoryFavorite: 5, categoryIndex: 6, categoryAll: 7,
       actionIndicator: 1, actionCommentary: 2, actionScan: 3, actionExplore: 4, actionBacktest: 5, actionOptimize: 6, actionPortfolio: 7,
       backtestRegular: 0, backtestRotational: 1, backtestRegularRaw: 2, backtestRegularRawMulti: 3,
       inDaily: 86400, inWeekly: 604800, inMonthly: 2592000, inQuarterly: 7776000, inYearly: 31536000, inHourly: 3600, inMinute: 60, in1Minute: 60,

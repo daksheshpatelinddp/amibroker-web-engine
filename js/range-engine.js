@@ -1,16 +1,12 @@
 // RangeEngine: reads ONE symbol from the parquet files on R2 using HTTP range requests.
 //
-// Three layouts are understood (the best one that exists on R2 is used):
-//  * "pack" (fastest): manifest.json lists the byte position of every stock's compact block, recent.json the
-//    last 400 bars. A chart = 2 parallel range requests, ~50 KB, no file headers. Bulk loading for backtests
-//    (iterMany) and scans (iterRecent) read whole bucket packs / the single recent pack.
+// Two layouts are understood:
 //  * "history" (fast, preferred): <db>/manifest.json lists history bucket files. Each bucket holds ~64
 //    stocks and every stock's whole past history is ONE block, so a stock costs one small header + one
 //    block (~0.3 MB) however many years exist. The current year still comes from its yearly file.
 //  * "yearly" (fallback when there is no manifest): every yearly file is read in parallel, which gets
 //    slower with every year added.
 import { parquetMetadataAsync, parquetRead } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.4.0/+esm';
-import { decodeBlock, mergeBlocks, tailBlock, blockToRows } from './pack-codec.js';
 
 const COLUMN_NAMES = {
   symbol: ['symbol', 'ticker', 'scrip', 'name'],
@@ -30,16 +26,6 @@ function toDateString(v) {
   return String(v ?? '').slice(0, 10);
 }
 
-// Runs fn over the list with a few items in flight at once, yielding results in order (decoding overlaps).
-async function* pipelined(list, fn, window = 8) {
-  const q = [];
-  let i = 0;
-  while (i < list.length || q.length) {
-    while (i < list.length && q.length < window) q.push(fn(list[i++]));
-    yield await q.shift();
-  }
-}
-
 export class RangeEngine {
   constructor(dbConfig) {
     this.cfg = dbConfig;
@@ -50,11 +36,7 @@ export class RangeEngine {
     this.onProgress = () => {};
     this.ready = null;
     this.idb = null;
-    this.mode = 'yearly';       // 'pack' | 'history' (parquet) | 'yearly'
-    this.packIdx = new Map();   // pack mode: stock -> { bucket, off, len, n }
-    this.recentIdx = new Map(); // pack mode: stock -> { off, len, n }
-    this.recentMeta = null;
-    this.aliases = {};          // old ticker -> latest ticker
+    this.mode = 'yearly';       // 'history' once a valid manifest is found
     this.manifest = null;
     this.symbolToBucket = new Map();
     this.histYears = 0;
@@ -68,15 +50,11 @@ export class RangeEngine {
   async _init() {
     const t0 = performance.now();
     const manifest = await this._loadManifest();
-    const recent = manifest && manifest.packs ? await this._loadRecent() : null;
-    if (manifest && recent) this._applyPacks(manifest, recent);
-    else if (manifest) await this._initHistory(manifest);
+    if (manifest) await this._initHistory(manifest);
     else await this._initYearly();
     this.initSeconds = (performance.now() - t0) / 1000;
-    const what = this.mode === 'pack'
-      ? `pack layout: ${this.packIdx.size} stocks, ${this.histYears} past years + last ${recent.bars} bars`
-      : this.mode === 'history'
-      ? `parquet history: ${this.histYears} past years in ${Object.keys(this.manifest.buckets).length} files + ${this.years.length} recent`
+    const what = this.mode === 'history'
+      ? `history layout: ${this.histYears} past years in ${Object.keys(this.manifest.buckets).length} files + ${this.years.length} recent`
       : `${this.years.length} yearly files`;
     this.onProgress(`Range engine ready (${what}, ${this.initSeconds.toFixed(1)}s)`);
     return true;
@@ -136,218 +114,6 @@ export class RangeEngine {
     for (let y = m.histThrough + 1; y <= Math.max(thisYear, m.currentYear); y++) list.push(y);
     const infos = await Promise.all(list.map(y => this._headYear(y)));
     this.years = infos.filter(Boolean);
-  }
-
-  // ---------------- pack mode ----------------
-  async _loadRecent() {
-    try {
-      const r = await fetch(`${this.cfg.baseUrl}/recent.json`, { cache: 'no-cache' });
-      if (!r.ok) return null;
-      const j = await r.json();
-      return (j && j.format === 1 && j.file && j.idx && j.token) ? j : null;
-    } catch (e) { return null; }
-  }
-
-  _applyPacks(m, rec) {
-    this.mode = 'pack';
-    this.manifest = m;
-    this.recentMeta = rec;
-    this.aliases = m.aliases || {};
-    this.histYears = m.histThrough - m.firstYear + 1;
-    this.packIdx = new Map();
-    for (const [bucket, b] of Object.entries(m.packs.buckets)) {
-      for (const [sym, e] of Object.entries(b.idx)) this.packIdx.set(sym, { bucket, off: e[0], len: e[1], n: e[2] });
-    }
-    this.recentIdx = new Map(Object.entries(rec.idx).map(([sym, e]) => [sym, { off: e[0], len: e[1], n: e[2] }]));
-    this.years = [];
-  }
-
-  // Rebuilt history/recent files replace the old ones; a long-open page reloads the small index files once.
-  async _refreshPacks() {
-    const m = await this._loadManifest();
-    const rec = m && m.packs ? await this._loadRecent() : null;
-    if (!m || !rec) return false;
-    if (this.manifest && m.fingerprint === this.manifest.fingerprint && this.recentMeta && rec.token === this.recentMeta.token) return false;
-    this._applyPacks(m, rec);
-    return true;
-  }
-
-  // 'NSE:RELIANCE', 'reliance.ns' ... -> the name used in the data; old tickers resolve to the latest name
-  _resolve(symbol) {
-    const base = String(symbol).trim().toUpperCase().replace(/\.(NS|BO)$/, '');
-    const known = (n) => this.packIdx.has(n) || this.recentIdx.has(n);
-    for (const n of [base, `${base}.NS`, `${base}.BO`]) if (known(n)) return n;
-    const alias = this.aliases[base];
-    return alias && known(alias) ? alias : null;
-  }
-
-  async _fetchRange(url, off, len) {
-    const r = await fetch(url, { headers: { Range: `bytes=${off}-${off + len - 1}` } });
-    this.stats.requests++;
-    if (r.status === 206) { const b = new Uint8Array(await r.arrayBuffer()); this.stats.bytes += b.length; return b; }
-    if (r.status === 200) { const all = new Uint8Array(await r.arrayBuffer()); this.stats.bytes += all.length; return all.slice(off, off + len); }
-    throw new Error(`HTTP ${r.status} reading ${url.split('/').slice(-2).join('/')}`);
-  }
-
-  async _fetchWhole(url) {
-    const r = await fetch(url);
-    this.stats.requests++;
-    if (!r.ok) throw new Error(`HTTP ${r.status} reading ${url.split('/').slice(-2).join('/')}`);
-    const b = new Uint8Array(await r.arrayBuffer());
-    this.stats.bytes += b.length;
-    return b;
-  }
-
-  _packUrl(kind, sym) {
-    return kind === 'h'
-      ? `${this.cfg.baseUrl}/${this.manifest.packs.path}/${this.packIdx.get(sym).bucket}.pack`
-      : `${this.cfg.baseUrl}/${this.recentMeta.file}`;
-  }
-
-  _packEntry(kind, sym) { return kind === 'h' ? this.packIdx.get(sym) : this.recentIdx.get(sym); }
-  _packToken(kind) { return kind === 'h' ? this.manifest.fingerprint : this.recentMeta.token; }
-
-  // Compressed bytes of one stock's block (browser cache first, else one range request)
-  async _packBytes(kind, sym) {
-    const e = this._packEntry(kind, sym);
-    if (!e) return { bytes: null, cached: true };           // the stock has no block in this layer
-    const key = `${sym}|pk-${kind}`;
-    const hit = await this._cacheGet(key);
-    if (hit && hit.token === this._packToken(kind) && hit.data) return { bytes: hit.data, cached: true };
-    const bytes = await this._fetchRange(this._packUrl(kind, sym), e.off, e.len);
-    this._cachePut({ key, token: this._packToken(kind), data: bytes, ts: Date.now() });
-    return { bytes, cached: false };
-  }
-
-  async _getBarsPack(symbol) {
-    const sym = this._resolve(symbol);
-    if (!sym) return { rows: [], cached: [true, true] };
-    const [h, r] = await Promise.all([this._packBytes('h', sym), this._packBytes('r', sym)]);
-    const [hb, rb] = await Promise.all([h.bytes ? decodeBlock(h.bytes) : null, r.bytes ? decodeBlock(r.bytes) : null]);
-    const merged = mergeBlocks(hb, rb);
-    return { rows: merged ? blockToRows(merged, sym) : [], cached: [h.cached, r.cached] };
-  }
-
-  // ---------------- bulk loading (backtests, explorations) ----------------
-  /**
-   * Streams the full history of many stocks, one at a time, as typed arrays:
-   *   for await (const s of engine.iterMany(['TCS', 'INFY', ...], { onProgress })) { s.symbol, s.n, s.t, s.o, s.h, s.l, s.c, s.v, s.dq }
-   * Downloads are shared: when a bucket file is mostly wanted it is fetched whole (one request), otherwise per stock.
-   * Everything fetched is kept in the browser, so the second run is instant. Only one stock is decoded at a time.
-   */
-  async *iterMany(symbols, { onProgress, concurrency = 8 } = {}) {
-    await this.init();
-    if (this.mode !== 'pack') throw new Error('Bulk loading needs the pack layout: run "Convert DB to Parquet & Upload R2" first');
-    const t0 = performance.now();
-    this.stats.requests = 0; this.stats.bytes = 0;
-    const syms = [...new Set(symbols.map(s => this._resolve(s)).filter(Boolean))];
-    const hData = new Map(), rData = new Map();
-    const needH = [], needR = [];
-    let cachedCount = 0;
-
-    // Whole bucket files kept from an earlier bulk run: a handful of reads instead of one per stock
-    const bucketsWanted = [...new Set(syms.filter(s => this.packIdx.has(s)).map(s => this.packIdx.get(s).bucket))];
-    const wholeBuckets = new Map();
-    await Promise.all(bucketsWanted.map(async (b) => {
-      const hit = await this._cacheGet(`bk|${b}`);
-      if (hit && hit.token === this._packToken('h') && hit.data) wholeBuckets.set(b, hit.data);
-    }));
-    const recentWhole = (await this._cacheGet('rk|recent')) || null;
-    const recentOk = recentWhole && recentWhole.token === this._packToken('r') && recentWhole.data ? recentWhole.data : null;
-
-    await Promise.all(syms.map(async (s) => {
-      for (const kind of ['h', 'r']) {
-        const e = this._packEntry(kind, s);
-        if (!e) continue;
-        const whole = kind === 'h' ? wholeBuckets.get(e.bucket) : recentOk;
-        if (whole) { (kind === 'h' ? hData : rData).set(s, whole.subarray(e.off, e.off + e.len)); cachedCount++; continue; }
-        const hit = await this._cacheGet(`${s}|pk-${kind}`);
-        if (hit && hit.token === this._packToken(kind) && hit.data) { (kind === 'h' ? hData : rData).set(s, hit.data); cachedCount++; }
-        else (kind === 'h' ? needH : needR).push(s);
-      }
-    }));
-
-    const tasks = [];
-    const store = (kind, s, bytes) => { (kind === 'h' ? hData : rData).set(s, bytes); this._cachePut({ key: `${s}|pk-${kind}`, token: this._packToken(kind), data: bytes, ts: Date.now() }); };
-    const byBucket = new Map();
-    for (const s of needH) { const b = this.packIdx.get(s).bucket; if (!byBucket.has(b)) byBucket.set(b, []); byBucket.get(b).push(s); }
-    for (const [bucket, list] of byBucket) {
-      const inBucket = Object.keys(this.manifest.packs.buckets[bucket].idx).length;
-      if (list.length >= Math.max(8, inBucket * 0.3)) {        // most of the file is wanted: one request for all of it
-        tasks.push(async () => {
-          const all = await this._fetchWhole(this._packUrl('h', list[0]));
-          this._cachePut({ key: `bk|${bucket}`, token: this._packToken('h'), data: all, ts: Date.now() });   // keep the whole file
-          for (const s of list) { const e = this.packIdx.get(s); hData.set(s, all.subarray(e.off, e.off + e.len)); }
-        });
-      } else {
-        for (const s of list) tasks.push(async () => { const e = this.packIdx.get(s); store('h', s, await this._fetchRange(this._packUrl('h', s), e.off, e.len)); });
-      }
-    }
-    if (needR.length > 30) {
-      tasks.push(async () => {
-        const all = await this._fetchWhole(`${this.cfg.baseUrl}/${this.recentMeta.file}`);
-        this._cachePut({ key: 'rk|recent', token: this._packToken('r'), data: all, ts: Date.now() });
-        for (const s of needR) { const e = this.recentIdx.get(s); rData.set(s, all.subarray(e.off, e.off + e.len)); }
-      });
-    } else {
-      for (const s of needR) tasks.push(async () => { const e = this.recentIdx.get(s); store('r', s, await this._fetchRange(this._packUrl('r', s), e.off, e.len)); });
-    }
-
-    let done = 0;
-    const worker = async () => { while (tasks.length) { const t = tasks.shift(); await t(); done++; if (onProgress) onProgress({ phase: 'download', requests: this.stats.requests, bytes: this.stats.bytes }); } };
-    await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
-
-    let n = 0;
-    const decodeOne = async (s) => {
-      const hb = hData.get(s), rb = rData.get(s);
-      hData.delete(s); rData.delete(s);                       // free the compressed bytes as we go
-      const [h, r] = await Promise.all([hb ? decodeBlock(hb) : null, rb ? decodeBlock(rb) : null]);
-      const merged = mergeBlocks(h, r);
-      return merged ? { symbol: s, ...merged } : null;
-    };
-    for await (const item of pipelined(syms, decodeOne)) {    // several blocks are decoded at once, delivered in order
-      if (!item) continue;
-      n++;
-      if (onProgress && n % 25 === 0) onProgress({ phase: 'decode', done: n, total: syms.length });
-      yield item;
-    }
-    this.lastBulk = { stocks: n, requests: this.stats.requests, bytes: this.stats.bytes, fromBrowserCache: cachedCount, seconds: (performance.now() - t0) / 1000 };
-    if (onProgress) onProgress({ phase: 'done', ...this.lastBulk });
-  }
-
-  /** Convenience: all stocks at once into a Map (uses a lot of memory for big lists; prefer iterMany). */
-  async getMany(symbols, opts) {
-    const out = new Map();
-    for await (const s of this.iterMany(symbols, opts)) out.set(s.symbol, s);
-    return out;
-  }
-
-  /**
-   * For scanners and explorations: the last `bars` bars of EVERY active stock, streamed one by one.
-   * One download (the recent pack, ~10 MB), kept in the browser until the next daily rebuild.
-   */
-  async *iterRecent({ bars = 300, onProgress } = {}) {
-    await this.init();
-    if (this.mode !== 'pack') throw new Error('Scanning needs the pack layout: run "Convert DB to Parquet & Upload R2" first');
-    const t0 = performance.now();
-    this.stats.requests = 0; this.stats.bytes = 0;
-    const key = 'rk|recent';
-    let pack = null, fromCache = false;
-    const hit = await this._cacheGet(key);
-    if (hit && hit.token === this.recentMeta.token && hit.data) { pack = hit.data; fromCache = true; }
-    else {
-      pack = await this._fetchWhole(`${this.cfg.baseUrl}/${this.recentMeta.file}`);
-      this._cachePut({ key, token: this.recentMeta.token, data: pack, ts: Date.now() });
-    }
-    if (onProgress) onProgress({ phase: 'downloaded', bytes: pack.length, fromBrowserCache: fromCache, seconds: (performance.now() - t0) / 1000 });
-    let n = 0;
-    const decodeOne = async ([sym, e]) => ({ symbol: sym, ...tailBlock(await decodeBlock(pack.subarray(e.off, e.off + e.len)), bars) });
-    for await (const item of pipelined([...this.recentIdx], decodeOne)) {
-      n++;
-      if (onProgress && n % 250 === 0) onProgress({ phase: 'decode', done: n, total: this.recentIdx.size });
-      yield item;
-    }
-    this.lastScan = { stocks: n, bytes: this.stats.bytes, fromBrowserCache: fromCache, seconds: (performance.now() - t0) / 1000 };
   }
 
   // The history is rebuilt on days when a split/bonus changes old prices. If a long-open page still holds the
@@ -550,22 +316,6 @@ export class RangeEngine {
     const base = String(symbol).trim().toUpperCase().replace(/\.(NS|BO)$/, '');
     const names = [base, `${base}.NS`, `${base}.BO`];
 
-    if (this.mode === 'pack') {
-      let res;
-      try {
-        res = await this._getBarsPack(symbol);
-      } catch (e) {
-        if (await this._refreshPacks()) res = await this._getBarsPack(symbol);     // history was rebuilt meanwhile
-        else throw e;
-      }
-      this.lastStats = {
-        years: this.histYears + 1,
-        cached: (res.cached[0] ? this.histYears : 0) + (res.cached[1] ? 1 : 0),
-        requests: this.stats.requests, bytes: this.stats.bytes, seconds: (performance.now() - t0) / 1000,
-      };
-      return res.rows;
-    }
-
     const recent = Promise.all(this.years.map(info => this._year(info, base, names)));
     let hist = null;
     if (this.mode === 'history') {
@@ -593,7 +343,6 @@ export class RangeEngine {
   // Every symbol name
   async getSymbols() {
     await this.init();
-    if (this.mode === 'pack') return [...new Set([...this.packIdx.keys(), ...this.recentIdx.keys()])].sort();   // no network
     const names = new Set(this.mode === 'history' ? this.symbolToBucket.keys() : []);
 
     // Stocks of the newest year (this also covers stocks listed after the history was built).
