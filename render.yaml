@@ -4,10 +4,3 @@ services:
     env: static
     buildCommand: ""
     staticPublishPath: .
-  # Intraday bars (Yahoo by default). After the first deploy, put this service's address in Tools > Intraday data.
-  - type: web
-    name: amibroker-intraday
-    runtime: node
-    plan: free
-    buildCommand: ""
-    startCommand: node server/server.js
