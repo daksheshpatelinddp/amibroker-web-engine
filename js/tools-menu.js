@@ -10,6 +10,7 @@ const ITEMS = [
   { sep: true },
   { icon: '🔎', label: 'Analysis: Scan · Explore · Backtest · Optimize…', hint: 'Run any formula over many symbols', run: async () => (await import('./analysis.js')).openAnalysis() },
   { icon: '🗂', label: 'Symbols · Categories · Watchlists…', hint: 'Groups, sectors, watchlists, favorites; import TXT / TLS', run: async () => (await import('./categories-ui.js')).openCategories() },
+  { icon: '⏱', label: 'Intraday data…', hint: 'Server address, 1/5/15/30/45 min and hourly frames (editable)', run: async () => (await import('./intraday-ui.js')).openIntradaySettings(() => host.refreshTimeframes()) },
   { icon: '🕯', label: 'Price style…', hint: 'Candles, OHLC bars, line or area for Price formulas', run: async () => openPriceStyle() },
   { sep: true },
   { icon: '❓', label: 'AFL Reference', hint: 'Functions you can use', run: () => openReference() },

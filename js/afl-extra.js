@@ -55,9 +55,11 @@ export function addExtras(F, E, H) {
   F.hhvbars = F.hhvbars; F.ref = F.ref;
 
   // ------------------------------------------------------------------ date & time
-  const parts = () => bars.t.map((d) => { const p = String(d).split('-').map(Number); return { y: p[0], m: p[1], d: p[2] }; });
-  F.datetime = () => Float64Array.from(parts(), (p) => ((p.y - 1900) * 10000 + p.m * 100 + p.d) * 1e6);
-  F.timenum = () => newArr(n(), 0); F.hour = () => newArr(n(), 0); F.minute = () => newArr(n(), 0); F.second = () => newArr(n(), 0);
+  const parts = () => bars.t.map((d) => { const s = String(d), p = s.slice(0, 10).split('-').map(Number); return { y: p[0], m: p[1], d: p[2], hh: s.length > 10 ? +s.slice(11, 13) : 0, mm: s.length > 10 ? +s.slice(14, 16) : 0 }; });
+  const hms = (p) => p.hh * 10000 + p.mm * 100;   // intraday bars carry their start time (IST); daily bars are 0
+  F.datetime = () => Float64Array.from(parts(), (p) => ((p.y - 1900) * 10000 + p.m * 100 + p.d) * 1e6 + hms(p));
+  F.timenum = () => Float64Array.from(parts(), (p) => hms(p));
+  F.hour = () => Float64Array.from(parts(), (p) => p.hh); F.minute = () => Float64Array.from(parts(), (p) => p.mm); F.second = () => newArr(n(), 0);
   F.dayofyear = () => Float64Array.from(parts(), (p) => Math.round((Date.UTC(p.y, p.m - 1, p.d) - Date.UTC(p.y, 0, 1)) / 86400000) + 1);
   F.datetimetostr = (a) => {
     const f = (v) => { if (!Number.isFinite(v)) return '-'; const dn = Math.floor(v / 1e6), tn = Math.round(v - dn * 1e6); const y = Math.floor(dn / 10000) + 1900, m = Math.floor(dn / 100) % 100, d = dn % 100; const z = (x) => String(x).padStart(2, '0'); return `${y}-${z(m)}-${z(d)} ${z(Math.floor(tn / 10000))}:${z(Math.floor(tn / 100) % 100)}:${z(tn % 100)}`; };

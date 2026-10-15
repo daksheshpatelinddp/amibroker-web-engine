@@ -2,6 +2,7 @@
 //   loadBars(symbol) -> Promise<{t,o,h,l,c,v,dq,delpct}|null>
 import { aflEngine } from './afl-engine.js';
 import { periodKey } from './timeframe.js';
+import { isIntraday } from './intraday.js';
 import { rawTrades, portfolio, rotational, individual, optionsFromResult } from './bt-core.js';
 import { computeStats } from './bt-report.js';
 import { settingsToOptions, defaultSettings } from './analysis-settings.js';
@@ -44,7 +45,7 @@ export function resampleArrays(b, tf) {
 const sliceArr = (a, from, to) => (a && typeof a === 'object' && a.length !== undefined ? Float64Array.from(a.subarray ? a.subarray(from, to + 1) : a.slice(from, to + 1)) : a);
 const sliceBars = (b, from, to) => ({ t: b.t.slice(from, to + 1), o: b.o.slice(from, to + 1), h: b.h.slice(from, to + 1), l: b.l.slice(from, to + 1), c: b.c.slice(from, to + 1), v: b.v.slice(from, to + 1) });
 const lowerBound = (t, d) => { let lo = 0, hi = t.length; while (lo < hi) { const m = (lo + hi) >> 1; if (t[m] < d) lo = m + 1; else hi = m; } return lo; };
-const dayNum = (d) => Date.parse(d) / 86400000;
+const dayNum = (d) => Date.parse(String(d).slice(0, 10)) / 86400000;   // intraday labels 'YYYY-MM-DD HH:MM' count as their day
 
 /**
  * Range, like AmiBroker's Range box: {mode:'all'} | {mode:'bars', n} (N recent bars) | {mode:'days', n} (N recent days) | {mode:'dates', from, to}
@@ -61,7 +62,7 @@ export function rangeOf(b, range, from, to) {
   if (r.mode === 'bars') return [Math.max(0, last - Math.max(1, r.n | 0) + 1), last];
   if (r.mode === 'days') { const cut = new Date(dayNum(b.t[last]) * 86400000 - (Math.max(1, r.n | 0) - 1) * 86400000).toISOString().slice(0, 10); return [lowerBound(b.t, cut), last]; }
   const a = r.from ? lowerBound(b.t, r.from) : 0;
-  let z = r.to ? lowerBound(b.t, r.to + '\u0001') - 1 : last;
+  let z = r.to ? lowerBound(b.t, r.to + '\uffff') - 1 : last;
   return [a, Math.min(z, last)];
 }
 
@@ -95,8 +96,8 @@ export function makeSession(loadBars, interval = 'D') {
   const cache = new Map(), foreign = {};
   const get = async (sym) => {
     if (cache.has(sym)) return cache.get(sym);
-    let b = null; try { b = await loadBars(sym); } catch (e) { b = null; }
-    if (b && b.t && b.t.length) b = resampleArrays(b, interval); else b = null;
+    let b = null; try { b = await loadBars(sym, interval); } catch (e) { b = null; }
+    if (b && b.t && b.t.length) b = isIntraday(interval) ? b : resampleArrays(b, interval); else b = null;   // intraday bars are already built
     cache.set(sym, b); return b;
   };
   const runOn = async (sym, bars, code, opts) => {

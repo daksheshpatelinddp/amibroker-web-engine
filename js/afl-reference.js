@@ -96,6 +96,7 @@ TRADING RULES (scanner / exploration / backtest)
  AddColumn(array,"name",format,fg,bg,width) format: 1.2 digits | formatChar | formatDateTime;  AddMultiTextColumn(array,"a\nb\nc","name");
  AddRankColumn();  SetSortColumns(2,-4) (column 2 up, column 4 down);  AddSummaryRows(1+2+4+8+16)  total,min,max,average,count;  Exclude = 1 hides a row
  OptimizerSetEngine("spso");  OptimizerSetOption("Runs",100);  ApplyStop(type,mode,amount,exitAtStop,volatile,reEntryDelay,validFrom,validTo)
+ Intraday frames (Time frame box: 1/5/15/30/45 min, 1 h, or Custom…): Hour(), Minute(), TimeNum() (e.g. 91500), DateTime() with time, Interval() in seconds. Example: TimeNum() >= 93000 AND TimeNum() < 151500
  Futures: PointValue, MarginDeposit, RoundLotSize, TickSize variables
  SetOption("InitialEquity",100000) "MaxOpenPositions" "CommissionMode" (1 %, 2 per trade, 3 per share) "CommissionAmount" "WorstRankHeld" "AllowPositionShrinking" ...
  SetTradeDelays(buy,sell,short,cover)  SetPositionSize(size, spsPercentOfEquity | spsValue | spsShares)  PositionSize = -25 (25% of equity)

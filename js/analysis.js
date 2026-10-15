@@ -9,6 +9,8 @@ import { categoryStore, TYPES } from './category-store.js';
 import { makeSession, scan, explore, backtest, optimize, walkForward, buildBreadth, resolveSymbols, toCSV, METRICS } from './analysis-core.js';
 import { monteCarlo } from './bt-report.js';
 import { loadSettings } from './analysis-settings.js';
+import { loadConfig as loadIntradayConfig, saveConfig as saveIntradayConfig, frameId, frameName, frameMinutes, isIntraday } from './intraday.js';
+import { openCustomFrame } from './intraday-ui.js';
 import { esc, f2, money, svgLine, svgScatter, svgHeat, svgMonteCarlo, monthlyHtml, mcTableHtml, statsHtml, chartsFor, reportHtml } from './report-charts.js';
 
 const MODES = { scan: 'Scan', explore: 'Explore', backtest: 'Backtest', optimize: 'Optimize', walk: 'Walk-Forward' };
@@ -149,7 +151,14 @@ export function openAnalysis({ formulaId = null } = {}) {
     const rmode = el('select', INPUT + ' w-full'); [['all', 'All quotations'], ['bars', 'N recent bars'], ['days', 'N recent days'], ['dates', 'From – To dates']].forEach(([v, l]) => { const o = el('option', '', l); o.value = v; rmode.appendChild(o); }); rmode.value = st.range.mode;
     const rn = el('input', INPUT + ' w-full'); rn.type = 'number'; rn.min = 1; rn.value = st.range.n || 1;
     const rf = el('input', INPUT + ' w-full'); rf.type = 'date'; rf.value = st.range.from || ''; const rt = el('input', INPUT + ' w-full'); rt.type = 'date'; rt.value = st.range.to || '';
-    const tf = el('select', INPUT + ' w-full'); [['D', 'Daily'], ['W', 'Weekly'], ['M', 'Monthly'], ['Q', 'Quarterly'], ['Y', 'Yearly']].forEach(([v, l]) => { const o = el('option', '', l); o.value = v; tf.appendChild(o); }); tf.value = st.tf;
+    const tf = el('select', INPUT + ' w-full'); const fillTf = (cur) => {
+      tf.innerHTML = '';
+      const ids = loadIntradayConfig().frames.map(frameId); if (isIntraday(cur) && !ids.includes(cur)) ids.push(cur);
+      [['D', 'Daily'], ['W', 'Weekly'], ['M', 'Monthly'], ['Q', 'Quarterly'], ['Y', 'Yearly'], ...ids.sort((a, b) => frameMinutes(a) - frameMinutes(b)).map((id) => [id, frameName(id) + ' (intraday)']), ['__custom', 'Custom intraday…']].forEach(([v, l]) => { const o = el('option', '', l); o.value = v; tf.appendChild(o); });
+      tf.value = cur;
+    };
+    fillTf(st.tf); let tfPrev = st.tf;
+    tf.addEventListener('change', () => { if (tf.value === '__custom') { const back = tfPrev; fillTf(back); openCustomFrame((id, keep) => { if (keep) { const c = loadIntradayConfig(); saveIntradayConfig({ ...c, frames: [...new Set([...c.frames, frameMinutes(id)])] }); host.refreshTimeframes(); } tfPrev = id; fillTf(id); save(); }, back); } else tfPrev = tf.value; });
     const rbox = el('div', 'grid grid-cols-2 gap-2'); const rv = () => { rn.parentNode.style.display = ['bars', 'days'].includes(rmode.value) ? '' : 'none'; rf.parentNode.style.display = rt.parentNode.style.display = rmode.value === 'dates' ? '' : 'none'; };
     rbox.appendChild(labeled('Range', rmode)); rbox.appendChild(labeled('Time frame (periodicity)', tf)); rbox.appendChild(labeled('N', rn)); rbox.appendChild(labeled('From', rf)); rbox.appendChild(labeled('To', rt));
     rmode.onchange = rv; rv(); body.appendChild(rbox);
@@ -174,7 +183,7 @@ export function openAnalysis({ formulaId = null } = {}) {
     const getState = () => ({ formulaId: fsel.value, apply: apply.value, filter: st.filter, range: rangeNow(), tf: tf.value, bt: btSel.value, settings: loadSettings() });
     const applyState = (p) => {
       if (p.formulaId && all.some((f) => f.id === p.formulaId)) fsel.value = p.formulaId; st.apply = apply.value = p.apply || 'all'; st.filter = p.filter || st.filter; const r = p.range || { mode: 'all' };
-      rmode.value = r.mode || 'all'; rn.value = r.n || 1; rf.value = r.from || ''; rt.value = r.to || ''; tf.value = p.tf || 'D'; btSel.value = p.bt || 'portfolio'; rv();
+      rmode.value = r.mode || 'all'; rn.value = r.n || 1; rf.value = r.from || ''; rt.value = r.to || ''; tfPrev = p.tf || 'D'; fillTf(tfPrev); btSel.value = p.bt || 'portfolio'; rv();
       if (p.settings) { import('./analysis-settings.js').then((m) => { m.saveSettings(p.settings); S = p.settings; refreshInfo(); }); } refreshInfo();
     };
     proj.onclick = () => openProjects(getState, applyState);
@@ -233,7 +242,7 @@ export function openAnalysis({ formulaId = null } = {}) {
       const sy = symbols(); if (!sy.symbols.length) { toast('No symbols to analyse. Choose Apply to, or add symbols to the filter.'); return; }
       if (sy.capped) toast(`Using the first ${sy.symbols.length} symbols (Settings > General > largest number of symbols)`);
       save(); cancel.stop = false; pane.innerHTML = ''; R = null; tabsBar.classList.add('hidden'); setBusy(true);
-      const t0 = Date.now(), session = makeSession((s) => host.loadBars(s), tf.value), common = { code: f.code, symbols: sy.symbols, session, range: rangeNow(), onProgress: setProgress, cancel, settings: S };
+      const t0 = Date.now(), session = makeSession((s, iv) => host.loadBars(s, iv), tf.value), common = { code: f.code, symbols: sy.symbols, session, range: rangeNow(), onProgress: setProgress, cancel, settings: S };
       const infoLines = (extra = []) => [`Formula: ${f.name}`, `Action: ${MODES[mode]}`, `Symbols: ${sy.symbols.length}`, `Time frame: ${tf.value}`, `Range: ${(() => { const r = rangeNow(); return r.mode === 'all' ? 'All quotations' : r.mode === 'bars' ? 'Last ' + r.n + ' bars' : r.mode === 'days' ? 'Last ' + r.n + ' days' : 'From ' + r.from + ' to ' + r.to; })()}`, `Run time: ${((Date.now() - t0) / 1000).toFixed(1)} s`, ...extra];
       try {
         if (mode === 'scan') {

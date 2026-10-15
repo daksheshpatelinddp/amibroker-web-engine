@@ -7,7 +7,8 @@ import { barsToArrays, sma, ema, rsi, macd, sourceArray, applyTransform } from '
 import { paneTitle, overlayTitle } from './workspace.js';
 import { aflEngine, colorToHex, shapeKind } from './afl-engine.js';
 import { formulaStore } from './formula-store.js';
-import { INTERVALS } from './timeframe.js';
+import { intervalName } from './timeframe.js';
+import { isIntraday, frameMinutes, chartTime } from './intraday.js';
 import { pseudoStore } from './pseudo-store.js';
 import { CloudPrimitive, VapPrimitive } from './chart-primitives.js';
 
@@ -67,6 +68,10 @@ export class ChartEngine {
     this.container.innerHTML = '';
     this.sheet = sheet;
     this.arrays = barsToArrays(rows);
+    // intraday bars carry 'YYYY-MM-DD HH:MM' labels; the chart needs a number for them
+    this.intraday = isIntraday(sheet.interval);
+    this.times = this.intraday ? this.arrays.t.map(chartTime) : this.arrays.t;
+    if (this._foreignInterval !== (sheet.interval || 'D')) { this._foreignInterval = sheet.interval || 'D'; this.foreign = {}; this.foreignAsked = new Set(); this.foreignFailed = new Set(); }
     this.mainSeries = null;
     this.paneInfo = new Map();
 
@@ -77,7 +82,7 @@ export class ChartEngine {
       grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
       crosshair: { mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 1 },
       rightPriceScale: { borderColor: COLORS.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
-      timeScale: { borderColor: COLORS.border, timeVisible: false, rightOffset: 4 },
+      timeScale: { borderColor: COLORS.border, timeVisible: this.intraday, secondsVisible: false, rightOffset: 4 },
     });
     this.chart = chart;
     this.firstVisible = prevRange ? Math.max(0, Math.floor(prevRange.from)) : Math.max(0, this.arrays.t.length - DEFAULT_BARS_SHOWN);
@@ -112,7 +117,7 @@ export class ChartEngine {
   // ---- building one pane ----
   _buildPane(chart, LWC, pane, idx) {
     const a = this.arrays;
-    const t = a.t;
+    const t = this.times;
     const pts = (vals) => t.map((time, i) => (Number.isFinite(vals[i]) ? { time, value: vals[i] } : { time }));
     const line = (vals, color, opts = {}) => {
       const s = chart.addSeries(LWC.LineSeries, {
@@ -206,14 +211,15 @@ export class ChartEngine {
   }
 
   _futureTimes(k) {
-    const t = this.arrays.t, out = []; if (!t.length || k <= 0) return out;
+    const t = this.times, out = []; if (!t.length || k <= 0) return out;
+    if (this.intraday) { const step = frameMinutes(this.sheet.interval) * 60; for (let i = 1; i <= k; i++) out.push(t[t.length - 1] + step * i); return out; }
     const d = new Date(t[t.length - 1] + 'T00:00:00Z');
     while (out.length < k) { d.setUTCDate(d.getUTCDate() + 1); const w = d.getUTCDay(); if (w !== 0 && w !== 6) out.push(d.toISOString().slice(0, 10)); }
     return out;
   }
 
   _buildLayer(chart, LWC, pane, idx, { key, ref, primary }, shared, paneInfo) {
-    const a = this.arrays, t = a.t, N = t.length;
+    const a = this.arrays, t = this.times, N = t.length;
     const info = { errors: [], params: [], legend: [], notes: [], key, formulaId: ref.formulaId };
     if (!primary) this.paneInfo.set(key, info);
     const f = formulaStore.get(ref.formulaId);
@@ -221,7 +227,7 @@ export class ChartEngine {
     const sheet = this.sheet || {};
     const res = aflEngine.run(f.code, a, {
       symbol: sheet.symbol || '', formulaName: f.name, params: ref.values || {}, triggers: this.triggers[key] || {}, guiState: ref.gui || {},
-      guiEvents: this.guiEvents[key] || [], guiKnown: this.guiKnown[key] || [], interval: sheet.interval || 'D', intervalName: INTERVALS[sheet.interval || 'D'],
+      guiEvents: this.guiEvents[key] || [], guiKnown: this.guiKnown[key] || [], interval: sheet.interval || 'D', intervalName: intervalName(sheet.interval),
       priceStyle: sheet.priceStyle || 'candle', foreign: this._foreignMap(), firstVisible: this.firstVisible || 0, action: 1,
       lastBacktestFormula: this.lastBacktestFormula || '', baseIndex: this.baseIndex || 'NIFTY',
     });
@@ -356,7 +362,7 @@ export class ChartEngine {
   }
 
   _finishPane(chart, LWC, pane, idx, shared, paneInfo) {
-    const a = this.arrays, t = a.t;
+    const a = this.arrays, t = this.times;
     const anchor = () => {
       if (shared.first) return shared.first;
       if (shared.anchorSeries) return shared.anchorSeries;

@@ -83,7 +83,7 @@ export function barsToArrays(rows) {
   const seen = new Set();
   const list = [];
   for (const r of rows || []) {
-    const t = String(r.date || '').slice(0, 10);
+    const ds = String(r.date || ''), t = ds.length > 10 && ds[10] === ' ' ? ds.slice(0, 16) : ds.slice(0, 10);   // 'YYYY-MM-DD' or intraday 'YYYY-MM-DD HH:MM'
     if (!t || seen.has(t) || !(r.close > 0)) continue;
     seen.add(t);
     list.push({ t, r });

@@ -634,7 +634,7 @@ function buildFunctions(E) {
   F.barindex = () => Float64Array.from({ length: n() }, (_, i) => i);
 
   // --- date / symbol
-  const dateParts = () => bars.t.map((t) => { const p = String(t).split('-').map(Number); return { y: p[0], m: p[1], d: p[2] }; });
+  const dateParts = () => bars.t.map((t) => { const p = String(t).slice(0, 10).split('-').map(Number); return { y: p[0], m: p[1], d: p[2] }; });
   F.datenum = () => Float64Array.from(dateParts(), (p) => (p.y - 1900) * 10000 + p.m * 100 + p.d);
   F.day = () => Float64Array.from(dateParts(), (p) => p.d);
   F.month = () => Float64Array.from(dateParts(), (p) => p.m);
@@ -642,7 +642,7 @@ function buildFunctions(E) {
   F.dayofweek = () => Float64Array.from(dateParts(), (p) => new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay());
   F.name = () => String(E.opts.symbol || '');
   F.fullname = F.name;
-  F.interval = () => ({ D: 86400, W: 604800, M: 2592000, Q: 7776000, Y: 31536000 })[E.opts.interval || 'D'] || 86400;
+  F.interval = () => { const iv = E.opts.interval || 'D'; return /^\d+m$/.test(iv) ? parseInt(iv, 10) * 60 : ({ D: 86400, W: 604800, M: 2592000, Q: 7776000, Y: 31536000 })[iv] || 86400; };
   F.version = () => 6;
 
   // --- text

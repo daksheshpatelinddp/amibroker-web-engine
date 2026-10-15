@@ -7,6 +7,7 @@ export const host = {
   getBars() { return null; },          // arrays of the symbol on screen (for "Check formula")
   symbol() { return ''; },
   ws() { return null; },               // the Workspace (sheets and panes)
-  loadBars(symbol) { return Promise.resolve(null); }, // arrays for any symbol (scans, backtests, foreign data)
+  loadBars(symbol, interval) { return Promise.resolve(null); }, // arrays for any symbol (scans, backtests, foreign data); interval like '5m' = intraday
+  refreshTimeframes() {},              // rebuild the time-frame box after the intraday list changed
   symbols() { return []; },            // list of symbols in the database
 };

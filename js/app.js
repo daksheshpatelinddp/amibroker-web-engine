@@ -11,6 +11,8 @@ import { formulaStore } from './formula-store.js';
 import { resample } from './timeframe.js';
 import { pseudoStore } from './pseudo-store.js';
 import { barsToArrays } from './indicators.js';
+import { isIntraday, frameMinutes, fetchFrame, loadConfig, frameName } from './intraday.js';   // intraday time frames
+import { refreshTfSelect, openCustomFrame, openIntradaySettings } from './intraday-ui.js';
 
 // Indian-style short numbers for the header line: 1.2K, 3.4L (lakh), 5.6Cr (crore)
 function fmtQty(n) {
@@ -73,11 +75,12 @@ class Application {
             symbol: () => this.ws.active().symbol,
             ws: () => this.ws,
             openSymbol: (sym) => { this.ws.setSymbol(this.ws.active().id, sym); this.openSheet(this.ws.active()); },
-            loadBars: (sym) => this.loadBarsFor(sym),
+            loadBars: (sym, interval) => this.loadBarsFor(sym, interval),
+            refreshTimeframes: () => { refreshTfSelect(document.getElementById('tf-select'), this.ws.active().interval || 'D'); },
             symbols: () => this.symbols || [],
         });
         // other symbols asked for by formulas (Foreign, PlotForeign, RelStrength ...)
-        chartEngine.loadForeign = (sym) => this.loadBarsFor(sym);
+        chartEngine.loadForeign = (sym) => this.loadBarsFor(sym, this.ws.active().interval);
         chartEngine.onForeignLoaded = () => this.relayout();
         try { initToolsMenu('tools-root'); } catch (e) { console.error('Tools menu failed:', e); }
         chartEngine.onFormulaErrors = (paneId, errors) => {
@@ -93,8 +96,14 @@ class Application {
         const on = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
         const tf = document.getElementById('tf-select');
         if (tf) tf.addEventListener('change', () => {
-            this.ws.setInterval(this.ws.active().id, tf.value);   // linked sheets follow
-            if (this.currentRows.length) this.display(this.currentRows);
+            const active = this.ws.active();
+            const apply = (id) => {
+                this.ws.setInterval(active.id, id);   // linked sheets follow
+                this.loadActiveSymbol(active.symbol); // daily bars come from memory; intraday bars from the intraday server
+            };
+            if (tf.value === '__custom') { refreshTfSelect(tf, active.interval || 'D'); openCustomFrame((id, keep) => { if (keep) this.keepFrame(id); apply(id); }, active.interval); return; }
+            if (tf.value === '__manage') { refreshTfSelect(tf, active.interval || 'D'); openIntradaySettings(() => refreshTfSelect(tf, this.ws.active().interval || 'D')); return; }
+            apply(tf.value);
         });
         on('btn-fit', () => chartEngine.fitAll());
         on('btn-latest', () => chartEngine.goLatest());
@@ -161,10 +170,10 @@ class Application {
 
     // Draw the active sheet's panes for the given rows
     display(rows, { keepRange = false } = {}) {
-        this.currentRows = rows;                       // always the daily bars; the sheet's time frame is applied here
+        this.currentRows = rows;                       // daily bars (the sheet's W/M/Q/Y frame is applied here) or, on an intraday frame, the finished intraday bars
         const sheet = this.ws.active();
         const tfBox = document.getElementById('tf-select');
-        if (tfBox) tfBox.value = sheet.interval || 'D';
+        if (tfBox) refreshTfSelect(tfBox, sheet.interval || 'D');
         try {
             chartEngine.render(sheet, resample(rows, sheet.interval || 'D'), { keepRange });
         } catch (e) {
@@ -306,7 +315,11 @@ class Application {
     }
 
     /** Bars (as arrays) for any symbol: pseudo symbols (~~~EQUITY, breadth), the in-memory cache, or the database. Used by scans, backtests and Foreign(). */
-    async loadBarsFor(symbol) {
+    async loadBarsFor(symbol, interval) {
+        if (isIntraday(interval) && !pseudoStore.get(symbol)) {      // intraday: from the intraday server, never from the daily database
+            const rows = await fetchFrame(symbol, frameMinutes(interval), loadConfig());
+            return rows.length ? barsToArrays(rows) : null;
+        }
         const ps = pseudoStore.get(symbol);
         if (ps) return { t: ps.t, o: ps.o, h: ps.h, l: ps.l, c: ps.c, v: ps.v, dq: ps.t.map(() => NaN), delpct: ps.t.map(() => NaN) };
         let rows = this.barCache.get(symbol);
@@ -316,6 +329,46 @@ class Application {
             if (rows && rows.length) { this.barCache.set(symbol, rows); if (this.barCache.size > 60) this.barCache.delete(this.barCache.keys().next().value); }
         }
         return rows && rows.length ? barsToArrays(rows) : null;
+    }
+
+    /** Adds a custom frame ('45m') to the user's list of intraday frames. */
+    keepFrame(id) {
+        const cfg = loadConfig(), m = frameMinutes(id);
+        if (cfg.frames.includes(m)) return;
+        import('./intraday.js').then((x) => x.saveConfig({ ...cfg, frames: [...cfg.frames, m] }));
+    }
+
+    /** Draws an intraday frame of the symbol and keeps it fresh while it stays open. */
+    async showIntraday(symbol, token = this.loadToken, { force = false, keepRange = false } = {}) {
+        if (this.intraTimer) { clearInterval(this.intraTimer); this.intraTimer = null; }
+        const sheet = this.ws.active(), tf = sheet.interval, cfg = loadConfig();
+        this.updateHeader(null);
+        if (!keepRange) this.setCacheText(`Loading ${symbol} ${frameName(tf)} bars...`);
+        try {
+            const rows = await fetchFrame(symbol, frameMinutes(tf), cfg, { force });
+            if (token !== this.loadToken || this.ws.active().interval !== tf) return;   // you moved on
+            if (!rows.length) {
+                this.setCacheText(`No ${frameName(tf)} bars for ${symbol} (market closed, or Yahoo does not know this symbol).`);
+                this.showDiag('');
+                return;
+            }
+            this.display(rows, { keepRange });
+            const last = rows[rows.length - 1];
+            this.setCacheText(`Intraday ${frameName(tf)}: ${rows.length} bars, last ${last.date} (about 15 min delayed)`);
+            const ts = document.getElementById('data-timestamp');
+            if (ts) ts.textContent = `Updated: ${last.date}`;
+            this.showDiag('');
+            if (cfg.refreshSeconds > 0) {
+                this.intraTimer = setInterval(() => {
+                    if (this.ws.active().symbol !== symbol || this.ws.active().interval !== tf || document.hidden) return;
+                    this.showIntraday(symbol, this.loadToken, { force: true, keepRange: true });
+                }, Math.max(15, cfg.refreshSeconds) * 1000);
+            }
+        } catch (e) {
+            if (token !== this.loadToken) return;
+            this.setCacheText('Intraday: ' + (e.message || e));
+            this.showDiag(String(e.message || e));
+        }
     }
 
     async loadActiveSymbol(symbol) {
@@ -328,6 +381,8 @@ class Application {
                 const rows = ps.t.map((d, i) => ({ symbol, date: d, open: ps.o[i], high: ps.h[i], low: ps.l[i], close: ps.c[i], volume: ps.v[i], delivery: NaN }));
                 this.display(rows); this.setCacheText(`${symbol}: ${rows.length} bars (made by the backtester)`); return;
             }
+            if (isIntraday(this.ws.active().interval)) { await this.showIntraday(symbol, token); return; }   // intraday frame
+            if (this.intraTimer) { clearInterval(this.intraTimer); this.intraTimer = null; }
             const hit = this.barCache.get(symbol);
             if (hit) {                                         // opened before in this visit
                 this.display(hit);
