@@ -12,10 +12,17 @@ function download(name, text, type = 'text/plain') {
   const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+/** File text; understands UTF-8 and UTF-16 (Windows Notepad "Unicode") files. */
+async function readText(f) {
+  const b = new Uint8Array(await f.arrayBuffer());
+  if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(b);
+  if (b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder('utf-16be').decode(b);
+  return new TextDecoder('utf-8').decode(b);
+}
 function pickFile(accept) {
   return new Promise((resolve) => {
     const i = document.createElement('input'); i.type = 'file'; i.accept = accept; i.style.display = 'none';
-    i.onchange = async () => { const f = i.files && i.files[0]; i.remove(); resolve(f ? { name: f.name, text: await f.text() } : null); };
+    i.onchange = async () => { const f = i.files && i.files[0]; i.remove(); resolve(f ? { name: f.name, text: await readText(f) } : null); };
     document.body.appendChild(i); i.click();
   });
 }
@@ -123,12 +130,13 @@ export function openCategories(opts = {}) {
       if (t.kind === 'free') mk('Import lists…', async () => {
         const f = await pickFile('.txt,.tls,.csv,.lst,text/plain'); if (!f) return;
         const secs = parseSymbolText(f.text, all).sections;
-        if (Object.keys(secs).length && confirm(`This file has ${Object.keys(secs).length} sections (###). Create one watchlist for each?`)) { const r = st.importSections(state.type, f.text, all); toast(`${r.length} lists created`); render(); return; }
+        if (Object.keys(secs).length && confirm(`This file has ${Object.keys(secs).length} sections (###). Create one watchlist for each?`)) { const r = st.importSections(state.type, f.text, all); toast(`${r.length} lists created, ${r.reduce((a, x) => a + x.added, 0)} symbols added`); render(); return; }
         const base = f.name.replace(/\.[^.]+$/, '');
         const nm = await ask('Import into', 'Create / add to which list?', state.name || base); if (!nm) return;
         if (!st.names(state.type).some((x) => x.toLowerCase() === nm.toLowerCase())) st.add(state.type, nm);
         const hit = st.names(state.type).find((x) => x.toLowerCase() === nm.toLowerCase());
         const r = st.importInto(state.type, hit, f.text, all); state.name = hit;
+        if (!r.total) { toast(`No symbols found in "${f.name}". It starts with: ${f.text.trim().slice(0, 60) || '(empty file)'}`, 7000); render(); return; }
         toast(`${r.added} added to "${hit}"${r.unknown.length ? `, ${r.unknown.length} not in database` : ''}`); render();
       });
       left.appendChild(bar);
@@ -196,6 +204,11 @@ export function openCategories(opts = {}) {
         const act = el('div', 'flex flex-wrap gap-1');
         const mk = (label, fn, cls = BTN) => { const x = el('button', cls + ' !px-2 !py-1', label); x.type = 'button'; x.onclick = fn; act.appendChild(x); };
         mk('Pick from database…', () => openBulkAdd(`Add to ${state.name}`, members, (syms) => { toast(`${st.addSymbols(state.type, state.name, syms)} added`); render(); }));
+        mk('Import TXT / TLS file…', async () => {   // works for every list: Favorites, watchlists, groups, sectors ...
+          const f = await pickFile('.txt,.tls,.csv,.lst,text/plain'); if (!f) return;
+          const r = st.importInto(state.type, state.name, f.text, all);
+          toast(r.total ? `${r.added} added to "${state.name}" (${r.total - r.added} already there)${r.unknown.length ? `, ${r.unknown.length} not in database` : ''}` : 'No symbols found in that file'); render();
+        });
         if (t.kind === 'free' || t.kind === 'fav') mk('Clear', () => { if (members.length && confirm(`Remove all ${members.length} symbols from "${state.name}"?`)) { st.clear(state.type, state.name, all); render(); } }, BTN_DANGER);
         else mk('Unassign all', () => { if (members.length && confirm(`Move all ${members.length} symbols out of "${state.name}"?`)) { st.clear(state.type, state.name, all); render(); } }, BTN_DANGER);
         right.appendChild(act);

@@ -60,7 +60,11 @@ export function openIntradaySettings(onSave = () => {}) {
         const r = await fetch(`${u}/api/health`), j = await r.json();
         status.textContent = j && j.ok ? `Connected. Data source: ${j.provider}. Frames it can send: ${(j.intervals || []).join(', ')}.` : 'The address answered, but it is not the intraday server.';
         status.style.color = j && j.ok ? '#4ade80' : '#f87171';
-      } catch (e) { status.textContent = `Cannot reach it: ${e.message || e}`; status.style.color = '#f87171'; }
+      } catch (e) {
+        const notJson = /JSON|token/i.test(String(e.message || e));
+        status.textContent = notJson ? `${u} answered, but it is not the intraday server (it is probably your website). Use the address of the separate intraday service, for example https://amibroker-intraday.onrender.com` : `Cannot reach it: ${e.message || e}`;
+        status.style.color = '#f87171';
+      }
     };
     b.appendChild(test); b.appendChild(status);
 

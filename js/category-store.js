@@ -61,6 +61,8 @@ export function normSymbol(raw, dbMap = null) {
   if (hit(s)) return hit(s);
   const stripped = s.replace(/\.(NS|BO|BSE|NSE)$/, '');
   if (hit(stripped)) return hit(stripped);
+  const noSeries = stripped.replace(/-(EQ|BE|BZ|SM|N1|IL)$/, '');   // exchange series suffix of a broker export (RELIANCE-EQ)
+  if (noSeries !== stripped && hit(noSeries)) return hit(noSeries);
   return s;
 }
 export const dbMapOf = (all) => new Map((all || []).map((s) => [String(s).toUpperCase(), s]));
@@ -76,7 +78,7 @@ const looksLikeSymbol = (t) => /^[A-Z0-9^&._~\-+]{1,32}$/i.test(t);
  */
 export function parseSymbolText(text, all = null) {
   const db = dbMapOf(all);
-  const lines = String(text || '').replace(/^﻿/, '').split(/\r?\n/);
+  const lines = String(text || '').replace(/^﻿/, '').replace(/\0/g, '').split(/\r?\n/);   // NUL characters = a UTF-16 file read as UTF-8
   const sections = {}; let cur = '', symbols = [], seen = new Set();
   const push = (raw) => {
     const s = normSymbol(raw, db); if (!s || !looksLikeSymbol(s) || HEADER_WORDS.has(s)) return;
@@ -92,9 +94,13 @@ export function parseSymbolText(text, all = null) {
     return { symbols, sections: {} };
   }
   for (const l of body) {
-    if (l.startsWith('###')) { cur = l.replace(/^#+/, '').trim(); if (cur) sections[cur] = sections[cur] || []; continue; }
-    if (l.startsWith('#') || l.startsWith('//') || l.startsWith(';')) continue;
-    l.split(/[,;\t\s|]+/).forEach(push);
+    if (l.startsWith('#') && !l.startsWith('###') || l.startsWith('//') || l.startsWith(';')) continue;
+    // TradingView writes everything on ONE line: ###Section 1,NSE:AAA,NSE:BBB,###Section 2,NSE:CCC  (a section name may contain spaces)
+    for (const part of l.split(/[,;\t|]+/)) {
+      const tok = part.trim(); if (!tok) continue;
+      if (tok.startsWith('###')) { cur = tok.replace(/^#+/, '').trim(); if (cur) sections[cur] = sections[cur] || []; continue; }
+      tok.split(/\s+/).forEach(push);
+    }
   }
   return { symbols, sections };
 }
