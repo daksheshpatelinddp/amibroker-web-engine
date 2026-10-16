@@ -101,4 +101,36 @@ ok(new CategoryStore(st2).names('watchlists').filter((n) => n === 'Mine').length
   const made = st2.importSections('watchlists', '###A,NSE:TCS,NSE:RELIANCE,###B,NSE:M&M', db);
   ok(made.length === 2 && made[0].added === 2 && made[1].added === 1 && st2.count('watchlists', 'A', db) === 2, 'one watchlist per section with its symbols');
 }
+
+// ---- one set of categories per database (market) + index charts
+{
+  const { CategoryStore: CS, categoryStore: cstore, normIndexName } = await import('../js/category-store.js');
+  const cfg = await import('../js/config.js');
+  const memStore = () => { const m = {}; return { m, getItem: (k) => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = v; }, removeItem: (k) => { delete m[k]; } }; };
+  const shared = memStore();
+  const nse = new CS(shared, 'nse'), bse = new CS(shared, 'bse');
+  nse.add('watchlists', 'Swing'); nse.addSymbols('watchlists', 'Swing', ['TCS']); nse.toggleFavorite('TCS');
+  ok(bse.names('watchlists').length === 0 && bse.members('favorites', 'Favorites').length === 0, 'BSE does not see NSE watchlists / favorites');
+  bse.add('watchlists', 'BSE list'); bse.addSymbols('watchlists', 'BSE list', ['500325']);
+  ok(Object.keys(shared.m).sort().join() === 'amibroker_categories_v2,amibroker_categories_v2__bse', 'NSE keeps the old storage key, BSE has its own: ' + Object.keys(shared.m));
+  ok(new CS(shared, 'nse').members('watchlists', 'Swing').join() === 'TCS' && new CS(shared, 'bse').members('watchlists', 'BSE list').join() === '500325', 'each database reloads its own data');
+  ok(bse.names('indexes').includes('SENSEX') && !bse.names('indexes').includes('NIFTY 50') && nse.names('indexes').includes('NIFTY 50'), 'default index names differ per market');
+  ok(bse.names('markets')[0] === 'BSE', 'new database starts with its own market');
+  ok(cstore() === cstore('nse') && cstore('bse') !== cstore('nse'), 'categoryStore() = the active database; categoryStore(id) = that database');
+  // index charts
+  const all = ['NIFTY', 'BANKNIFTY', 'SENSEX', 'RELIANCE', '^NSEI2'];
+  const rows = nse.indexRows(all), by = Object.fromEntries(rows.map((r) => [r.name, r.symbol]));
+  ok(by['NIFTY 50'] === 'NIFTY' && by['NIFTY BANK'] === 'BANKNIFTY' && by.SENSEX === 'SENSEX' && by['NIFTY IT'] === '', 'index names match database symbols (aliases), missing ones are empty: ' + JSON.stringify(by));
+  nse.setIndexSymbol('NIFTY IT', 'reliance'); ok(nse.indexSymbol('NIFTY IT', all) === 'RELIANCE', 'manual chart symbol');
+  nse.rename('indexes', 'NIFTY IT', 'NIFTY INFOTECH'); ok(nse.indexSymbol('NIFTY INFOTECH', all) === 'RELIANCE', 'chart symbol follows a rename');
+  nse.remove('indexes', 'NIFTY INFOTECH'); ok(!('NIFTY INFOTECH' in nse.data.indexSym), 'chart symbol removed with the index');
+  ok(normIndexName('^NSEI') === 'NSEI' && normIndexName('Nifty 50') === 'NIFTY50', 'index name normalising');
+  nse.resetDefaults(); ok(nse.names('indexes').includes('NIFTY 50') && nse.members('favorites', 'Favorites').length === 0, 'reset goes back to that database\'s defaults');
+  // databases added by the user
+  const us = memStore();
+  ok(cfg.addUserDatabase({ name: 'BSE', folder: 'bse' }, us) === 'bse' && cfg.addUserDatabase({ name: 'x', folder: 'nse' }, us) === '' && cfg.addUserDatabase({ name: '', folder: 'abc' }, us) === '', 'add database: ok, duplicate refused, empty name refused');
+  ok(cfg.userDatabases(us).length === 1 && cfg.userDatabases(us)[0].folder === 'bse', 'user databases saved');
+  cfg.removeUserDatabase('bse', us); ok(cfg.userDatabases(us).length === 0, 'remove database');
+  ok(cfg.symbolListKey('nse') === 'symbol_list' && cfg.symbolListKey('bse') === 'symbol_list__bse', 'symbol list key per database');
+}
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) process.exit(1);
