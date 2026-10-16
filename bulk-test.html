@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bulk speed test</title>
+<style>
+  body { margin: 0; padding: 14px; background: #020617; color: #e2e8f0; font: 14px/1.45 system-ui, sans-serif; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  p { color: #94a3b8; margin: 4px 0 12px; font-size: 12px; }
+  label { display: block; margin: 10px 0 4px; color: #94a3b8; font-size: 12px; }
+  input { width: 100px; padding: 8px; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; font-size: 15px; }
+  button { padding: 11px 14px; margin: 8px 8px 0 0; background: #0284c7; color: #fff; border: 0; border-radius: 6px; font-size: 14px; font-weight: 600; }
+  button.alt { background: #334155; }
+  button:disabled { opacity: .5; }
+  pre { background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 12.5px; margin-top: 14px; min-height: 120px; }
+</style>
+</head>
+<body>
+<h1>Bulk speed test</h1>
+<p>Measures how fast THIS phone loads many stocks. Take a screenshot of the result.</p>
+<label>How many stocks</label>
+<input id="n" type="number" value="1000" min="10" max="4000">
+<div>
+  <button id="go">Load stocks</button>
+  <button id="scan" class="alt">Scan all (last 300 bars)</button>
+  <button id="again" class="alt">Load again (cached)</button>
+</div>
+<pre id="out">Ready.</pre>
+
+<script type="module">
+import { RangeEngine } from './js/range-engine.js';
+import { DATABASES, ACTIVE_DB } from './js/config.js';
+
+const out = document.getElementById('out');
+const say = (t) => { out.textContent = t; };
+const btns = [...document.querySelectorAll('button')];
+const busy = (b) => btns.forEach(x => (x.disabled = b));
+const engine = new RangeEngine(DATABASES[ACTIVE_DB]);
+const mb = (b) => (b / 1048576).toFixed(1) + ' MB';
+const sec = (ms) => (ms / 1000).toFixed(1) + ' s';
+const device = `${navigator.hardwareConcurrency || '?'} cores${navigator.connection && navigator.connection.effectiveType ? ', network ' + navigator.connection.effectiveType : ''}`;
+
+// A small backtest-like workload: SMA(20) x SMA(50) crossover count over every loaded bar
+function crossovers(s) {
+  let c = 0, a = 0, b = 0, prev = 0;
+  for (let i = 0; i < s.n; i++) {
+    a += s.c[i]; if (i >= 20) a -= s.c[i - 20];
+    b += s.c[i]; if (i >= 50) b -= s.c[i - 50];
+    if (i >= 49) { const d = a / 20 - b / 50; if (prev <= 0 && d > 0) c++; prev = d; }
+  }
+  return c;
+}
+
+async function run(label, cachedRun) {
+  busy(true);
+  try {
+    const t0 = performance.now();
+    say(`${label}\nStarting the engine...`);
+    await engine.init();
+    const initMs = performance.now() - t0;
+    if (engine.mode !== 'pack') { say('The pack layout is not on R2 yet: run "Convert DB to Parquet & Upload R2" first.'); return; }
+    const n = Math.max(10, Math.min(4000, Number(document.getElementById('n').value) || 1000));
+    const all = await engine.getSymbols();
+    const symbols = all.slice(0, n);
+    let bars = 0, signals = 0, computeMs = 0, last = null;
+    const t1 = performance.now();
+    for await (const s of engine.iterMany(symbols, { onProgress: (p) => {
+      if (p.phase === 'download') say(`${label}\nDownloading... ${p.requests} requests, ${mb(p.bytes)}`);
+      else if (p.phase === 'decode') say(`${label}\nDecoding ${p.done} / ${p.total} stocks...`);
+    } })) {
+      bars += s.n;
+      const c0 = performance.now(); signals += crossovers(s); computeMs += performance.now() - c0;
+    }
+    const totalMs = performance.now() - t1;
+    last = engine.lastBulk || {};
+    say([
+      `${label}  -  done`,
+      ``,
+      `Stocks loaded:      ${last.stocks}`,
+      `Bars (all years):   ${bars.toLocaleString()}`,
+      `Download:           ${last.requests} requests, ${mb(last.bytes || 0)}${last.fromBrowserCache ? ` (+${last.fromBrowserCache} blocks already in the browser)` : ''}`,
+      `Load + decode:      ${sec(totalMs - computeMs)}`,
+      `Test calculation:   ${sec(computeMs)}  (${signals.toLocaleString()} SMA20/50 crossovers)`,
+      `TOTAL:              ${sec(totalMs)}`,
+      `Engine start:       ${sec(initMs)}`,
+      `Device:             ${device}`,
+    ].join('\n'));
+  } catch (e) { say(`Error: ${e.message || e}`); }
+  finally { busy(false); }
+}
+
+async function scan() {
+  busy(true);
+  try {
+    await engine.init();
+    if (engine.mode !== 'pack') { say('The pack layout is not on R2 yet.'); return; }
+    const t0 = performance.now(); let stocks = 0, bars = 0, rising = 0, dl = null;
+    for await (const s of engine.iterRecent({ bars: 300, onProgress: (p) => { if (p.phase === 'downloaded') { dl = p; say(`Scan\nDownloaded ${mb(p.bytes)}${p.fromBrowserCache ? ' (from the browser)' : ''} in ${sec(p.seconds * 1000)}...`); } } })) {
+      stocks++; bars += s.n; if (s.n > 20 && s.c[s.n - 1] > s.c[s.n - 21]) rising++;
+    }
+    const ms = performance.now() - t0;
+    say([`Scan  -  done`, ``, `Stocks scanned:     ${stocks}`, `Bars:               ${bars.toLocaleString()}`,
+         `Download:           ${mb(dl ? dl.bytes : 0)}${dl && dl.fromBrowserCache ? ' (already in the browser)' : ''}`,
+         `TOTAL:              ${sec(ms)}`, `Stocks up over 20 days: ${rising}`, `Device:             ${device}`].join('\n'));
+  } catch (e) { say(`Error: ${e.message || e}`); }
+  finally { busy(false); }
+}
+
+document.getElementById('go').onclick = () => run('Load stocks (first run)');
+document.getElementById('again').onclick = () => run('Load stocks (again, from the browser)');
+document.getElementById('scan').onclick = scan;
+</script>
+</body>
+</html>
