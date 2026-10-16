@@ -461,6 +461,7 @@ class Application {
             if (box && document.activeElement !== box) box.value = symbol;
             if (problems.length) note += ` | ${problems.join(' || ')}`;
             if (data.length === 0) {
+            	this.display([]);
                 this.setCacheText(`No rows for ${symbol} (${source})${note}`);
                 this.showDiag(problems.join(' || '));
                 return;
