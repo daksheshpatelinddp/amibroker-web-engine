@@ -86,4 +86,19 @@ ok(new CategoryStore(st2).names('watchlists').filter((n) => n === 'Mine').length
   ok(await run('Filter = InSector(CategoryFind("Technology", categorySector)) AND Status("lastbarinrange");') === 'AAA', 'InSector + CategoryFind');
   ok(await run('Filter = StrFind(CategoryGetSymbols(categoryWatchlist, 0), Name()) >= 0 AND Status("lastbarinrange");') === 'AAA,CCC', 'CategoryGetSymbols');
 }
+
+// ---- import file formats (TradingView one-line export, broker -EQ suffix, UTF-16 leftovers)
+{
+  const { parseSymbolText: P, CategoryStore: CS } = await import('../js/category-store.js');
+  const db = ['RELIANCE', 'TCS', 'M&M', 'HCL-INSYS'];
+  const tv = P('###Section 1,NSE:RELIANCE,NSE:TCS,###Section 2,NSE:M&M', db);
+  ok(JSON.stringify(tv.sections) === '{"Section 1":["RELIANCE","TCS"],"Section 2":["M&M"]}' && tv.symbols.length === 3, 'TradingView one-line export: ' + JSON.stringify(tv));
+  ok(P('RELIANCE-EQ\nTCS-EQ', db).symbols.join() === 'RELIANCE,TCS', '-EQ suffix removed when the database has the plain name');
+  ok(P('HCL-INSYS\n', db).symbols.join() === 'HCL-INSYS', 'a real hyphen name is kept');
+  ok(P('R\0E\0L\0I\0A\0N\0C\0E\0', db).symbols.join() === 'RELIANCE', 'NUL characters ignored');
+  ok(P('# comment\nTCS', db).symbols.join() === 'TCS' && P('###Banks\nNSE:TCS', db).sections.Banks[0] === 'TCS', 'comments and ### lines');
+  const st2 = new CS({ getItem: () => null, setItem() {} });
+  const made = st2.importSections('watchlists', '###A,NSE:TCS,NSE:RELIANCE,###B,NSE:M&M', db);
+  ok(made.length === 2 && made[0].added === 2 && made[1].added === 1 && st2.count('watchlists', 'A', db) === 2, 'one watchlist per section with its symbols');
+}
 console.log(`\n${pass} passed, ${fail} failed`); if (fail) process.exit(1);
