@@ -13,6 +13,7 @@ import { pseudoStore } from './pseudo-store.js';
 import { barsToArrays } from './indicators.js';
 import { isIntraday, frameMinutes, fetchFrame, loadConfig, frameName } from './intraday.js';   // intraday time frames
 import { refreshTfSelect, openCustomFrame, openIntradaySettings } from './intraday-ui.js';
+import { tradeState, mountTradeBar } from './trade-view.js';
 
 // Indian-style short numbers for the header line: 1.2K, 3.4L (lakh), 5.6Cr (crore)
 function fmtQty(n) {
@@ -82,6 +83,7 @@ class Application {
             activeDb: () => ACTIVE_DB,
             symbolsOf: (dbId, { refresh = false } = {}) => this.symbolsOfDb(dbId, refresh),
             switchDb: (dbId) => { setActiveDb(dbId); location.reload(); },
+            showTrades: (sym, trades, opts) => this.showTrades(sym, trades, opts),
         });
         // other symbols asked for by formulas (Foreign, PlotForeign, RelStrength ...)
         chartEngine.loadForeign = (sym) => this.loadBarsFor(sym, this.ws.active().interval);
@@ -165,6 +167,23 @@ class Application {
         }).catch((e) => { this.symbolsRequested = false; console.warn('Symbol list failed', e); });
     }
 
+    // Analysis trade list -> chart: open the symbol with Buy / Sell arrows for the picked trade (or all trades of it)
+    async showTrades(symbol, trades, { index = 0, mode = 'one', interval = '', onBack = null } = {}) {
+        if (!symbol || !trades || !trades.length) return false;
+        Object.assign(tradeState, { symbol, trades, index: Math.min(Math.max(0, index), trades.length - 1), mode, focus: true, onBack });
+        chartEngine.tradeState = tradeState;
+        const active = this.ws.active();
+        if (interval && interval !== (active.interval || 'D') && (isIntraday(interval) || isIntraday(active.interval))) this.ws.setInterval(active.id, interval);
+        const box = document.getElementById('symbol-input'); if (box) box.value = symbol;
+        if (!this.tradeBar) {
+            const ws = document.getElementById('chart-workspace');
+            this.tradeBar = mountTradeBar(ws, { refresh: () => this.relayout(), hide: () => this.relayout() });
+        }
+        await this.loadActiveSymbol(symbol);
+        this.tradeBar.draw(true);
+        return true;
+    }
+
     // Switch to a sheet: show its symbol (from memory if already loaded)
     async openSheet(sheet) {
         const box = document.getElementById('symbol-input');
@@ -184,6 +203,7 @@ class Application {
             console.error('Chart draw failed:', e);
             this.setCacheText('Chart error: ' + (e.message || e));
         }
+        if (this.tradeBar) this.tradeBar.draw(tradeState.symbol === sheet.symbol);
         this.updateHeader(null);
     }
 

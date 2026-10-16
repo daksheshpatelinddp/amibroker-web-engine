@@ -12,5 +12,6 @@ export const host = {
   symbols() { return []; },            // list of symbols in the database on screen
   activeDb() { return 'nse'; },        // id of that database
   symbolsOf(dbId, opts) { return Promise.resolve([]); },   // symbols of any database (read once, then remembered)
-  switchDb(dbId) {},                   // show another database (reloads the app)
+  switchDb(dbId) {},
+  showTrades(symbol, trades, opts) { return false; },   // open a symbol's chart with the Buy / Sell arrows of backtest trades                   // show another database (reloads the app)
 };

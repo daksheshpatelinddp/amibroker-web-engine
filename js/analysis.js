@@ -193,6 +193,17 @@ export function openAnalysis({ formulaId = null } = {}) {
     const setBusy = (b) => { Object.values(buttons).forEach((x) => { x.disabled = b; x.classList.toggle('opacity-50', b); }); bre.disabled = b; stopBtn.classList.toggle('hidden', !b); };
     const errorsBox = (errors) => { if (!errors || !errors.length) return null; const box = el('div', 'p-2 rounded border border-amber-800 bg-amber-950/30 text-[11px] text-amber-200 max-h-24 overflow-auto'); errors.slice(0, 8).forEach((e) => box.appendChild(el('div', '', e))); if (errors.length > 8) box.appendChild(el('div', '', `... and ${errors.length - 8} more`)); return box; };
     const open = (sym) => host.openSymbol && host.openSymbol(sym);
+    // a trade row -> the symbol's chart with the Buy / Sell arrows of that trade (the bar on the chart switches to all trades of the symbol)
+    const showTrade = (row, trades, results) => {
+      const sym = row[0];
+      if (!host.showTrades) { open(sym); return; }
+      const mine = (trades || []).filter((t) => t.symbol === sym);
+      let i = mine.findIndex((t) => t.trade === row[1] && t.entryDate === row[2] && t.exitDate === row[4]); if (i < 0) i = 0;
+      const root = results.closest('.fixed.inset-0');
+      const back = () => { if (root) root.style.display = ''; };
+      if (root) root.style.display = 'none';
+      Promise.resolve(host.showTrades(sym, mine, { index: i, mode: 'one', interval: st.tf, onBack: back })).then((ok) => { if (!ok) back(); }, () => back());
+    };
 
     // ---- result renderers: each returns { Results, Report?, Charts?, Info }
     const infoPane = (lines, errors) => { const d = el('div', 'space-y-1 text-[11px] text-slate-300'); lines.forEach((l) => d.appendChild(el('div', '', l))); const e = errorsBox(errors); if (e) d.appendChild(e); return d; };
@@ -209,9 +220,9 @@ export function openAnalysis({ formulaId = null } = {}) {
       } else if (mode === 'detail') {
         results.appendChild(table(['Date', 'Equity', 'Cash', 'Exposure %', 'Open', 'Events'], r.equityCurve.map((c) => [c.t, c.equity, c.cash === undefined ? '' : c.cash, c.exposure, c.open, (c.events || []).join('; ')]), { csvName: 'detailed-log.csv' }));
       } else {
-        results.appendChild(el('div', 'text-[11px] text-slate-400', 'Trades (tap a column to sort, tap a row to open the symbol)'));
+        results.appendChild(el('div', 'text-[11px] text-slate-400', 'Trades (tap a column to sort, tap a row to see that trade on the chart)'));
         results.appendChild(table(['Symbol', 'Trade', 'Entry date', 'Entry', 'Exit date', 'Exit', 'Shares', 'Profit', '% Profit', 'Bars', 'Exit by', 'MAE %', 'MFE %'],
-          r.trades.map((t) => [t.symbol, t.trade, t.entryDate, t.entryPrice, t.exitDate, t.exitPrice, t.shares, t.profit, t.pctProfit, t.bars, t.open ? 'open' : t.reason, t.mae, t.mfe]), { onRow: (row) => open(row[0]), csvName: 'trades.csv' }));
+          r.trades.map((t) => [t.symbol, t.trade, t.entryDate, t.entryPrice, t.exitDate, t.exitPrice, t.shares, t.profit, t.pctProfit, t.bars, t.open ? 'open' : t.reason, t.mae, t.mfe]), { onRow: (row) => showTrade(row, r.trades, results), csvName: 'trades.csv' }));
       }
       return results;
     }

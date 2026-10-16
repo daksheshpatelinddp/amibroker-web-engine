@@ -11,6 +11,7 @@ import { intervalName } from './timeframe.js';
 import { isIntraday, frameMinutes, chartTime } from './intraday.js';
 import { pseudoStore } from './pseudo-store.js';
 import { CloudPrimitive, VapPrimitive } from './chart-primitives.js';
+import { tradeMarkers, tradeSpan } from './trade-view.js';
 
 const COLORS = { up: '#22c55e', down: '#ef4444', grid: '#1e293b', border: '#334155', text: '#94a3b8', bg: '#020617' };
 const DEFAULT_BARS_SHOWN = 250;   // a fresh chart opens on about one year; "Fit" shows everything
@@ -107,10 +108,25 @@ export class ChartEngine {
         else chart.timeScale().fitContent();
       } catch (e) { chart.timeScale().fitContent(); }
     }
+    try { this._drawTrades(LWC); } catch (e) { console.warn('Trade arrows failed:', e); }
     this._scheduleLabels();
     this.triggers = {}; this.guiEvents = {};      // a button press fires exactly once
     if (this.onFormulaErrors) {
       for (const [paneId, info] of this.paneInfo) if (info.errors.length) this.onFormulaErrors(paneId, info.errors);
+    }
+  }
+
+  // ---- Buy / Sell arrows of backtest trades (set by tools > Analysis > trade list; see trade-view.js) ----
+  _drawTrades(LWC) {
+    const st = this.tradeState;
+    if (!st || !st.symbol || !st.trades.length || !this.sheet || st.symbol !== this.sheet.symbol || !this.mainSeries || !LWC.createSeriesMarkers) return;
+    const labels = this.arrays.t, t = this.times;
+    const m = tradeMarkers(labels, st.trades, { mode: st.mode, index: st.index }).map((x) => ({ time: t[x.idx], position: x.position, shape: x.shape, color: x.color, size: x.size, text: x.text }));
+    LWC.createSeriesMarkers(this.mainSeries, m);
+    if (st.focus) {
+      st.focus = false;
+      const span = tradeSpan(labels, st.trades[st.index] || st.trades[0]);
+      if (span) { try { this.chart.timeScale().setVisibleLogicalRange(span); } catch (e) { /* ignore */ } }
     }
   }
 
