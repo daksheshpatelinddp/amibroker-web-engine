@@ -204,6 +204,13 @@ export function openCategories(opts = {}) {
         const act = el('div', 'flex flex-wrap gap-1');
         const mk = (label, fn, cls = BTN) => { const x = el('button', cls + ' !px-2 !py-1', label); x.type = 'button'; x.onclick = fn; act.appendChild(x); };
         mk('Pick from database…', () => openBulkAdd(`Add to ${state.name}`, members, (syms) => { toast(`${st.addSymbols(state.type, state.name, syms)} added`); render(); }));
+        mk('Paste a list…', () => openModal(`Paste symbols into ${state.name}`, (pb, pclose) => {   // for phones: copy the list anywhere, paste it here
+          pb.appendChild(el('div', 'text-[11px] text-slate-400', 'Paste symbols separated by commas, spaces or new lines. TradingView lists (NSE:TCS), RELIANCE.NS, a CSV with a Symbol column, all work.'));
+          const ta = el('textarea', INPUT + ' w-full h-40'); ta.placeholder = 'RELIANCE, TCS, INFY ...'; pb.appendChild(ta);
+          const go = el('button', BTN_PRIMARY + ' w-full', 'Add to list'); go.type = 'button';
+          go.onclick = () => { const r = st.importInto(state.type, state.name, ta.value, all); if (!r.total) { toast('No symbols found in the pasted text.'); return; } pclose.force(); toast(`${r.added} added to "${state.name}" (${r.total - r.added} already there)${r.unknown.length ? `, ${r.unknown.length} not in database` : ''}`); render(); };
+          pb.appendChild(go);
+        }, { stack: true }));
         mk('Import TXT / TLS file…', async () => {   // works for every list: Favorites, watchlists, groups, sectors ...
           const f = await pickFile('.txt,.tls,.csv,.lst,text/plain'); if (!f) return;
           const r = st.importInto(state.type, state.name, f.text, all);
