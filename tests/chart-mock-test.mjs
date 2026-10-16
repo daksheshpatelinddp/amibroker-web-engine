@@ -47,5 +47,24 @@ for (const f of BUILTIN_FORMULAS) {
     fail += bad; console.log(`${cnt} formulas on ${tf} bars (${irows.length} bars): ${bad} failed`);
   }
 }
+// trade arrows from the Analysis trade list: drawn on the candle series, only for the symbol on screen
+{
+  const rec = []; const old = window.LightweightCharts.createSeriesMarkers;
+  window.LightweightCharts.createSeriesMarkers = (series, m) => { rec.push({ series, m }); };
+  const sheet = { id: 's', symbol: 'X', interval: 'D', priceStyle: 'candle', panes: [{ id: 'pp', kind: 'price', weight: 3, overlays: [], params: {} }] };
+  const trades = [{ symbol: 'X', trade: 'Long', entryDate: rows[100].date, entryPrice: 10, exitDate: rows[110].date, exitPrice: 12, pctProfit: 20, profit: 2 }, { symbol: 'X', trade: 'Long', entryDate: rows[200].date, entryPrice: 11, exitDate: rows[205].date, exitPrice: 9, pctProfit: -18, profit: -2 }];
+  const check = (c, m) => { if (!c) { fail++; console.log('FAIL', m); } };
+  chartEngine.tradeState = { symbol: 'X', trades, index: 1, mode: 'one', focus: true };
+  chartEngine.render(sheet, rows);
+  check(rec.length === 1 && rec[0].series === chartEngine.mainSeries, 'markers go on the candle series');
+  check(rec[0].m.length === 2 && rec[0].m[0].time === rows[200].date && rec[0].m[1].time === rows[205].date, 'picked trade arrows at its entry/exit bars');
+  check(chartEngine.tradeState.focus === false, 'focus is used once');
+  rec.length = 0; chartEngine.tradeState.mode = 'all'; chartEngine.render(sheet, rows, { keepRange: true });
+  check(rec[0].m.length === 4, 'all trades: 4 arrows');
+  rec.length = 0; chartEngine.render({ ...sheet, symbol: 'Y' }, rows);
+  check(rec.length === 0, 'no arrows on another symbol');
+  chartEngine.tradeState = null; window.LightweightCharts.createSeriesMarkers = old;
+  console.log('trade arrows on the mock chart checked');
+}
 console.log(`${n} formulas rendered through the mock chart (${calls.series} series, ${calls.prims} primitives, ${calls.markers} marker sets); ${fail} failed`);
 process.exit(fail ? 1 : 0);
