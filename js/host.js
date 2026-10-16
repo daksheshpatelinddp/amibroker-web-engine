@@ -9,5 +9,8 @@ export const host = {
   ws() { return null; },               // the Workspace (sheets and panes)
   loadBars(symbol, interval) { return Promise.resolve(null); }, // arrays for any symbol (scans, backtests, foreign data); interval like '5m' = intraday
   refreshTimeframes() {},              // rebuild the time-frame box after the intraday list changed
-  symbols() { return []; },            // list of symbols in the database
+  symbols() { return []; },            // list of symbols in the database on screen
+  activeDb() { return 'nse'; },        // id of that database
+  symbolsOf(dbId, opts) { return Promise.resolve([]); },   // symbols of any database (read once, then remembered)
+  switchDb(dbId) {},                   // show another database (reloads the app)
 };

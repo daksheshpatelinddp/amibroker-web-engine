@@ -2,6 +2,7 @@
 // and Watchlists, Favorites, Indexes (a symbol can be in any number of them), plus ALL.
 // Pure data + parsing: no DOM, so it can be tested in Node. The UI is in categories-ui.js.
 
+import { ACTIVE_DB, DATABASES } from './config.js';
 export const UNASSIGNED = '(Unassigned)';
 
 export const TYPES = [
@@ -12,7 +13,7 @@ export const TYPES = [
   { id: 'industries', label: 'Industries', kind: 'industry', one: 'industry', help: 'Finer classification inside a sector.' },
   { id: 'watchlists', label: 'Watchlists', kind: 'free', one: 'watchlist', help: 'Any symbol can be in any number of watchlists.' },
   { id: 'favorites', label: 'Favorites', kind: 'fav', one: 'favorites list', help: 'Your starred symbols.' },
-  { id: 'indexes', label: 'Indexes', kind: 'free', one: 'index', help: 'Index constituents (NIFTY 50...). A symbol can be in many.' },
+  { id: 'indexes', label: 'Indexes', kind: 'free', one: 'index', help: 'The indices of this market (NIFTY 50, SENSEX...), not stocks. Tap a name to open its chart; ▤ shows the stocks inside it (used by InIndex() in formulas).' },
   { id: 'gics', label: 'GICS', kind: 'code', one: 'GICS category', help: 'Global Industry Classification Standard. A code such as 4510 also belongs to its parent 45.' },
   { id: 'icb', label: 'ICB', kind: 'code', one: 'ICB category', help: 'Industry Classification Benchmark. A code such as 8300 also belongs to its parent 8000.' },
 ];
@@ -47,7 +48,22 @@ export const DEFAULT_ICB = ['0001 Oil & Gas', '1000 Basic Materials', '2000 Indu
   '0500 Oil & Gas', '1300 Chemicals', '1700 Basic Resources', '2300 Construction & Materials', '2700 Industrial Goods & Services', '3300 Automobiles & Parts', '3500 Food & Beverage', '3700 Personal & Household Goods', '4500 Health Care',
   '5300 Retail', '5500 Media', '5700 Travel & Leisure', '6500 Telecommunications', '7500 Utilities', '8300 Banks', '8500 Insurance', '8600 Real Estate', '8700 Financial Services', '9500 Technology'];
 
-const KEY = 'amibroker_categories_v2', OLD_KEY = 'amibroker_categories';
+const OLD_KEY = 'amibroker_categories';
+// Each database (market) keeps its own categories. NSE keeps the key used before databases were separated.
+const keyFor = (db) => (db === 'nse' ? 'amibroker_categories_v2' : `amibroker_categories_v2__${db}`);
+
+// Index names of each market (the indices themselves, not their stocks) and other names the database may use for them.
+export const DEFAULT_INDEXES_BY_DB = {
+  nse: DEFAULT_INDEXES,
+  bse: ['SENSEX', 'BSE 100', 'BSE 200', 'BSE 500', 'BSE MIDCAP', 'BSE SMALLCAP'],
+  nasdaq: ['NASDAQ 100', 'NASDAQ COMPOSITE'],
+};
+export const INDEX_ALIASES = {
+  NIFTY50: ['NIFTY', 'NSEI', 'CNXNIFTY'], NIFTYNEXT50: ['NIFTYJR', 'CNXNXT50', 'NIFTYNEXT'], NIFTYBANK: ['BANKNIFTY', 'CNXBANK', 'NSEBANK'], NIFTYIT: ['CNXIT'],
+  NIFTYMIDCAP100: ['CNXMIDCAP', 'NIFTYMIDCAP'], NIFTYSMALLCAP100: ['CNXSMALLCAP', 'NIFTYSMALLCAP'], SENSEX: ['BSESN', 'BSE30', 'SENSEX30'],
+  NASDAQ100: ['NDX', 'NASDAQ100INDEX'], NASDAQCOMPOSITE: ['IXIC', 'COMP', 'NASDAQ'],
+};
+export const normIndexName = (s) => String(s || '').toUpperCase().replace(/^\^/, '').replace(/[^A-Z0-9]/g, '');
 const codeOf = (name) => String(name).split(/\s+/)[0];
 
 // ---- symbol text helpers -------------------------------------------------------------------------------------
@@ -119,27 +135,30 @@ function csvRows(text) {
 }
 
 // ---- the store -------------------------------------------------------------------------------------------------
-function fresh() {
+function fresh(db = 'nse') {
   return {
     v: 2,
-    names: { groups: [...DEFAULT_GROUPS], markets: [...DEFAULT_MARKETS], watchlists: [], indexes: [...DEFAULT_INDEXES], gics: [...DEFAULT_GICS], icb: [...DEFAULT_ICB] },
+    names: { groups: [...DEFAULT_GROUPS], markets: db === 'nse' ? [...DEFAULT_MARKETS] : [((DATABASES[db] || {}).name) || db.toUpperCase()], watchlists: [], indexes: [...(DEFAULT_INDEXES_BY_DB[db] || [])], gics: [...DEFAULT_GICS], icb: [...DEFAULT_ICB] },
     sectors: [...DEFAULT_SECTORS],
     industries: DEFAULT_INDUSTRIES.map((x) => ({ ...x })),
     assign: { groups: {}, markets: {}, sectors: {}, industries: {}, gics: {}, icb: {} },
     lists: { watchlists: {}, indexes: {} },
     favorites: [],
+    indexSym: {},          // index name -> the database symbol whose chart it opens (when the automatic match is wrong)
   };
 }
 
 export class CategoryStore {
-  constructor(storage = null) {
+  constructor(storage = null, dbId = 'nse') {
     this.storage = storage || (typeof localStorage !== 'undefined' ? localStorage : null);
+    this.dbId = dbId; this.KEY = keyFor(dbId);
     this.listeners = [];
-    this.data = this._load() || fresh();
-    this._migrateOld();
+    this.data = this._load() || fresh(dbId);
+    if (!this.data.indexSym) this.data.indexSym = {};
+    if (dbId === 'nse') this._migrateOld();
   }
-  _load() { try { const s = this.storage && this.storage.getItem(KEY); if (s) { const d = JSON.parse(s); if (d && d.v === 2) return d; } } catch (e) {} return null; }
-  save() { try { this.storage && this.storage.setItem(KEY, JSON.stringify(this.data)); } catch (e) {} this.listeners.forEach((f) => { try { f(); } catch (e) {} }); }
+  _load() { try { const s = this.storage && this.storage.getItem(this.KEY); if (s) { const d = JSON.parse(s); if (d && d.v === 2) return d; } } catch (e) {} return null; }
+  save() { try { this.storage && this.storage.setItem(this.KEY, JSON.stringify(this.data)); } catch (e) {} this.listeners.forEach((f) => { try { f(); } catch (e) {} }); }
   onChange(fn) { this.listeners.push(fn); return () => { this.listeners = this.listeners.filter((x) => x !== fn); }; }
 
   /** Folders you made in the first version of this screen (groups / sectors / industries / watchlists / favorites) move over. */
@@ -227,7 +246,7 @@ export class CategoryStore {
     const mapAssign = (t) => { for (const s of Object.keys(d.assign[t])) if (d.assign[t][s] === oldName) d.assign[t][s] = newName; };
     if (k === 'sector') { d.sectors = d.sectors.map((n) => (n === oldName ? newName : n)); d.industries.forEach((i) => { if (i.sector === oldName) i.sector = newName; }); mapAssign('sectors'); }
     else if (k === 'industry') { d.industries.forEach((i) => { if (i.name === oldName) i.name = newName; }); mapAssign('industries'); }
-    else if (k === 'free') { d.names[type] = d.names[type].map((n) => (n === oldName ? newName : n)); d.lists[type][newName] = d.lists[type][oldName] || []; delete d.lists[type][oldName]; }
+    else if (k === 'free') { d.names[type] = d.names[type].map((n) => (n === oldName ? newName : n)); d.lists[type][newName] = d.lists[type][oldName] || []; delete d.lists[type][oldName]; if (type === 'indexes' && d.indexSym && d.indexSym[oldName]) { d.indexSym[newName] = d.indexSym[oldName]; delete d.indexSym[oldName]; } }
     else { d.names[type] = d.names[type].map((n) => (n === oldName ? newName : n)); mapAssign(type); }
     this.save(); return true;
   }
@@ -237,7 +256,7 @@ export class CategoryStore {
     const unassign = (t) => { for (const s of Object.keys(d.assign[t])) if (d.assign[t][s] === name) delete d.assign[t][s]; };
     if (k === 'sector') { d.sectors = d.sectors.filter((n) => n !== name); d.industries.forEach((i) => { if (i.sector === name) i.sector = ''; }); unassign('sectors'); }
     else if (k === 'industry') { d.industries = d.industries.filter((i) => i.name !== name); unassign('industries'); }
-    else if (k === 'free') { d.names[type] = d.names[type].filter((n) => n !== name); delete d.lists[type][name]; }
+    else if (k === 'free') { d.names[type] = d.names[type].filter((n) => n !== name); delete d.lists[type][name]; if (type === 'indexes' && d.indexSym) delete d.indexSym[name]; }
     else { d.names[type] = d.names[type].filter((n) => n !== name); unassign(type); }
     this.save(); return true;
   }
@@ -370,8 +389,24 @@ export class CategoryStore {
   }
   exportJson() { return JSON.stringify(this.data, null, 1); }
   importJson(text) { const d = JSON.parse(text); if (!d || d.v !== 2 || !d.names) throw new Error('Not a categories backup file'); this.data = d; this.save(); }
-  resetDefaults() { this.data = fresh(); this.save(); }
+  resetDefaults() { this.data = fresh(this.dbId); this.save(); }
+
+  // ------------------------------------------------------------ indexes (the index instruments of this market)
+  /** The database symbol whose chart an index opens, or '' when the database has none. all = symbols of the database. */
+  indexSymbol(name, all = [], map = null) {
+    const m = map || new Map(all.map((s) => [normIndexName(s), s]));
+    const cands = [this.data.indexSym[name], name, ...(INDEX_ALIASES[normIndexName(name)] || [])].filter(Boolean);
+    for (const c of cands) { const hit = m.get(normIndexName(c)); if (hit) return hit; }
+    return '';
+  }
+  /** [{name, symbol, members}] for the Indexes tab; symbol is '' when the database has no chart for that index. */
+  indexRows(all = []) {
+    const m = new Map(all.map((s) => [normIndexName(s), s]));
+    return this.names('indexes').map((name) => ({ name, symbol: this.indexSymbol(name, all, m), members: this.count('indexes', name, all) }));
+  }
+  setIndexSymbol(name, symbol) { if (symbol) this.data.indexSym[name] = String(symbol).trim().toUpperCase(); else delete this.data.indexSym[name]; this.save(); }
 }
 
-let _store = null;
-export function categoryStore() { if (!_store) _store = new CategoryStore(); return _store; }
+// One store per database. categoryStore() = the database the app is showing; categoryStore('bse') = another one.
+const _stores = new Map();
+export function categoryStore(dbId = ACTIVE_DB) { if (!_stores.has(dbId)) _stores.set(dbId, new CategoryStore(null, dbId)); return _stores.get(dbId); }

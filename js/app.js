@@ -4,7 +4,7 @@ import { SheetManager } from './sheet-manager.js';
 import { RangeEngine } from './range-engine.js';
 import { Workspace } from './workspace.js';
 import { openAddPane, openPaneEditor } from './pane-ui.js';
-import { DATABASES, ACTIVE_DB } from './config.js';
+import { DATABASES, ACTIVE_DB, setActiveDb, symbolListKey } from './config.js';
 import { host } from './host.js';
 import { initToolsMenu } from './tools-menu.js';
 import { formulaStore } from './formula-store.js';
@@ -29,7 +29,7 @@ class Application {
     constructor() {
         this.initialized = false;
         this.symbols = [];
-        try { this.symbols = JSON.parse(localStorage.getItem('symbol_list') || '[]'); } catch (e) {}
+        try { this.symbols = JSON.parse(localStorage.getItem(symbolListKey()) || '[]'); } catch (e) {}
         this.ws = new Workspace();          // sheets, panes, overlays (saved in the browser)
         this.barCache = new Map();          // symbol -> rows, so switching sheets is instant
         this.currentRows = [];
@@ -78,6 +78,10 @@ class Application {
             loadBars: (sym, interval) => this.loadBarsFor(sym, interval),
             refreshTimeframes: () => { refreshTfSelect(document.getElementById('tf-select'), this.ws.active().interval || 'D'); },
             symbols: () => this.symbols || [],
+            // databases (markets): every one has its own symbols, categories, watchlists, favorites and indexes
+            activeDb: () => ACTIVE_DB,
+            symbolsOf: (dbId, { refresh = false } = {}) => this.symbolsOfDb(dbId, refresh),
+            switchDb: (dbId) => { setActiveDb(dbId); location.reload(); },
         });
         // other symbols asked for by formulas (Foreign, PlotForeign, RelStrength ...)
         chartEngine.loadForeign = (sym) => this.loadBarsFor(sym, this.ws.active().interval);
@@ -156,7 +160,7 @@ class Application {
         engine.getSymbols().then((list) => {
             if (list.length) {
                 this.symbols = list;
-                try { localStorage.setItem('symbol_list', JSON.stringify(list)); } catch (e) {}
+                try { localStorage.setItem(symbolListKey(), JSON.stringify(list)); } catch (e) {}
             }
         }).catch((e) => { this.symbolsRequested = false; console.warn('Symbol list failed', e); });
     }
@@ -306,11 +310,24 @@ class Application {
         });
     }
 
+    /** Symbols of any database. The one on screen is already loaded; others are read once and remembered in this browser. */
+    async symbolsOfDb(dbId, refresh = false) {
+        if (dbId === ACTIVE_DB) return this.symbols || [];
+        const key = symbolListKey(dbId);
+        if (!refresh) { try { const c = JSON.parse(localStorage.getItem(key) || '[]'); if (c.length) return c; } catch (e) { /* load below */ } }
+        if (!DATABASES[dbId]) return [];
+        const eng = new RangeEngine(DATABASES[dbId]);
+        await eng.init();
+        const list = await eng.getSymbols();
+        if (list.length) { try { localStorage.setItem(key, JSON.stringify(list)); } catch (e) { /* storage full */ } }
+        return list;
+    }
+
     refreshSymbolList() {
         const all = dataEngine.getAllSymbols();
         if (all.length > 0) {
             this.symbols = all;
-            try { localStorage.setItem('symbol_list', JSON.stringify(all)); } catch (e) {}
+            try { localStorage.setItem(symbolListKey(), JSON.stringify(all)); } catch (e) {}
         }
     }
 
