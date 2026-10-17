@@ -177,7 +177,7 @@ const colorAt = (c, k) => { const x = c === undefined ? undefined : (typeof c ==
  * Rows of the exploration, ready to show: table = { head:[names], cols:[{name,kind}], rows:[[{v,text,fg,bg}]], summary:[[...]] }
  * Also keeps the older fields: rows[].values, columns (names), xy.
  */
-export async function explore({ code, symbols, session, range, from, to, params, maxRows = 5000, onProgress, cancel }) {
+export async function explore({ code, symbols, session, range, from, to, params, maxRows = 1000000, onProgress, cancel }) {
   const rows = [], errors = [], xy = {}, colNames = []; let meta = null, noDefault = false, sortCols = [], summary = null;
   await eachSymbol(symbols, onProgress, cancel, async (sym, i) => {
     const b = await session.get(sym); if (!b) return;

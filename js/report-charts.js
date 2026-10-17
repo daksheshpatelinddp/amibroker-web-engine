@@ -88,15 +88,15 @@ export function statsHtml(stats) {
   return `<table class="rt"><tr><th>Statistic</th><th>All trades</th><th>Long</th><th>Short</th></tr>${rows.map(([l, a, lo, sh, k]) => `<tr><td>${esc(l)}</td><td>${fmtKind(a, k)}</td><td>${fmtKind(lo, k)}</td><td>${fmtKind(sh, k)}</td></tr>`).join('')}</table>`;
 }
 
-export function chartsFor(result, { distSpacing = 1 } = {}) {
+export function chartsFor(result, { distSpacing = 1, big = false } = {}) {
   const eq = result.equityCurve.map((p) => p.equity); let pk = -Infinity; const dd = eq.map((v) => { pk = Math.max(pk, v); return pk > 0 ? (v / pk - 1) * 100 : 0; });
-  const h = histogram(result.trades.map((t) => t.pctProfit), distSpacing);
+  const h = histogram(result.trades.map((t) => t.pctProfit), distSpacing), k = big ? 2 : 1;
   return {
-    equity: svgLine([{ values: eq, color: '#38bdf8' }], { title: 'Equity', fill: true }),
-    drawdown: svgLine([{ values: dd, color: '#ef4444' }], { title: 'Drawdown %', height: 100, fill: true }),
-    distribution: svgBars(h.bins, { title: `Profit distribution (% per trade, bar width ${h.width}%)` }),
-    mae: svgScatter(result.trades.map((t) => ({ x: t.mae, y: t.pctProfit, label: t.symbol })), { title: 'MAE vs profit', xLabel: 'MAE %', yLabel: 'profit %', color: (p) => (p.y >= 0 ? '#22c55e' : '#ef4444') }),
-    mfe: svgScatter(result.trades.map((t) => ({ x: t.mfe, y: t.pctProfit, label: t.symbol })), { title: 'MFE vs profit', xLabel: 'MFE %', yLabel: 'profit %', color: (p) => (p.y >= 0 ? '#22c55e' : '#ef4444') }),
+    equity: svgLine([{ values: eq, color: '#38bdf8' }], { title: 'Equity', fill: true, height: 150 * k }),
+    drawdown: svgLine([{ values: dd, color: '#ef4444' }], { title: 'Drawdown %', height: 100 * k, fill: true }),
+    distribution: svgBars(h.bins, { title: `Profit distribution (% per trade, bar width ${h.width}%)`, height: 130 * k }),
+    mae: svgScatter(result.trades.map((t) => ({ x: t.mae, y: t.pctProfit, label: t.symbol })), { title: 'MAE vs profit', xLabel: 'MAE %', yLabel: 'profit %', height: 200 * (big ? 1.6 : 1), color: (p) => (p.y >= 0 ? '#22c55e' : '#ef4444') }),
+    mfe: svgScatter(result.trades.map((t) => ({ x: t.mfe, y: t.pctProfit, label: t.symbol })), { title: 'MFE vs profit', xLabel: 'MFE %', yLabel: 'profit %', height: 200 * (big ? 1.6 : 1), color: (p) => (p.y >= 0 ? '#22c55e' : '#ef4444') }),
   };
 }
 

@@ -36,7 +36,7 @@ export function openAnalysisSettings({ onSave } = {}) {
           chk(g, 'reverseSignalForcesExit', 'Reverse entry signal forces exit', 'A Short signal while long closes the long (and the opposite)'),
           chk(g, 'allowSameBarExit', 'Allow same bar exit (single bar trade)', 'Use only when you enter at the open'),
           chk(g, 'priceBounds', 'Check trade prices against the bar\'s High-Low', 'BuyPrice etc. outside the bar are pulled back into it'),
-          head('Analysis window'), num(g, 'maxSymbols', 'Largest number of symbols per run', 'A safety limit for "All symbols" (each symbol is loaded one by one)'),
+          head('Analysis window'), num(g, 'maxSymbols', 'Largest number of symbols per run (0 = no limit)', 'Optional safety limit for "All symbols" (each symbol is loaded one by one)'),
         ];
       },
       Trades() {

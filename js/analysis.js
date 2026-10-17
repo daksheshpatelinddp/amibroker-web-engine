@@ -1,6 +1,6 @@
 // Analysis window (AmiBroker's Analysis): Scan, Explore, Backtest (portfolio / individual), Optimize, Walk-Forward, with Apply to / Filter,
 // Range, Settings, Projects and Results / Report / Charts / Info tabs. The engine is in analysis-core.js (no DOM).
-import { el, openModal, toast, labeled, BTN, BTN_PRIMARY, INPUT } from './ui.js';
+import { el, openModal, toast, labeled, BTN, BTN_PRIMARY, BTN_DANGER, INPUT } from './ui.js';
 import { formulaStore } from './formula-store.js';
 import { host } from './host.js';
 import { chartEngine } from './chart-engine.js';
@@ -33,31 +33,45 @@ function download(name, text, type = 'text/csv') {
 const cellText = (c) => (c && typeof c === 'object' ? c.text : c === undefined || c === null ? '' : typeof c === 'number' ? f2(c) : String(c));
 const cellVal = (c) => (c && typeof c === 'object' ? c.v : c);
 
-/** Sortable result list. Cells are values or {text, v, fg, bg}. Rows can be tapped (onRow). */
+/** Sortable result list. Cells are values or {text, v, fg, bg}. Rows can be tapped (onRow). Shows `max` rows at a time with "Show more" (no limit), a search box finds any row, CSV has every row. */
 function table(cols, rows, { onRow = null, max = 500, extraRows = [], csvName = 'analysis.csv' } = {}) {
   const wrap = el('div', 'overflow-auto max-h-80 border border-slate-800 rounded');
   const t = el('table', 'w-full text-[11px] text-slate-200'), head = el('tr', 'bg-slate-800 sticky top-0');
-  let sortCol = -1, asc = true; const data = rows.slice(), body = el('tbody');
+  let sortCol = -1, asc = true, shown = max, query = ''; const data = rows.slice(), body = el('tbody');
+  const texts = new Map(); const hay = (r) => { let h = texts.get(r); if (h === undefined) { h = r.map(cellText).join(' ').toLowerCase(); texts.set(r, h); } return h; };
+  const view = () => (query ? data.filter((r) => hay(r).includes(query)) : data);
+  const foot = el('div', 'flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500'), count = el('span'), more = el('span', 'space-x-3');
   const draw = () => {
-    body.innerHTML = '';
-    data.slice(0, max).forEach((r) => {
+    body.innerHTML = ''; const v = view();
+    v.slice(0, shown).forEach((r) => {
       const tr = el('tr', 'border-t border-slate-800' + (onRow ? ' active:bg-slate-700' : ''));
       r.forEach((c) => { const td = el('td', 'px-2 py-1 whitespace-nowrap', cellText(c)); if (c && typeof c === 'object') { if (c.fg) td.style.color = c.fg; if (c.bg) td.style.background = c.bg; } tr.appendChild(td); });
       if (onRow) tr.onclick = () => onRow(r.map(cellVal));
       body.appendChild(tr);
     });
     extraRows.forEach((r) => { const tr = el('tr', 'border-t border-slate-700 bg-slate-900 font-semibold'); r.forEach((c) => tr.appendChild(el('td', 'px-2 py-1 whitespace-nowrap', c))); body.appendChild(tr); });
+    count.textContent = query ? `${Math.min(shown, v.length)} of ${v.length} matching (${rows.length} in all)` : `${Math.min(shown, v.length)} of ${rows.length} row${rows.length === 1 ? '' : 's'}`;
+    more.innerHTML = '';
+    if (v.length > shown) {
+      const m = el('button', 'underline text-sky-400', `Show ${Math.min(max, v.length - shown)} more`); m.type = 'button'; m.onclick = () => { shown += max; draw(); };
+      const a = el('button', 'underline text-sky-400', `Show all ${v.length}`); a.type = 'button'; a.onclick = () => { shown = v.length; draw(); };
+      more.appendChild(m); more.appendChild(a);
+    }
   };
   cols.forEach((c, i) => {
     const th = el('th', 'px-2 py-1 text-left text-slate-400 font-semibold whitespace-nowrap', c);
-    th.onclick = () => { asc = sortCol === i ? !asc : true; sortCol = i; data.sort((a, b) => { const x = cellVal(a[i]), y = cellVal(b[i]); return (x < y ? -1 : x > y ? 1 : 0) * (asc ? 1 : -1); }); draw(); };
+    th.onclick = () => { asc = sortCol === i ? !asc : true; sortCol = i; data.sort((a, b) => { const x = cellVal(a[i]), y = cellVal(b[i]); return (x < y ? -1 : x > y ? 1 : 0) * (asc ? 1 : -1); }); shown = max; draw(); };
     head.appendChild(th);
   });
-  const th = el('thead'); th.appendChild(head); t.appendChild(th); t.appendChild(body); wrap.appendChild(t); draw();
-  const box = el('div', 'space-y-1'); box.appendChild(wrap);
-  const foot = el('div', 'flex items-center justify-between text-[10px] text-slate-500');
-  foot.appendChild(el('span', '', `${rows.length} row${rows.length === 1 ? '' : 's'}${rows.length > max ? ` (first ${max} shown, CSV has all)` : ''}`));
-  const csv = el('button', 'underline text-sky-400', 'Download CSV'); csv.type = 'button';
+  const th = el('thead'); th.appendChild(head); t.appendChild(th); t.appendChild(body); wrap.appendChild(t);
+  const box = el('div', 'space-y-1');
+  if (rows.length > 20) {
+    const q = el('input', INPUT + ' w-full'); q.type = 'search'; q.placeholder = `Find in all ${rows.length} rows (symbol, date, value ...)`;
+    q.oninput = () => { query = q.value.trim().toLowerCase(); shown = max; draw(); }; box.appendChild(q);
+  }
+  draw(); box.appendChild(wrap);
+  foot.appendChild(count); foot.appendChild(more);
+  const csv = el('button', 'underline text-sky-400', `Download CSV (all ${rows.length})`); csv.type = 'button';
   csv.onclick = () => download(csvName, toCSV(cols, rows.map((r) => r.map(cellText))));
   foot.appendChild(csv); box.appendChild(foot); return box;
 }
@@ -123,9 +137,27 @@ function openProjects(getState, applyState) {
 }
 
 // ------------------------------------------------------------------ main window
+let win = null;   // the open Analysis window (hidden, not closed, when you leave it: a running analysis keeps going)
 export function openAnalysis({ formulaId = null } = {}) {
-  ensureCss();
+  if (win && document.body.contains(win.root)) { win.show(); if (formulaId) win.setFormula(formulaId); return; }
+  win = null; ensureCss();
+  let cleanup = () => {}, hideWin = () => {};
   openModal('Analysis', (body, close) => {
+    // ---- minimise instead of close: the window and a running analysis stay alive; a button at the bottom-right brings it back
+    const root = body.closest('.fixed.inset-0');
+    const chip = el('button', 'fixed bottom-14 right-2 z-[55] max-w-[80vw] truncate px-3 py-2 rounded-full bg-sky-600 text-white text-xs font-semibold shadow-lg'); chip.type = 'button'; chip.style.display = 'none'; document.body.appendChild(chip);
+    let busyNow = false, progText = '', hasResults = false;
+    const chipText = () => { chip.textContent = busyNow ? `🔎 Analysis running ${progText}` : hasResults ? '🔎 Analysis: results ready' : '🔎 Analysis'; };
+    const minimize = () => { root.style.display = 'none'; chip.style.display = ''; chipText(); };
+    const showWin = () => { root.style.display = ''; chip.style.display = 'none'; };
+    chip.onclick = showWin; hideWin = minimize;
+    cleanup = () => { chip.remove(); win = null; };
+    win = { root, show: showWin, setFormula: (id) => { if (all.some((f) => f.id === id)) { fsel.value = id; fsel.dispatchEvent(new Event('change')); } } };
+    const bar = el('div', 'flex justify-end space-x-2 -mt-1');
+    const minBtn = el('button', BTN + ' !py-1', '▁ Minimise'); minBtn.type = 'button'; minBtn.title = 'Go to the chart; a running analysis keeps going'; minBtn.onclick = minimize;
+    const endBtn = el('button', BTN_DANGER + ' !py-1', 'End analysis'); endBtn.type = 'button'; endBtn.title = 'Stop and close this window';
+    endBtn.onclick = () => { if (busyNow && !confirm('An analysis is running. Stop it and close the window?')) return; cancel.stop = true; close.force(); };
+    bar.appendChild(minBtn); bar.appendChild(endBtn); body.appendChild(bar);
     const last = readJson(LAST_KEY, {});
     const st = { apply: last.apply || 'current', filter: last.filter || { include: [], exclude: [], names: '', typed: '', limit: 0 }, range: last.range || { mode: 'all', n: 1, from: '', to: '' }, tf: last.tf || 'D', bt: last.bt || 'portfolio', formulaId: formulaId || last.formulaId || 'b:sys-macd' };
     let S = loadSettings();
@@ -189,16 +221,15 @@ export function openAnalysis({ formulaId = null } = {}) {
     proj.onclick = () => openProjects(getState, applyState);
     refreshInfo();
 
-    const setProgress = (i, n, s) => { progress.textContent = n ? `${i} / ${n}  ${s}` : ''; };
-    const setBusy = (b) => { Object.values(buttons).forEach((x) => { x.disabled = b; x.classList.toggle('opacity-50', b); }); bre.disabled = b; stopBtn.classList.toggle('hidden', !b); };
+    const setProgress = (i, n, s) => { progress.textContent = n ? `${i} / ${n}  ${s}` : ''; progText = n ? `${i}/${n}` : ''; if (chip.style.display !== 'none') chipText(); };
+    const setBusy = (b) => { const was = busyNow; busyNow = b; if (was && !b && chip.style.display !== 'none') { toast('Analysis finished. Tap the 🔎 button to see it.'); } if (chip.style.display !== 'none') chipText(); Object.values(buttons).forEach((x) => { x.disabled = b; x.classList.toggle('opacity-50', b); }); bre.disabled = b; stopBtn.classList.toggle('hidden', !b); };
     const errorsBox = (errors) => { if (!errors || !errors.length) return null; const box = el('div', 'p-2 rounded border border-amber-800 bg-amber-950/30 text-[11px] text-amber-200 max-h-24 overflow-auto'); errors.slice(0, 8).forEach((e) => box.appendChild(el('div', '', e))); if (errors.length > 8) box.appendChild(el('div', '', `... and ${errors.length - 8} more`)); return box; };
-    const open = (sym) => host.openSymbol && host.openSymbol(sym);
+    const open = (sym) => { if (host.openSymbol) { host.openSymbol(sym); minimize(); } };
     // scan / exploration row -> the symbol's chart with the arrows of the result (the bar on the chart switches to all signals / all hits of the symbol)
     const showEvents = (sym, events, pick, results, kind = 'signals') => {
       if (!host.showTrades || !events.length) { open(sym); return; }
       let i = events.findIndex(pick); if (i < 0) i = 0;
-      const root = results.closest('.fixed.inset-0'), back = () => { if (root) root.style.display = ''; };
-      if (root) root.style.display = 'none';
+      const back = showWin; minimize();
       Promise.resolve(host.showTrades(sym, events, { index: i, mode: 'one', interval: tf.value, onBack: back, kind })).then((ok) => { if (!ok) back(); }, () => back());
     };
     // a trade row -> the symbol's chart with the Buy / Sell arrows of that trade (the bar on the chart switches to all trades of the symbol)
@@ -207,9 +238,7 @@ export function openAnalysis({ formulaId = null } = {}) {
       if (!host.showTrades) { open(sym); return; }
       const mine = (trades || []).filter((t) => t.symbol === sym);
       let i = mine.findIndex((t) => t.trade === row[1] && t.entryDate === row[2] && t.exitDate === row[4]); if (i < 0) i = 0;
-      const root = results.closest('.fixed.inset-0');
-      const back = () => { if (root) root.style.display = ''; };
-      if (root) root.style.display = 'none';
+      const back = showWin; minimize();
       Promise.resolve(host.showTrades(sym, mine, { index: i, mode: 'one', interval: st.tf, onBack: back })).then((ok) => { if (!ok) back(); }, () => back());
     };
 
@@ -239,15 +268,45 @@ export function openAnalysis({ formulaId = null } = {}) {
       if (mc) { d.appendChild(el('div', 'text-xs font-semibold text-slate-200 pt-1', `Monte Carlo (${mc.runs} runs)`)); d.appendChild(html(svgMonteCarlo(mc))); d.appendChild(html(mcTableHtml(mc))); }
       return d;
     }
+    // Charts: small previews; tap one to open it big (one at a time, ◀ ▶ for the next, zoom, scroll)
+    const CHART_NAMES = [['equity', 'Equity'], ['drawdown', 'Drawdown'], ['distribution', 'Profit distribution'], ['mae', 'MAE vs profit'], ['mfe', 'MFE vs profit']];
+    function openChartViewer(r, start = 0) {
+      const big = chartsFor(r, { distSpacing: S.report.distSpacing, big: true });
+      openModal('Backtest chart', (b, closeV) => {
+        let i = start, zoom = 1.6, fitMode = false;
+        const nav = el('div', 'flex items-center justify-between space-x-1 shrink-0');
+        const prev = el('button', BTN, '◀'), next = el('button', BTN, '▶'), title = el('div', 'flex-1 text-center text-xs text-slate-200 truncate');
+        const zout = el('button', BTN, '－'), zin = el('button', BTN, '＋'), fit = el('button', BTN, 'Fit');
+        [prev, next, zout, zin, fit].forEach((x) => { x.type = 'button'; });
+        const scroller = el('div', 'flex-1 min-h-0 overflow-auto rounded border border-slate-800 bg-slate-950');
+        const holder = el('div'); scroller.appendChild(holder);
+        const baseW = () => Math.max(scroller.clientWidth - 4, 320);
+        const paint = () => {
+          holder.innerHTML = big[CHART_NAMES[i][0]]; const svg = holder.querySelector('svg'); if (!svg) return;
+          svg.removeAttribute('class'); svg.style.border = '0'; svg.style.display = 'block';
+          svg.style.width = `${Math.round(fitMode ? baseW() : Math.max(baseW() * zoom, 820 * zoom / 1.6))}px`;
+          title.textContent = `${CHART_NAMES[i][1]} (${i + 1} of ${CHART_NAMES.length})`;
+        };
+        const go = (d) => { i = (i + d + CHART_NAMES.length) % CHART_NAMES.length; scroller.scrollTo(0, 0); paint(); };
+        prev.onclick = () => go(-1); next.onclick = () => go(1);
+        zin.onclick = () => { fitMode = false; zoom *= 1.25; paint(); }; zout.onclick = () => { fitMode = false; zoom = Math.max(0.6, zoom / 1.25); paint(); };
+        fit.onclick = () => { fitMode = true; zoom = 1.6; paint(); };
+        [prev, title, next, zout, zin, fit].forEach((x) => nav.appendChild(x));
+        b.appendChild(nav); b.appendChild(scroller);
+        b.appendChild(el('div', 'text-[10px] text-slate-500 shrink-0', 'Scroll sideways and up/down to look around. ＋ / － zoom, Fit shows the whole chart.'));
+        setTimeout(paint, 0);
+      }, { wide: true, stack: true });
+    }
     function chartsView(r) {
       const c = chartsFor(r, { distSpacing: S.report.distSpacing }), d = el('div', 'space-y-2');
-      [c.equity, c.drawdown, c.distribution, c.mae, c.mfe].forEach((x) => d.appendChild(html(x)));
-      const bt = el('button', BTN + ' w-full', 'Open equity on a chart (symbol ~~~EQUITY)'); bt.type = 'button'; bt.onclick = () => { pseudoStore.setEquity(r.equityCurve); close(); host.openSymbol('~~~EQUITY'); }; d.appendChild(bt);
+      d.appendChild(el('div', 'text-[11px] text-slate-400', 'Tap a chart to open it big.'));
+      CHART_NAMES.forEach(([k, name], idx) => { const card = el('button', 'block w-full text-left rounded border border-slate-800 p-1 active:bg-slate-800'); card.type = 'button'; card.appendChild(html(c[k])); card.onclick = () => openChartViewer(r, idx); const hint = el('div', 'text-[10px] text-sky-400 text-right', `${name} · open big ›`); card.appendChild(hint); d.appendChild(card); });
+      const bt = el('button', BTN + ' w-full', 'Open equity on a chart (symbol ~~~EQUITY)'); bt.type = 'button'; bt.onclick = () => { pseudoStore.setEquity(r.equityCurve); host.openSymbol('~~~EQUITY'); minimize(); }; d.appendChild(bt);
       return d;
     }
     const exportBtn = (r, f, mc, nSyms) => { const b = el('button', BTN + ' w-full', 'Export report (HTML)…'); b.type = 'button'; b.onclick = () => download(`${f.name.replace(/[^\w\- ]+/g, '')}-report.html`, reportHtml({ title: 'Backtest report', formulaName: f.name, code: f.code, result: r, mc, settings: S, includeTrades: S.report.includeTradeList, meta: { symbols: nSyms, range: `${rangeNow().mode}` } }), 'text/html'); return b; };
 
-    function show(views) { R = views; if (!views[tab]) tab = 'Results'; drawTabs(); }
+    function show(views) { R = views; hasResults = true; if (chip.style.display !== 'none') chipText(); if (!views[tab]) tab = 'Results'; drawTabs(); }
     function drawTabs() {
       pane.innerHTML = ''; tabsBar.innerHTML = '';
       if (!R) { tabsBar.classList.add('hidden'); return; }
@@ -340,5 +399,5 @@ export function openAnalysis({ formulaId = null } = {}) {
       } catch (e) { pane.appendChild(el('div', 'text-xs text-red-300', 'Breadth failed: ' + e.message)); }
       setBusy(false); setProgress(0, 0, '');
     };
-  }, { big: true });
+  }, { big: true, stack: true, beforeClose: () => { hideWin(); return false; }, onClose: () => cleanup() });
 }

@@ -6,7 +6,7 @@ const tier = () => ({ basis: 'value', min: 0, max: 0, type: 'pct', amount: 0, mi
 export const DEFAULT_SETTINGS = {
   general: { initialEquity: 100000, positions: 'both', futuresMode: false, minShares: 1, minPosValue: 0, accountMargin: 100, interestRate: 0,
     allowPositionShrinking: false, activateStopsImmediately: false, roundLotSize: 0, tickSize: 0, reverseSignalForcesExit: true, allowSameBarExit: true,
-    priceBounds: true, maxSymbols: 500 },
+    priceBounds: true, maxSymbols: 0 },
   trades: { buyPrice: 'close', sellPrice: 'close', shortPrice: 'close', coverPrice: 'close', buyDelay: 0, sellDelay: 0, shortDelay: 0, coverDelay: 0 },
   stops: { maxLoss: { on: false, amount: 10, mode: 1 }, profit: { on: false, amount: 20, mode: 1 }, trail: { on: false, amount: 10, mode: 1 }, nbar: { on: false, amount: 10 }, exitAtStop: 1, reentryDelay: 0 },
   commission: { mode: 0, amount: 0, table: { default: { type: 'pct', amount: 0, minComm: 0, maxComm: 0 }, tiers: [tier(), tier(), tier(), tier(), tier()] } },
