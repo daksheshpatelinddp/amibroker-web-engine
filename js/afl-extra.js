@@ -6,6 +6,8 @@ import { singleEquity, optionsFromResult } from './bt-core.js';
 import { categoryStore } from './category-store.js';
 import { host } from './host.js';
 import { addAnalysis } from './afl-analysis.js';
+import { drawingStore } from './drawing-store.js';
+import { makeTimeMap, studyArray } from './drawing-math.js';
 
 const BASE_FIELDS = ['Open', 'High', 'Low', 'Close', 'Volume', 'Open Interest', 'Average'];
 
@@ -112,6 +114,15 @@ export function addExtras(F, E, H) {
   F.getchartbkcolor = () => 55 * 0 + (E.opts.bgColor === undefined ? 0 : E.opts.bgColor);
   F.getpricestyle = () => ({ candle: STYLE.Candle, bar: STYLE.Bar, line: STYLE.Line, area: STYLE.Area }[E.opts.priceStyle || 'candle'] || STYLE.Candle);
   F.ticker = () => String(E.opts.symbol || '');
+  // lines drawn on the chart (Draw / Fibonacci / Gann tools) with a Study ID: Study("SU", GetChartID()) is the value of that line on every bar
+  F.getchartid = () => Number(E.opts.chartId) || 1;
+  F.study = (a) => {
+    const id = String(a[0] === undefined ? '' : a[0]), chart = a[1] === undefined ? 1 : S(a[1]), scale = a[2] === undefined ? -1 : S(a[2]);
+    const sym = String(E.opts.symbol || ''), list = drawingStore.list(sym), b = E.bars;
+    if (!list.length || !b || !b.t) return newArr(n());
+    E._tm = E._tm || makeTimeMap(b.t);
+    return studyArray(list, id, chart, b, E._tm, scale);
+  };
   F.status = (a) => {
     const k = String(a[0]).toLowerCase(), N = n(), o = E.opts;
     const first = Math.max(0, o.firstVisible || 0), last = o.lastVisible !== undefined ? o.lastVisible : N - 1;

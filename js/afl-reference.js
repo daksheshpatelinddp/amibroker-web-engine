@@ -20,6 +20,8 @@ HIGHEST / LOWEST / REFERENCE
  HHV(array,n)  LLV(array,n)  HHVBars(array,n)  LLVBars(array,n)  Highest(array,n)  Lowest(array,n)
  Ref(array,-1) (previous bar; positive looks ahead)  ROC(array,n) (% change)  StDev(array,n)  Correlation(a,b,n)
  HighestSince(condition,array,1)  LowestSince(condition,array,1)
+DRAWINGS (Study ID of a line drawn on the chart: right-click / double tap the line > Properties > Study ID, e.g. UP DN SU RE ST)
+ Study("SU", GetChartID())  value of that line on every bar (Null where the line does not exist)  GetChartID()  number of the pane (price pane = 1)
 ZIG-ZAG (swing highs / lows, percent change)
  Zig(array,percent)  Peak(array,percent,n)  Trough(array,percent,n)  PeakBars(array,percent,n)  TroughBars(array,percent,n)
  (Zig repaints: its last leg always runs to the latest bar. Peak/Trough/PeakBars/TroughBars never look ahead.)

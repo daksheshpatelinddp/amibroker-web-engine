@@ -88,7 +88,12 @@ export class ChartEngine {
     this.chart = chart;
     this.firstVisible = prevRange ? Math.max(0, Math.floor(prevRange.from)) : Math.max(0, this.arrays.t.length - DEFAULT_BARS_SHOWN);
 
+    // remember the first series of every pane: the drawing tools use it to turn prices into pixels
+    this.paneSeries = [];
+    const origAdd = chart.addSeries;
+    chart.addSeries = (...args) => { const sr = origAdd.apply(chart, args); if (!this.paneSeries[args[2]]) this.paneSeries[args[2]] = sr; return sr; };
     sheet.panes.forEach((pane, idx) => this._buildPane(chart, LWC, pane, idx));
+    chart.addSeries = origAdd;
 
     const panes = chart.panes();
     sheet.panes.forEach((p, i) => { if (panes[i]) panes[i].setStretchFactor(p.weight || 1); });
@@ -109,6 +114,7 @@ export class ChartEngine {
       } catch (e) { chart.timeScale().fitContent(); }
     }
     try { this._drawTrades(LWC); } catch (e) { console.warn('Trade arrows failed:', e); }
+    if (this.onRendered) { try { this.onRendered(); } catch (e) { console.warn('Drawing layer failed:', e); } }
     this._scheduleLabels();
     this.triggers = {}; this.guiEvents = {};      // a button press fires exactly once
     if (this.onFormulaErrors) {
@@ -244,7 +250,7 @@ export class ChartEngine {
     const res = aflEngine.run(f.code, a, {
       symbol: sheet.symbol || '', formulaName: f.name, params: ref.values || {}, triggers: this.triggers[key] || {}, guiState: ref.gui || {},
       guiEvents: this.guiEvents[key] || [], guiKnown: this.guiKnown[key] || [], interval: sheet.interval || 'D', intervalName: intervalName(sheet.interval),
-      priceStyle: sheet.priceStyle || 'candle', foreign: this._foreignMap(), firstVisible: this.firstVisible || 0, action: 1,
+      priceStyle: sheet.priceStyle || 'candle', chartId: idx + 1, foreign: this._foreignMap(), firstVisible: this.firstVisible || 0, action: 1,
       lastBacktestFormula: this.lastBacktestFormula || '', baseIndex: this.baseIndex || 'NIFTY',
     });
     info.errors = res.errors; info.params = res.params; info.title = res.title; info.gui = res.gui || []; info.text = res.text; info.res = res;

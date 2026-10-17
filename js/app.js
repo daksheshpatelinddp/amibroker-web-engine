@@ -14,6 +14,8 @@ import { barsToArrays } from './indicators.js';
 import { isIntraday, frameMinutes, fetchFrame, loadConfig, frameName } from './intraday.js';   // intraday time frames
 import { refreshTfSelect, openCustomFrame, openIntradaySettings } from './intraday-ui.js';
 import { tradeState, mountTradeBar } from './trade-view.js';
+import { DrawingLayer } from './drawing-layer.js';
+import { drawingStore } from './drawing-store.js';
 
 // Indian-style short numbers for the header line: 1.2K, 3.4L (lakh), 5.6Cr (crore)
 function fmtQty(n) {
@@ -88,6 +90,11 @@ class Application {
         // other symbols asked for by formulas (Foreign, PlotForeign, RelStrength ...)
         chartEngine.loadForeign = (sym) => this.loadBarsFor(sym, this.ws.active().interval);
         chartEngine.onForeignLoaded = () => this.relayout();
+        // drawing tools (trend lines, Fibonacci, Gann ... with Study IDs for formulas)
+        try {
+            this.drawings = new DrawingLayer({ engine: chartEngine, workspace: document.getElementById('chart-workspace'), store: drawingStore });
+            chartEngine.onRendered = () => this.drawings.onRendered();
+        } catch (e) { console.error('Drawing tools failed:', e); }
         try { initToolsMenu('tools-root'); } catch (e) { console.error('Tools menu failed:', e); }
         chartEngine.onFormulaErrors = (paneId, errors) => {
             const pane = this.ws.active().panes.find((p) => p.id === paneId);
