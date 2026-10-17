@@ -147,6 +147,21 @@ export async function scan({ code, symbols, session, range, from, to, lastBars =
   return { rows, errors };
 }
 
+/** Every Buy / Sell / Short / Cover of the formula on one symbol (all bars): [{ symbol, date, kind, price }]. Used to draw the arrows of a scan result. */
+export async function signalEvents({ code, symbol, session, params }) {
+  const b = await session.get(symbol); if (!b || !b.t.length) return [];
+  const z = b.t.length - 1;
+  const res = await session.runOn(symbol, b, code, { action: 3, stockNum: 0, rangeFrom: 0, rangeTo: z, params, interval: 'D' });
+  if (res.errors.length || !res.usesSignals) return [];
+  const pr = { buy: 'buyprice', sell: 'sellprice', short: 'shortprice', cover: 'coverprice' }, out = [];
+  for (let k = 0; k <= z; k++) for (const kind of ['buy', 'sell', 'short', 'cover']) {
+    if (!flag(res[kind], k)) continue;
+    const pa = res.vars[pr[kind]], price = pa !== undefined ? (typeof pa === 'object' ? pa[k] : pa) : b.c[k];
+    out.push({ symbol, date: b.t[k], kind, price: Number.isFinite(price) ? price : b.c[k] });
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ Exploration
 const decimals = (f) => Math.max(0, Math.min(8, Math.round((f - Math.trunc(f)) * 10)));
 function cellOf(col, k) {

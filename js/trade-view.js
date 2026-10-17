@@ -3,7 +3,8 @@
 import { el } from './ui.js';
 
 /** What the chart is showing: which symbol, its trades, which one is picked, and "one" or "all". */
-export const tradeState = { symbol: '', trades: [], index: 0, mode: 'one', focus: false, onBack: null };
+// kind 'trades' = backtest trades; kind 'signals' = scan / exploration events [{ date, kind: buy|sell|short|cover|hit, price }] (then "trades" holds those events).
+export const tradeState = { kind: 'trades', symbol: '', trades: [], index: 0, mode: 'one', focus: false, onBack: null };
 
 const GREEN = '#22c55e', RED = '#ef4444', ORANGE = '#f97316', BLUE = '#38bdf8';
 const fmt = (x) => (Number.isFinite(+x) ? String(Math.round(+x * 100) / 100) : '');
@@ -41,8 +42,21 @@ export function tradeMarkers(labels, trades, { mode = 'one', index = 0 } = {}) {
   return out.sort((a, b) => a.idx - b.idx);
 }
 
+const SIG = { buy: ['Buy', 'arrowUp', 'belowBar', GREEN], sell: ['Sell', 'arrowDown', 'aboveBar', RED], short: ['Short', 'arrowDown', 'aboveBar', ORANGE], cover: ['Cover', 'arrowUp', 'belowBar', BLUE], hit: ['Hit', 'arrowUp', 'belowBar', BLUE] };
+/** Scan / exploration events -> arrows. A scan row can hold several signals ("Buy+Sell"); each gets its own arrow. */
+export function signalMarkers(labels, events, { mode = 'one', index = 0 } = {}) {
+  const out = [], list = mode === 'all' ? events.map((e, i) => [e, i]) : (events[index] ? [[events[index], index]] : []);
+  for (const [e, i] of list) {
+    const idx = barIndex(labels, e.date, false); if (idx < 0) continue;
+    const [name, shape, position, color] = SIG[e.kind] || SIG.hit, sel = i === index;
+    out.push({ idx, position, shape, color, size: sel ? 2 : 1, text: sel || mode === 'one' ? `${name}${Number.isFinite(+e.price) ? ' ' + fmt(e.price) : ''}` : '' });
+  }
+  return out.sort((a, b) => a.idx - b.idx);
+}
+
 /** The bar range worth showing for one trade (a little room on both sides), or null. */
 export function tradeSpan(labels, t) {
+  if (t && t.date !== undefined && t.entryDate === undefined) { const i = barIndex(labels, t.date, false); return i < 0 ? null : { from: Math.max(0, i - 40), to: Math.min(labels.length - 1, i + 40) + 4 }; }
   const ei = barIndex(labels, t.entryDate, false); if (ei < 0) return null;
   let xi = t.open ? labels.length - 1 : barIndex(labels, t.exitDate, true); if (xi < ei) xi = ei;
   const pad = Math.max(15, Math.round((xi - ei) * 0.5));
@@ -63,12 +77,14 @@ export function mountTradeBar(parent, api) {
     bar.style.display = 'flex';
     const t = s.trades[s.index] || s.trades[0], n = s.trades.length;
     bar.appendChild(el('span', 'font-semibold text-slate-100', s.symbol));
-    bar.appendChild(el('span', 'text-slate-400', s.mode === 'all' ? `all ${n} trade${n === 1 ? '' : 's'}` : `trade ${s.index + 1} of ${n}`));
-    bar.appendChild(el('span', Number(t.profit) >= 0 ? 'text-green-400' : 'text-red-400', `${t.trade} ${t.entryDate} → ${t.open ? 'open' : t.exitDate}${pctText(t)}`));
+    const sig = s.kind === 'signals', noun = sig ? 'signal' : 'trade';
+    bar.appendChild(el('span', 'text-slate-400', s.mode === 'all' ? `all ${n} ${noun}${n === 1 ? '' : 's'}` : `${noun} ${s.index + 1} of ${n}`));
+    if (sig) bar.appendChild(el('span', 'text-sky-300', `${(SIG[t.kind] || SIG.hit)[0]} ${t.date}${Number.isFinite(+t.price) ? ' @ ' + fmt(t.price) : ''}`));
+    else bar.appendChild(el('span', Number(t.profit) >= 0 ? 'text-green-400' : 'text-red-400', `${t.trade} ${t.entryDate} → ${t.open ? 'open' : t.exitDate}${pctText(t)}`));
     const go = (d) => { s.index = (s.index + d + n) % n; s.focus = true; api.refresh(); draw(); };
     bar.appendChild(btn('◀', 'Previous trade', () => go(-1))); bar.appendChild(btn('▶', 'Next trade', () => go(1)));
-    bar.appendChild(btn('This trade', 'Show only the trade you picked', () => { s.mode = 'one'; s.focus = true; api.refresh(); draw(); }, s.mode === 'one'));
-    bar.appendChild(btn('All trades', 'Show every trade of this symbol', () => { s.mode = 'all'; api.refresh(); draw(); }, s.mode === 'all'));
+    bar.appendChild(btn(sig ? 'This one' : 'This trade', 'Show only the one you picked', () => { s.mode = 'one'; s.focus = true; api.refresh(); draw(); }, s.mode === 'one'));
+    bar.appendChild(btn(sig ? 'All signals' : 'All trades', 'Show every one of this symbol', () => { s.mode = 'all'; api.refresh(); draw(); }, s.mode === 'all'));
     if (s.onBack) bar.appendChild(btn('Results', 'Back to the Analysis window', () => s.onBack()));
     bar.appendChild(btn('✕', 'Remove the arrows', () => { s.symbol = ''; s.trades = []; api.hide(); draw(false); }));
   };

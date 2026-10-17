@@ -11,7 +11,7 @@ import { intervalName } from './timeframe.js';
 import { isIntraday, frameMinutes, chartTime } from './intraday.js';
 import { pseudoStore } from './pseudo-store.js';
 import { CloudPrimitive, VapPrimitive } from './chart-primitives.js';
-import { tradeMarkers, tradeSpan } from './trade-view.js';
+import { tradeMarkers, signalMarkers, tradeSpan } from './trade-view.js';
 
 const COLORS = { up: '#22c55e', down: '#ef4444', grid: '#1e293b', border: '#334155', text: '#94a3b8', bg: '#020617' };
 const DEFAULT_BARS_SHOWN = 250;   // a fresh chart opens on about one year; "Fit" shows everything
@@ -121,7 +121,7 @@ export class ChartEngine {
     const st = this.tradeState;
     if (!st || !st.symbol || !st.trades.length || !this.sheet || st.symbol !== this.sheet.symbol || !this.mainSeries || !LWC.createSeriesMarkers) return;
     const labels = this.arrays.t, t = this.times;
-    const m = tradeMarkers(labels, st.trades, { mode: st.mode, index: st.index }).map((x) => ({ time: t[x.idx], position: x.position, shape: x.shape, color: x.color, size: x.size, text: x.text }));
+    const m = (st.kind === 'signals' ? signalMarkers : tradeMarkers)(labels, st.trades, { mode: st.mode, index: st.index }).map((x) => ({ time: t[x.idx], position: x.position, shape: x.shape, color: x.color, size: x.size, text: x.text }));
     LWC.createSeriesMarkers(this.mainSeries, m);
     if (st.focus) {
       st.focus = false;

@@ -168,9 +168,9 @@ class Application {
     }
 
     // Analysis trade list -> chart: open the symbol with Buy / Sell arrows for the picked trade (or all trades of it)
-    async showTrades(symbol, trades, { index = 0, mode = 'one', interval = '', onBack = null } = {}) {
+    async showTrades(symbol, trades, { index = 0, mode = 'one', interval = '', onBack = null, kind = 'trades' } = {}) {
         if (!symbol || !trades || !trades.length) return false;
-        Object.assign(tradeState, { symbol, trades, index: Math.min(Math.max(0, index), trades.length - 1), mode, focus: true, onBack });
+        Object.assign(tradeState, { kind, symbol, trades, index: Math.min(Math.max(0, index), trades.length - 1), mode, focus: true, onBack });
         chartEngine.tradeState = tradeState;
         const active = this.ws.active();
         if (interval && interval !== (active.interval || 'D') && (isIntraday(interval) || isIntraday(active.interval))) this.ws.setInterval(active.id, interval);

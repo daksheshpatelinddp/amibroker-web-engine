@@ -6,7 +6,7 @@ import { host } from './host.js';
 import { chartEngine } from './chart-engine.js';
 import { pseudoStore } from './pseudo-store.js';
 import { categoryStore, TYPES } from './category-store.js';
-import { makeSession, scan, explore, backtest, optimize, walkForward, buildBreadth, resolveSymbols, toCSV, METRICS } from './analysis-core.js';
+import { makeSession, scan, explore, backtest, optimize, walkForward, buildBreadth, signalEvents, resolveSymbols, toCSV, METRICS } from './analysis-core.js';
 import { monteCarlo } from './bt-report.js';
 import { loadSettings } from './analysis-settings.js';
 import { loadConfig as loadIntradayConfig, saveConfig as saveIntradayConfig, frameId, frameName, frameMinutes, isIntraday } from './intraday.js';
@@ -193,6 +193,14 @@ export function openAnalysis({ formulaId = null } = {}) {
     const setBusy = (b) => { Object.values(buttons).forEach((x) => { x.disabled = b; x.classList.toggle('opacity-50', b); }); bre.disabled = b; stopBtn.classList.toggle('hidden', !b); };
     const errorsBox = (errors) => { if (!errors || !errors.length) return null; const box = el('div', 'p-2 rounded border border-amber-800 bg-amber-950/30 text-[11px] text-amber-200 max-h-24 overflow-auto'); errors.slice(0, 8).forEach((e) => box.appendChild(el('div', '', e))); if (errors.length > 8) box.appendChild(el('div', '', `... and ${errors.length - 8} more`)); return box; };
     const open = (sym) => host.openSymbol && host.openSymbol(sym);
+    // scan / exploration row -> the symbol's chart with the arrows of the result (the bar on the chart switches to all signals / all hits of the symbol)
+    const showEvents = (sym, events, pick, results, kind = 'signals') => {
+      if (!host.showTrades || !events.length) { open(sym); return; }
+      let i = events.findIndex(pick); if (i < 0) i = 0;
+      const root = results.closest('.fixed.inset-0'), back = () => { if (root) root.style.display = ''; };
+      if (root) root.style.display = 'none';
+      Promise.resolve(host.showTrades(sym, events, { index: i, mode: 'one', interval: tf.value, onBack: back, kind })).then((ok) => { if (!ok) back(); }, () => back());
+    };
     // a trade row -> the symbol's chart with the Buy / Sell arrows of that trade (the bar on the chart switches to all trades of the symbol)
     const showTrade = (row, trades, results) => {
       const sym = row[0];
@@ -258,14 +266,20 @@ export function openAnalysis({ formulaId = null } = {}) {
       try {
         if (mode === 'scan') {
           const r = await scan({ ...common, lastBars: 1 });
-          const res = r.rows.length ? (() => { const d = el('div', 'space-y-2'); d.appendChild(saveBtn(r.rows.map((x) => x.symbol), `${f.name} scan`)); d.appendChild(table(['Symbol', 'Date', 'Trade', 'Price'], r.rows.map((x) => [x.symbol, x.date, x.signal, x.price]), { onRow: (row) => open(row[0]), csvName: 'scan.csv' })); return d; })()
+          const res = r.rows.length ? (() => { const d = el('div', 'space-y-2'); d.appendChild(saveBtn(r.rows.map((x) => x.symbol), `${f.name} scan`)); d.appendChild(el('div', 'text-[11px] text-slate-400', 'Tap a row to see its signal on the chart')); d.appendChild(table(['Symbol', 'Date', 'Trade', 'Price'], r.rows.map((x) => [x.symbol, x.date, x.signal, x.price]), { onRow: async (row) => {
+            let ev = []; try { ev = await signalEvents({ code: f.code, symbol: row[0], session }); } catch (e) { /* fall back to the row itself */ }
+            const first = String(row[2]).split('+')[0].toLowerCase();
+            if (!ev.some((e) => e.date === row[1])) ev = [{ symbol: row[0], date: row[1], kind: first, price: row[3] }, ...ev];
+            showEvents(row[0], ev, (e) => e.date === row[1] && e.kind === first, d);
+          }, csvName: 'scan.csv' })); return d; })()
             : el('div', 'text-xs text-slate-400', 'No signals. A scan needs Buy / Sell / Short / Cover rules (or use Explore with Filter and AddColumn).');
           show({ Results: res, Info: infoPane(infoLines([`Signals found: ${r.rows.length}`]), r.errors) });
         } else if (mode === 'explore') {
           const r = await explore(common), t = r.table;
           const res = el('div', 'space-y-2');
           if (!t.rows.length) res.appendChild(el('div', 'text-xs text-slate-400', 'Nothing passed the Filter. An exploration needs Filter = condition; and AddColumn(...).'));
-          else { res.appendChild(saveBtn(r.rows.map((x) => x.symbol), `${f.name} exploration`)); res.appendChild(table(t.head, t.rows, { extraRows: t.summary, onRow: (row) => { const k = t.head.indexOf('Ticker'); open(row[k >= 0 ? k : 0]); }, csvName: 'exploration.csv' })); }
+          else { res.appendChild(saveBtn(r.rows.map((x) => x.symbol), `${f.name} exploration`)); res.appendChild(table(t.head, t.rows, { extraRows: t.summary, onRow: (row) => { const k = t.head.indexOf('Ticker'), sym = row[k >= 0 ? k : 0], ev = r.rows.filter((x) => x.symbol === sym).map((x) => ({ symbol: sym, date: x.date, kind: 'hit' }));
+            showEvents(sym, ev, (e) => row.includes(e.date), res); }, csvName: 'exploration.csv' })); }
           const views = { Results: res }; const xyNames = Object.keys(r.xy);
           if (xyNames.length) views.Charts = () => { const d = el('div', 'space-y-2'); xyNames.forEach((n) => d.appendChild(html(svgScatter(r.xy[n].points, { title: n, xLabel: r.xy[n].xLabel, yLabel: r.xy[n].yLabel })))); return d; };
           views.Info = infoPane(infoLines([`Rows: ${t.rows.length}`]), r.errors); show(views);
