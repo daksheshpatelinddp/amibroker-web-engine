@@ -1,5 +1,5 @@
 // Run: node tests/analysis-test.mjs   -- scan / explore / backtest / optimize on synthetic data (no browser)
-import { makeSession, scan, explore, backtest, optimize, buildBreadth, paramGrid } from '../js/analysis-core.js';
+import { makeSession, signalEvents, scan, explore, backtest, optimize, buildBreadth, paramGrid } from '../js/analysis-core.js';
 import { rawTrades, portfolio, DEFAULT_OPTIONS } from '../js/bt-core.js';
 import { BUILTIN_FORMULAS } from '../js/builtin-formulas.js';
 import { makeBars } from './data.mjs';
@@ -46,6 +46,9 @@ const session = () => makeSession(async (s) => data[s] || null);
   ok(Array.isArray(r.rows) && r.errors.length === 0, 'scan runs');
   r = await scan({ code: 'Buy = 1; Sell = 0;', symbols: syms, session: s });
   ok(r.rows.length === syms.length && r.rows[0].signal === 'Buy', 'scan finds the signal on every symbol');
+  { const ev = await signalEvents({ code: 'Buy = Cross(C, MA(C, 10)); Sell = Cross(MA(C, 10), C);', symbol: syms[0], session: s });
+    ok(ev.length > 2 && ev.every((e) => ['buy', 'sell'].includes(e.kind) && e.date && Number.isFinite(e.price)), 'signalEvents lists every Buy / Sell of a symbol: ' + ev.length);
+    ok(ev.every((e, i) => i === 0 || ev[i - 1].date <= e.date), 'signalEvents in date order'); }
   // ---- explore
   r = await explore({ code: F('exploration-basic'), symbols: syms, session: s });
   ok(r.rows.length === syms.length && r.columns.includes('Close') && r.errors.length === 0, `explore rows=${r.rows.length}`);

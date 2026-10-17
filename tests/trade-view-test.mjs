@@ -1,5 +1,5 @@
 // Run: node tests/trade-view-test.mjs
-import { barIndex, tradeMarkers, tradeSpan } from '../js/trade-view.js';
+import { barIndex, tradeMarkers, signalMarkers, tradeSpan } from '../js/trade-view.js';
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.log('FAIL', m); } };
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), `${m}: got ${JSON.stringify(a)}`);
@@ -30,4 +30,10 @@ ok(m.filter((x) => x.size === 1).every((x) => x.text === ''), 'other trades have
 eq(tradeMarkers(daily, trades, { mode: 'one', index: 9 }), [], 'bad index');
 const sp = tradeSpan(daily, trades[0]); ok(sp && sp.from === 0 && sp.to >= 3, 'span ' + JSON.stringify(sp));
 ok(tradeSpan(daily, { entryDate: '2020-01-01' }) === null, 'span null');
+const ev = [{ date: '2024-01-02', kind: 'buy', price: 10 }, { date: '2024-01-04', kind: 'sell', price: 12 }, { date: '2024-01-05', kind: 'hit' }];
+m = signalMarkers(daily, ev, { mode: 'one', index: 1 });
+eq(m.map((x) => [x.idx, x.shape, x.text]), [[3, 'arrowDown', 'Sell 12']], 'one signal');
+m = signalMarkers(daily, ev, { mode: 'all', index: 0 });
+eq(m.length, 3, 'all signals'); ok(m[0].size === 2 && m[0].text === 'Buy 10' && m[1].text === '' && m[2].shape === 'arrowUp', 'selected bigger, others unlabeled, hit = up arrow');
+ok(tradeSpan(daily, ev[1]).from === 0, 'span of a signal');
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
