@@ -9,7 +9,7 @@ const chartObj = {
   addSeries(type, opts, pane) { if (!type) throw new Error('unknown series type'); if (typeof pane !== 'number') throw new Error('pane index'); calls.series++; return mkSeries(); },
   panes() { return Array.from({ length: 8 }, () => ({ setStretchFactor() {}, getHTMLElement() { return { getBoundingClientRect: () => ({ left: 0, top: 0 }) }; } })); },
   timeScale() { return { getVisibleLogicalRange: () => ({ from: 0, to: 100 }), setVisibleLogicalRange() {}, fitContent() {}, timeToCoordinate: () => 10, scrollToRealTime() {} }; },
-  priceScale() { return { applyOptions() {} }; }, subscribeCrosshairMove() {}, remove() {},
+  priceScale() { return { applyOptions() {} }; }, subscribeCrosshairMove() {}, subscribeClick(f) { globalThis.__click = f; }, remove() {},
 };
 const T = new Proxy({}, { get: (_, k) => String(k) });
 globalThis.window = { LightweightCharts: { createChart: () => chartObj, CrosshairMode: { Normal: 0 }, createSeriesMarkers: () => { calls.markers++; }, LineSeries: 'L', CandlestickSeries: 'C', BarSeries: 'B', HistogramSeries: 'H', AreaSeries: 'A' } };
@@ -65,6 +65,16 @@ for (const f of BUILTIN_FORMULAS) {
   check(rec.length === 0, 'no arrows on another symbol');
   chartEngine.tradeState = null; window.LightweightCharts.createSeriesMarkers = old;
   console.log('trade arrows on the mock chart checked');
+}
+{
+  const sheet = { id: 's', symbol: 'X', interval: 'D', priceStyle: 'candle', panes: [{ id: 'p1', kind: 'afl', weight: 1, overlays: [], params: { formulaId: 'b:price', values: {} } }] };
+  chartEngine.render(sheet, rows); const seen = []; chartEngine.onHover = (i) => seen.push(i);
+  globalThis.__click({ logical: 5.2, point: { x: 1, y: 1 } }); const a = chartEngine.selected === 5;
+  globalThis.__click({ logical: 5.4, point: { x: 1, y: 1 } }); const b = chartEngine.selected === null;
+  globalThis.__click({ logical: 9999, point: { x: 1, y: 1 } }); const c = chartEngine.selected === null;
+  chartEngine.suppressSelect = () => true; globalThis.__click({ logical: 7, point: { x: 1, y: 1 } }); const d = chartEngine.selected === null; chartEngine.suppressSelect = null;
+  globalThis.__click({ logical: 7, point: { x: 1, y: 1 } }); chartEngine.render(sheet, rows); const e = chartEngine.selected === null;   // a new chart clears it
+  if (!(a && b && c && d && e) || seen[0] !== 5 || seen[1] !== null) { fail++; console.log('FAIL candle selection', a, b, c, d, e, seen); } else console.log('candle selection checked');
 }
 console.log(`${n} formulas rendered through the mock chart (${calls.series} series, ${calls.prims} primitives, ${calls.markers} marker sets); ${fail} failed`);
 process.exit(fail ? 1 : 0);
