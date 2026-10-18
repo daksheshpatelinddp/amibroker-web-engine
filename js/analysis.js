@@ -11,6 +11,7 @@ import { monteCarlo } from './bt-report.js';
 import { loadSettings } from './analysis-settings.js';
 import { loadConfig as loadIntradayConfig, saveConfig as saveIntradayConfig, frameId, frameName, frameMinutes, isIntraday } from './intraday.js';
 import { openCustomFrame } from './intraday-ui.js';
+import { saveJob, loadJob, deleteJob } from './job-store.js';
 import { esc, f2, money, svgLine, svgScatter, svgHeat, svgMonteCarlo, monthlyHtml, mcTableHtml, statsHtml, chartsFor, reportHtml } from './report-charts.js';
 
 const MODES = { scan: 'Scan', explore: 'Explore', backtest: 'Backtest', optimize: 'Optimize', walk: 'Walk-Forward' };
@@ -205,7 +206,10 @@ export function openAnalysis({ formulaId = null } = {}) {
     const row2 = el('div', 'flex space-x-2'); row2.appendChild(btSel);
     const proj = el('button', BTN, 'Projects…'); proj.type = 'button'; row2.appendChild(proj);
     const bre = el('button', BTN, 'Market breadth'); bre.type = 'button'; bre.title = 'Build advancing / declining issues for ADLine, TRIN...'; row2.appendChild(bre); body.appendChild(row2);
-    const progress = el('div', 'text-[11px] text-slate-400 min-h-[16px]'); body.appendChild(progress);
+    const progress = el('div', 'text-[11px] text-slate-300 min-h-[16px] whitespace-pre-line break-words'); const pbar = el('div', 'hidden h-2 rounded bg-slate-800 overflow-hidden'), barFill = el('div', 'h-2 bg-sky-500'); barFill.style.width = '0%'; pbar.appendChild(barFill);
+    const awakeNote = el('div', 'hidden text-[10px] text-slate-500', 'The screen is kept awake while this runs. You can minimise this window and use the chart. If the phone sleeps or the browser is closed, progress is saved about every minute and you can resume.');
+    const banner = el('div', 'hidden rounded border border-amber-700 bg-amber-950/40 p-2 text-[11px] text-amber-100 space-y-1');
+    body.appendChild(banner); body.appendChild(progress); body.appendChild(pbar); body.appendChild(awakeNote);
     const stopBtn = el('button', BTN + ' hidden', 'Stop'); stopBtn.type = 'button'; const cancel = { stop: false }; stopBtn.onclick = () => { cancel.stop = true; }; body.appendChild(stopBtn);
 
     // ---- results area
@@ -221,8 +225,41 @@ export function openAnalysis({ formulaId = null } = {}) {
     proj.onclick = () => openProjects(getState, applyState);
     refreshInfo();
 
-    const setProgress = (i, n, s) => { progress.textContent = n ? `${i} / ${n}  ${s}` : ''; progText = n ? `${i}/${n}` : ''; if (chip.style.display !== 'none') chipText(); };
-    const setBusy = (b) => { const was = busyNow; busyNow = b; if (was && !b && chip.style.display !== 'none') { toast('Analysis finished. Tap the 🔎 button to see it.'); } if (chip.style.display !== 'none') chipText(); Object.values(buttons).forEach((x) => { x.disabled = b; x.classList.toggle('opacity-50', b); }); bre.disabled = b; stopBtn.classList.toggle('hidden', !b); };
+    // ---- progress with time left; keeps the screen awake while busy
+    const fmtDur = (ms) => { const t = Math.max(0, Math.round(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), x = t % 60; return h ? `${h} h ${m} min` : m ? `${m} min ${x} s` : `${x} s`; };
+    let phase = null, lock = null; const baseTitle = document.title;
+    const setProgress = (i, n, s, stage) => {
+      if (!n) { phase = null; progress.textContent = ''; pbar.classList.add('hidden'); progText = ''; document.title = baseTitle; return; }
+      const f = Math.min(1, i / n);
+      if (!phase || phase.stage !== stage) phase = { stage, t0: Date.now(), f0: f };
+      let text;
+      if (stage === 'load') text = `Loading data of the symbols: ${Math.floor(i)} / ${n}`;
+      else if (stage === 'run') text = `Combination ${Math.min(n, Math.floor(i) + 1).toLocaleString()} of ${n.toLocaleString()} (${(f * 100).toFixed(1)}%)`;
+      else text = `${Math.floor(i)} / ${n}  ${s || ''}`;
+      const el0 = Date.now() - phase.t0;
+      if ((stage === 'load' || stage === 'run') && f > phase.f0 + 0.002 && f < 1) text += `\n${fmtDur(el0)} so far, about ${fmtDur((el0 * (1 - f)) / (f - phase.f0))} left`;
+      if (stage === 'run' && s) text += `\n${s}`;
+      progress.textContent = text; pbar.classList.remove('hidden'); barFill.style.width = `${(f * 100).toFixed(1)}%`;
+      progText = `${Math.round(f * 100)}%`; document.title = `(${Math.round(f * 100)}%) ${baseTitle}`;
+      if (chip.style.display !== 'none') chipText();
+    };
+    const keepAwake = async (on) => {
+      try {
+        if (on) { if (!lock && typeof navigator !== 'undefined' && navigator.wakeLock) { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; }); } }
+        else if (lock) { const l = lock; lock = null; await l.release(); }
+      } catch (e) { /* not allowed (low battery, background): the run still continues */ }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible' && busyNow) keepAwake(true); };
+    document.addEventListener('visibilitychange', onVisible);
+    const leaveWarn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    const prevCleanup = cleanup; cleanup = () => { document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('beforeunload', leaveWarn); keepAwake(false); document.title = baseTitle; prevCleanup(); };
+    const setBusy = (b) => {
+      const was = busyNow; busyNow = b; if (was && !b && chip.style.display !== 'none') { toast('Analysis finished. Tap the 🔎 button to see it.'); } if (chip.style.display !== 'none') chipText();
+      Object.values(buttons).forEach((x) => { x.disabled = b; x.classList.toggle('opacity-50', b); }); bre.disabled = b; stopBtn.classList.toggle('hidden', !b);
+      awakeNote.classList.toggle('hidden', !b); keepAwake(b);
+      if (b) window.addEventListener('beforeunload', leaveWarn); else window.removeEventListener('beforeunload', leaveWarn);
+      if (b) banner.classList.add('hidden');
+    };
     const errorsBox = (errors) => { if (!errors || !errors.length) return null; const box = el('div', 'p-2 rounded border border-amber-800 bg-amber-950/30 text-[11px] text-amber-200 max-h-24 overflow-auto'); errors.slice(0, 8).forEach((e) => box.appendChild(el('div', '', e))); if (errors.length > 8) box.appendChild(el('div', '', `... and ${errors.length - 8} more`)); return box; };
     const open = (sym) => { if (host.openSymbol) { host.openSymbol(sym); minimize(); } };
     // scan / exploration row -> the symbol's chart with the arrows of the result (the bar on the chart switches to all signals / all hits of the symbol)
@@ -315,9 +352,10 @@ export function openAnalysis({ formulaId = null } = {}) {
       const v = typeof R[tab] === 'function' ? R[tab]() : R[tab]; pane.appendChild(v);
     }
 
+    let forced = null;   // a saved job being resumed: its own formula text and symbol list
     const run = async (mode) => {
-      const f = formulaStore.get(fsel.value); if (!f) { toast('Choose a formula'); return; }
-      const sy = symbols(); if (!sy.symbols.length) { toast('No symbols to analyse. Choose Apply to, or add symbols to the filter.'); return; }
+      const f = forced ? { name: forced.formulaName, code: forced.code } : formulaStore.get(fsel.value); if (!f) { toast('Choose a formula'); return; }
+      const sy = forced ? { symbols: forced.symbols } : symbols(); if (!sy.symbols.length) { toast('No symbols to analyse. Choose Apply to, or add symbols to the filter.'); return; }
       if (sy.capped) toast(`Using the first ${sy.symbols.length} symbols (Settings > General > largest number of symbols)`);
       save(); cancel.stop = false; pane.innerHTML = ''; R = null; tabsBar.classList.add('hidden'); setBusy(true);
       const t0 = Date.now(), session = makeSession((s, iv) => host.loadBars(s, iv), tf.value), common = { code: f.code, symbols: sy.symbols, session, range: rangeNow(), onProgress: setProgress, cancel, settings: S };
@@ -353,12 +391,19 @@ export function openAnalysis({ formulaId = null } = {}) {
               Info: infoPane(infoLines([`Mode: ${btSel.value}`, `Symbols with data: ${r.info.symbols}`, `Bars read: ${r.info.bars}`, `Trades: ${r.trades.length}`, 'Options used:', JSON.stringify({ ...r.options, commissionTable: undefined, stops: r.options.stops.length }, null, 0)]), r.errors) });
           }
         } else if (mode === 'optimize') {
-          const r = await optimize({ ...common, metric: S.optimize.target, engine: S.optimize.engine, maxEval: S.optimize.maxEval, runs: S.optimize.runs, maxCombos: 5000 });
+          const jobBase = { v: 1, mode: 'optimize', formulaName: f.name, code: f.code, symbols: sy.symbols, ui: getState(), settings: S, startedAt: Date.now() };
+          const resume = forced ? forced.state : null; if (!forced) await deleteJob();
+          const r = await optimize({ ...common, metric: S.optimize.target, engine: S.optimize.engine, maxEval: S.optimize.maxEval, runs: S.optimize.runs, keep: S.optimize.keep, resume,
+            onCheckpoint: (state) => saveJob({ ...jobBase, state, savedAt: Date.now() }) });
           const views = {};
+          let resumeNote = null;
+          if (r.completed) await deleteJob();
+          else if (r.engine !== 'smart' && r.next > 0) { await saveJob({ ...jobBase, state: { next: r.next, rows: r.rows }, savedAt: Date.now() }); resumeNote = `Stopped after ${r.next.toLocaleString()} of ${r.combinations.toLocaleString()} combinations. The progress is saved: open Analysis later and tap Resume.`; }
           if (!r.rows.length) views.Results = el('div', 'text-xs text-slate-400', r.errors[0] || 'No results');
           else {
             const names = r.optParams.map((p) => p.name), res = el('div', 'space-y-2');
-            res.appendChild(el('div', 'text-[11px] text-slate-400', `${r.rows.length} combinations tested (${r.engine}), best first by ${METRICS[r.metric][0]}. Tap a row to run a backtest with those values.`));
+            if (resumeNote) res.appendChild(el('div', 'p-2 rounded border border-amber-700 bg-amber-950/40 text-[11px] text-amber-100', resumeNote));
+            res.appendChild(el('div', 'text-[11px] text-slate-400', `${(r.combinations || r.rows.length).toLocaleString()} combinations (${r.engine}), best ${r.rows.length < (r.combinations || 0) ? r.rows.length.toLocaleString() + ' ' : ''}first by ${METRICS[r.metric][0]}. Tap a row to run a backtest with those values.`));
             res.appendChild(table([...names, 'Net profit', 'Net %', 'CAR %', 'Max DD %', 'Trades', 'PF', 'Exposure %', 'RAR %', METRICS[r.metric][0]], r.rows.map((x) => [...names.map((n) => x.values[n]), x.stats.netProfit, x.stats.netProfitPct, x.stats.cagr, x.stats.maxDrawdownPct, x.stats.trades, x.stats.profitFactor, x.stats.exposure, x.stats.riskAdjReturn, x.stats[r.metric]]),
               { csvName: 'optimization.csv', onRow: async (row) => {
                 const vals = {}; names.forEach((n, i) => { vals[n] = row[i]; }); setBusy(true);
@@ -369,13 +414,19 @@ export function openAnalysis({ formulaId = null } = {}) {
             views.Results = res;
             if (r.optParams.length === 2) views.Charts = () => html(svgHeat(r.rows, r.optParams, r.metric, { title: 'Optimization map:' }));
           }
-          views.Info = infoPane(infoLines([`Search: ${r.engine || ''}`, `Tested: ${r.tested || 0}`, `Target: ${METRICS[S.optimize.target][0]}`]), r.rows.length ? [] : r.errors); show(views);
+          views.Info = infoPane(infoLines([`Search: ${r.engine || ''}`, `Combinations: ${(r.combinations || 0).toLocaleString()} · kept in the list: ${r.tested || 0}`, `Target: ${METRICS[S.optimize.target][0]}`]), r.rows.length ? [] : r.errors); show(views);
         } else if (mode === 'walk') {
-          const r = await walkForward({ ...common, wf: S.walkForward, metric: S.walkForward.target, engine: S.optimize.engine, maxEval: S.optimize.maxEval });
+          const jobBase = { v: 1, mode: 'walk', formulaName: f.name, code: f.code, symbols: sy.symbols, ui: getState(), settings: S, startedAt: Date.now() };
+          const resume = forced ? forced.state : null; if (!forced) await deleteJob();
+          const r = await walkForward({ ...common, wf: S.walkForward, metric: S.walkForward.target, engine: S.optimize.engine, maxEval: S.optimize.maxEval, resume,
+            onCheckpoint: (state) => saveJob({ ...jobBase, state, savedAt: Date.now() }) });
+          let resumeNote = null;
+          if (r.completed) await deleteJob();
+          else if (r.resumeState) { await saveJob({ ...jobBase, state: r.resumeState, savedAt: Date.now() }); resumeNote = 'Stopped before all combinations were tested. The progress is saved: open Analysis later and tap Resume.'; }
           const names = r.optParams ? r.optParams.map((p) => p.name) : [], views = {};
           if (!r.steps.length) views.Results = el('div', 'text-xs text-slate-400', r.errors[0] || 'No walk-forward steps');
           else {
-            const m = S.walkForward.target, res = el('div', 'space-y-2');
+            const m = S.walkForward.target, res = el('div', 'space-y-2'); if (resumeNote) res.appendChild(el('div', 'p-2 rounded border border-amber-700 bg-amber-950/40 text-[11px] text-amber-100', resumeNote));
             res.appendChild(el('div', 'text-[11px] text-slate-400', `Each step optimises on the in-sample period (target ${METRICS[m][0]}) and tests the best values out of sample. Equity carries over from step to step.`));
             res.appendChild(table(['Step', 'In-sample', 'Out-of-sample', ...names, `IS ${METRICS[m][0]}`, `OOS ${METRICS[m][0]}`, 'OOS net %', 'OOS trades', 'End equity'],
               r.steps.map((s) => [s.step || '-', `${s.isFrom} → ${s.isTo}`, `${s.oosFrom} → ${s.oosTo}`, ...names.map((n) => (s.values ? s.values[n] : '')), s.isStats ? s.isStats[m] : '', s.oosStats ? s.oosStats[m] : (s.error || ''), s.oosStats ? s.oosStats.netProfitPct : '', s.oosStats ? s.oosStats.trades : '', s.endEquity || '']), { csvName: 'walk-forward.csv' }));
@@ -388,6 +439,18 @@ export function openAnalysis({ formulaId = null } = {}) {
       setBusy(false); setProgress(0, 0, '');
     };
     Object.entries(buttons).forEach(([m, b]) => { b.onclick = () => run(m); });
+    // an unfinished optimization / walk-forward from before (phone slept, tab closed ...)
+    const showBanner = async () => {
+      const job = await loadJob(); banner.innerHTML = ''; if (!job || busyNow) { banner.classList.add('hidden'); return; }
+      const st = job.state || {}, done = st.next || 0, ago = fmtDur(Date.now() - (job.savedAt || Date.now()));
+      banner.appendChild(el('div', 'font-semibold', `Unfinished ${job.mode === 'walk' ? 'Walk-Forward' : 'Optimize'}: ${job.formulaName}`));
+      banner.appendChild(el('div', '', `${done.toLocaleString()} combinations done, saved ${ago} ago. Nothing is lost.`));
+      const row = el('div', 'flex space-x-2'), go = el('button', BTN_PRIMARY + ' !py-1', 'Resume'), no = el('button', BTN + ' !py-1', 'Discard'); go.type = no.type = 'button';
+      go.onclick = async () => { banner.classList.add('hidden'); forced = job; try { applyState(job.ui); S = job.settings; await run(job.mode); } finally { forced = null; } };
+      no.onclick = async () => { await deleteJob(); banner.classList.add('hidden'); };
+      row.appendChild(go); row.appendChild(no); banner.appendChild(row); banner.classList.remove('hidden');
+    };
+    showBanner();
     bre.onclick = async () => {
       const sy = symbols().symbols; cancel.stop = false; setBusy(true); pane.innerHTML = '';
       const session = makeSession((s) => host.loadBars(s), 'D');

@@ -112,6 +112,7 @@ export function openAnalysisSettings({ onSave } = {}) {
           sel(o, 'target', 'Optimization target', metricOpts(), 'Results are sorted by this. Default CAR/MaxDD'),
           sel(o, 'engine', 'Search', { exhaustive: 'Exhaustive (every combination)', smart: 'Smart (particle swarm)' }, 'A formula can choose with OptimizerSetEngine("spso")'),
           row(num(o, 'maxEval', 'Smart: tests per run (MaxEval)', '', 1), num(o, 'runs', 'Smart: runs', '', 1)),
+          num(o, 'keep', 'Keep the best N results (0 = all)', 'Exhaustive search has no limit on the number of combinations; only the best N rows are kept in the list and the CSV (saves memory on a phone).', 1),
           el('div', 'text-[10px] text-slate-500', 'The three AmiBroker engines names (spso, trib, cmae) all use the same particle-swarm search here.'),
         ];
       },

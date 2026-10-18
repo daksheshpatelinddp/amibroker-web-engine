@@ -14,7 +14,7 @@ export const DEFAULT_SETTINGS = {
     limitVolPct: 0, noVolLimitIfZero: true, usePrevBarEquity: false, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0 },
   report: { resultList: 'trades', riskFree: 5, distSpacing: 1, includeTradeList: true },
   walkForward: { isLength: 3, isUnit: 'years', oosLength: 1, oosUnit: 'years', anchored: false, start: '', last: '', target: 'carMdd' },
-  optimize: { target: 'carMdd', engine: 'exhaustive', maxEval: 1000, runs: 3 },
+  optimize: { target: 'carMdd', engine: 'exhaustive', maxEval: 1000, runs: 3, keep: 100000 },
   monteCarlo: { enable: true, runs: 1000, mode: 'trades', posMethod: 'keep', posValue: 10000, posPct: 10, strawLines: 30 },
 };
 
