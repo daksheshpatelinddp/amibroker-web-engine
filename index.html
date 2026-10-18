@@ -35,7 +35,6 @@
   <header class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0">
     <div class="flex items-center space-x-3">
       <span class="font-bold text-slate-200 tracking-wide">AmiBroker Web</span>
-      <div id="tools-root" class="relative"></div>
       <span id="status-badge" class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
         ● Initializing Engine...
       </span>
@@ -54,6 +53,9 @@
 
   <!-- Main Workstation Canvas Area -->
   <main class="flex-1 flex flex-col min-h-0 relative">
+    <!-- Menu bar (File · Edit · View · Insert · Format · Symbol · Analysis · Tools · Window) -->
+    <div id="menu-bar" class="bg-slate-900 border-b border-slate-800 flex items-center overflow-x-auto whitespace-nowrap shrink-0 px-1"></div>
+
     <!-- Symbol header: the symbol of the active sheet, last price and change (follows the crosshair) -->
     <div id="symbol-bar" class="bg-slate-900/80 border-b border-slate-800 flex items-center justify-between px-3 py-1 shrink-0 space-x-2">
       <div class="min-w-0 flex-1">
@@ -68,7 +70,6 @@
         <select id="tf-select" title="Time frame" class="px-1 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200 text-[11px]">
           <option value="D">D</option><option value="W">W</option><option value="M">M</option><option value="Q">Q</option><option value="Y">Y</option>
         </select>
-        <button id="btn-add-pane" type="button" class="px-2 py-1 rounded bg-sky-600 text-white text-[11px] font-semibold">＋ Pane</button>
         <button id="btn-fit" type="button" class="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200 text-[11px]">Fit</button>
         <button id="btn-latest" type="button" class="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200 text-[11px]">Latest</button>
       </div>
