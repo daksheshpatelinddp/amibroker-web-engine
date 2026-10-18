@@ -82,7 +82,8 @@ export class ChartEngine {
       localization: { locale: 'en-IN' },   // fixed, so an odd browser language setting can never break the chart
       layout: { background: { color: COLORS.bg }, textColor: COLORS.text, fontSize: 11, panes: { separatorColor: COLORS.border, separatorHoverColor: '#475569' } },
       grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
-      crosshair: { mode: LWC.CrosshairMode ? (this.crosshairOn === false ? LWC.CrosshairMode.Hidden : LWC.CrosshairMode.Normal) : 1 },
+      crosshair: { mode: LWC.CrosshairMode ? (this.crosshairOn === false ? LWC.CrosshairMode.Hidden : LWC.CrosshairMode.Normal) : 1,
+        vertLine: { color: 'rgba(148,163,184,0.75)', width: 1, labelBackgroundColor: '#334155' }, horzLine: { color: 'rgba(148,163,184,0.75)', width: 1, labelBackgroundColor: '#334155' } },
       rightPriceScale: { borderColor: COLORS.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
       timeScale: { borderColor: COLORS.border, timeVisible: this.intraday, secondsVisible: false, rightOffset: 4 },
     });
@@ -106,7 +107,11 @@ export class ChartEngine {
       if (!param || param.logical === undefined || param.logical === null || !param.point) return;
       if (this.suppressSelect && this.suppressSelect()) return;
       const i = Math.round(param.logical); if (i < 0 || i >= this.barCount) return;
-      this.select(i === this.selected ? null : i);
+      // price under the finger (price pane only): the crosshair is pinned there, so it stays on screen after the touch
+      let price = NaN; if (!param.paneIndex) { try { const sr = this.paneSeries && this.paneSeries[0]; if (sr) price = sr.coordinateToPrice(param.point.y); } catch (e) { /* ignore */ } }
+      let same = i === this.selected;
+      if (same && this.crosshairOn !== false && Number.isFinite(price) && Number.isFinite(this.selPrice)) { try { const y0 = this.paneSeries[0].priceToCoordinate(this.selPrice); same = Math.abs(y0 - param.point.y) < 16; } catch (e) { /* keep */ } }
+      this.select(same ? null : i, { price });
     });
     try { chart.timeScale().subscribeVisibleLogicalRangeChange(() => this._placeSel()); } catch (e) { /* ignore */ }
     chart.subscribeCrosshairMove((param) => {
@@ -126,7 +131,7 @@ export class ChartEngine {
     }
     try { this._drawTrades(LWC); } catch (e) { console.warn('Trade arrows failed:', e); }
     if (this.onRendered) { try { this.onRendered(); } catch (e) { console.warn('Drawing layer failed:', e); } }
-    this._placeSel(); this._scheduleLabels();
+    this._pin(); this._placeSel(); this._scheduleLabels();
     this.triggers = {}; this.guiEvents = {};      // a button press fires exactly once
     if (this.onFormulaErrors) {
       for (const [paneId, info] of this.paneInfo) if (info.errors.length) this.onFormulaErrors(paneId, info.errors);
@@ -545,9 +550,19 @@ export class ChartEngine {
   }
 
   /** Select one candle (null = none): header information of that candle plus a thin line on it. */
-  select(i) {
-    this.selected = i === null || i === undefined ? null : i;
-    this._placeSel(); if (this.onHover) this.onHover(this.selected);
+  select(i, { price = NaN } = {}) {
+    this.selected = i === null || i === undefined ? null : i; this.selPrice = this.selected === null ? NaN : price;
+    this._pin(); this._placeSel(); if (this.onHover) this.onHover(this.selected);
+  }
+  /** Keeps the crosshair on the selected candle (a finger lifted from the screen would otherwise make it vanish). */
+  _pin() {
+    if (!this.chart) return;
+    try {
+      if (this.selected === null || this.selected === undefined || this.crosshairOn === false) { this.chart.clearCrosshairPosition && this.chart.clearCrosshairPosition(); return; }
+      const sr = this.paneSeries && this.paneSeries[0] ? this.paneSeries[0] : this.mainSeries, a = this.arrays;
+      const p = Number.isFinite(this.selPrice) ? this.selPrice : a.c[this.selected];
+      if (this.chart.setCrosshairPosition && sr) this.chart.setCrosshairPosition(p, this.times[this.selected], sr);
+    } catch (e) { /* older library: the dashed line still marks the candle */ }
   }
   _placeSel() {
     const ws = this.container && this.container.parentNode; if (!ws) return;
@@ -562,7 +577,8 @@ export class ChartEngine {
     this.crosshairOn = !!on;
     const LWC = window.LightweightCharts; if (!this.chart || !LWC || !LWC.CrosshairMode) return;
     try { this.chart.applyOptions({ crosshair: { mode: on ? LWC.CrosshairMode.Normal : LWC.CrosshairMode.Hidden } }); } catch (e) { /* ignore */ }
-    if (!on && this.onHover) this.onHover(null);
+    this._pin();
+    if (!on && this.onHover) this.onHover(this.selected === undefined ? null : this.selected);
   }
 
   // ---- view buttons ----
