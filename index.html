@@ -33,18 +33,21 @@
 <body class="h-full flex flex-col overflow-hidden text-xs antialiased select-none">
   <!-- Top Navigation / Status Header -->
   <header class="h-10 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 shrink-0">
-    <div class="flex items-center space-x-3">
-      <span class="font-bold text-slate-200 tracking-wide">AmiBroker Web</span>
-      <span id="status-badge" class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+    <div class="flex items-center space-x-2 min-w-0">
+      <span class="font-bold text-slate-200 tracking-wide shrink-0" title="AmiBroker Web">ABW</span>
+      <span id="status-badge" class="truncate min-w-0 px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
         ● Initializing Engine...
       </span>
     </div>
-    <div class="flex items-center space-x-2" id="header-controls">
-      <!-- Symbol search -->
+    <div class="flex items-center space-x-1.5 shrink-0 ml-2" id="header-controls">
+      <!-- Time frame and the ★ (added by the app) sit beside the symbol search -->
+      <select id="tf-select" title="Time frame" class="px-1 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200 text-[11px]">
+          <option value="D">D</option><option value="W">W</option><option value="M">M</option><option value="Q">Q</option><option value="Y">Y</option>
+        </select>
 <div class="relative">
         <input id="symbol-input" type="search" inputmode="text" autocomplete="off" autocorrect="off" spellcheck="false"
                autocapitalize="characters" placeholder="Search symbol..."
-               class="select-text w-40 bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs outline-none focus:border-sky-500 uppercase" />
+               class="select-text w-24 sm:w-40 bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs outline-none focus:border-sky-500 uppercase" />
         <ul id="symbol-suggest"
             class="hidden absolute right-0 mt-1 w-56 max-h-72 overflow-y-auto bg-slate-800 border border-slate-700 rounded shadow-xl z-50"></ul>
       </div>
@@ -67,9 +70,6 @@
         <div id="sym-ohlc" class="text-[10px] text-slate-400 truncate"></div>
       </div>
       <div class="flex items-center space-x-1 shrink-0">
-        <select id="tf-select" title="Time frame" class="px-1 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200 text-[11px]">
-          <option value="D">D</option><option value="W">W</option><option value="M">M</option><option value="Q">Q</option><option value="Y">Y</option>
-        </select>
         <button id="btn-fit" type="button" class="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200 text-[11px]">Fit</button>
         <button id="btn-latest" type="button" class="px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-200 text-[11px]">Latest</button>
       </div>
