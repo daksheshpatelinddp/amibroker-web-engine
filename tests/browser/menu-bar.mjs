@@ -13,6 +13,8 @@ await pg.goto(`http://localhost:${port}/index.html`); await pg.waitForTimeout(15
 const names = await pg.$$eval('#menu-bar button', (x) => x.map((e) => e.textContent));
 ok(JSON.stringify(names) === JSON.stringify(['File', 'Edit', 'View', 'Insert', 'Format', 'Symbol', 'Analysis', 'Tools', 'Window']), 'nine menus in AmiBroker order: ' + names);
 ok(await pg.locator('#tools-root').count() === 0 && await pg.locator('#btn-add-pane').count() === 0, 'old Tools button and + Pane removed');
+ok(await pg.evaluate(() => !!document.querySelector('#header-controls #tf-select') && !document.querySelector('#symbol-bar #tf-select')), 'time frame box is in the top bar, beside the search');
+ok(await pg.evaluate(() => { const c = [...document.getElementById('header-controls').children].map((x) => x.id || x.className.split(' ')[0]); return c.indexOf('tf-select') < c.indexOf('btn-fav') && c.indexOf('btn-fav') < c.length - 1; }), 'order: time frame, star, search');
 const open = async (m) => { await pg.click(`#menu-bar button[data-menu="${m}"]`); };
 const item = (t) => pg.locator('[data-menu-panel] button', { hasText: t }).first();
 await open('View'); ok(await pg.locator('[data-menu-panel="View"]').isVisible(), 'View opens');
@@ -25,6 +27,8 @@ await pg.keyboard.press('Escape'); ok(await pg.locator('[data-menu-panel]').coun
 await open('Insert'); await item('Lines').click(); await item('Trend line').click(); await pg.waitForTimeout(100);
 ok(await pg.evaluate(() => !!document.querySelector('canvas')) , 'drawing layer present');
 await open('Window'); const before = await pg.locator('#sheet-tabs > div').count(); await item('New sheet').click(); await pg.waitForTimeout(300); ok(await pg.locator('#sheet-tabs > div').count() === before + 1, 'Window > New sheet adds a tab');
+await open('File'); ok(await item('Formula library').isVisible() && await item('My formulas').isVisible(), 'Formula library and My formulas are in File'); await pg.keyboard.press('Escape');
+await open('Analysis'); ok(await pg.locator('[data-menu-panel] button', { hasText: 'Formula library' }).count() === 0, 'not repeated in Analysis'); await pg.keyboard.press('Escape');
 await open('Analysis'); await item('New analysis').click(); await pg.waitForSelector('text=Market breadth', { timeout: 4000 }).then(() => ok(true, 'Analysis opens'), () => ok(false, 'Analysis did not open'));
 ok(!errs.length, 'no page errors: ' + errs.join(' | '));
 console.log(`${pass} passed, ${fail} failed`); await b.close(); server.close(); process.exit(fail ? 1 : 0);

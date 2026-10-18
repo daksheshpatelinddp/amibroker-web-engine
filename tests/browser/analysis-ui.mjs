@@ -64,6 +64,7 @@ await pg.getByRole('button', { name: 'Backtest', exact: true }).click();
 const win = pg.locator('div.fixed.inset-0').last(); await win.getByRole('button', { name: 'Charts', exact: true }).waitFor({ timeout: 20000 }); await win.getByRole('button', { name: 'Charts', exact: true }).click();
 ok(await pg.locator('text=Tap a chart to open it big.').count() === 1, 'charts tab lists previews');
 await pg.locator('button', { hasText: 'open big' }).first().click(); await pg.waitForSelector('text=Backtest chart', { timeout: 4000 }).catch(() => console.log('PAGE ERRORS', errs));
+await pg.waitForTimeout(400);
 const wide = await pg.evaluate(() => { const sv = [...document.querySelectorAll('svg')].pop(); return sv.getBoundingClientRect().width; }); ok(wide > 390, 'big chart is wider than the phone screen: ' + wide);
 ok(await pg.locator('text=/Equity \\(1 of 5\\)/').count() === 1, 'starts with the equity chart');
 await pg.locator('button', { hasText: '▶' }).last().click(); ok(await pg.locator('text=/Drawdown \\(2 of 5\\)/').count() === 1, 'next chart');
