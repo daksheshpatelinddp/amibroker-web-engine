@@ -10,12 +10,35 @@ const W = 600;
 const frame = (h, inner) => `<svg viewBox="0 0 ${W} ${h}" class="w-full" style="background:#020617;border:1px solid #1e293b;border-radius:6px" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">${inner}</svg>`;
 const txt = (x, y, t, o = {}) => `<text x="${x}" y="${y}" fill="${o.fill || '#94a3b8'}" font-size="${o.size || 10}" text-anchor="${o.anchor || 'start'}">${esc(t)}</text>`;
 
-export function svgLine(series, { height = 150, fill = false, title = '' } = {}) {
-  const H = height, pad = 24, all = series.flatMap((s) => s.values).filter(Number.isFinite);
+// ---- axes: round tick values, grid lines, labels and axis titles
+const short = (v) => { if (!Number.isFinite(v)) return '-'; const a = Math.abs(v); const r = (x, d) => String(+x.toFixed(d)); return a >= 1e7 ? r(v / 1e7, 2) + 'Cr' : a >= 1e5 ? r(v / 1e5, 2) + 'L' : a >= 1e4 ? r(v / 1e3, 1) + 'K' : a >= 100 ? String(Math.round(v)) : a >= 1 ? r(v, 1) : r(v, 2); };
+function niceTicks(lo, hi, n = 5) {
+  if (!(hi > lo)) return [lo];
+  const raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / mag, step = (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * mag, out = [];
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+const axisTitle = (x, y, t, rot = false) => `<text x="${x}" y="${y}" fill="#cbd5e1" font-size="10" text-anchor="middle"${rot ? ` transform="rotate(-90 ${x} ${y})"` : ''}>${esc(t)}</text>`;
+/** Grid + tick labels for a plot area. xTicks = [{x, label}] already placed. */
+function axes({ L, R, T, B, H, y0, y1, sy, xTicks, xTitle, yTitle, yFmt = short }) {
+  let g = '';
+  for (const v of niceTicks(y0, y1, H < 130 ? 3 : 5)) { const y = sy(v); if (y < T - 1 || y > H - B + 1) continue; g += `<line x1="${L}" x2="${W - R}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#1e293b"/>${txt(L - 4, y + 3, yFmt(v), { anchor: 'end', size: 9 })}`; }
+  g += `<line x1="${L}" x2="${L}" y1="${T}" y2="${H - B}" stroke="#475569"/><line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="#475569"/>`;
+  for (const t of xTicks) g += `<line x1="${t.x.toFixed(1)}" x2="${t.x.toFixed(1)}" y1="${H - B}" y2="${H - B + 3}" stroke="#475569"/>${txt(t.x, H - B + 13, t.label, { anchor: 'middle', size: 9 })}`;
+  if (xTitle) g += axisTitle((L + W - R) / 2, H - 3, xTitle);
+  if (yTitle) g += axisTitle(9, (T + H - B) / 2, yTitle, true);
+  return g;
+}
+const xTickList = (n, L, R, label, count = 5) => { if (n < 1) return []; const k = Math.min(count, n), out = []; for (let j = 0; j < k; j++) { const i = k === 1 ? 0 : Math.round((j * (n - 1)) / (k - 1)); out.push({ x: L + (n === 1 ? 0 : (i / (n - 1)) * (W - L - R)), label: label(i) }); } return out; };
+
+export function svgLine(series, { height = 150, fill = false, title = '', dates = null, xTitle = '', yTitle = '', yFmt = short } = {}) {
+  const H = height, L = 50, R = 8, T = 18, B = xTitle ? 30 : 20, all = series.flatMap((s) => s.values).filter(Number.isFinite);
   if (!all.length) return frame(H, txt(6, 12, title));
-  const lo = Math.min(...all), hi = Math.max(...all), n = Math.max(...series.map((s) => s.values.length));
-  const sy = (v) => H - pad / 2 - ((v - lo) / (hi - lo || 1)) * (H - pad), sx = (i) => pad + (i / Math.max(1, n - 1)) * (W - pad - 6);
-  let g = txt(6, 12, title) + txt(W - 6, 12, `${f2(lo)} … ${f2(hi)}`, { anchor: 'end', fill: '#64748b', size: 9 });
+  let lo = Math.min(...all), hi = Math.max(...all); if (hi === lo) { hi += 1; lo -= 1; } const padv = (hi - lo) * 0.04; lo -= padv; hi += padv;
+  const n = Math.max(...series.map((s) => s.values.length));
+  const sy = (v) => H - B - ((v - lo) / (hi - lo)) * (H - B - T), sx = (i) => L + (i / Math.max(1, n - 1)) * (W - L - R);
+  const lab = dates && dates.length ? (i) => String(dates[Math.min(dates.length - 1, i)]).slice(0, 10) : (i) => String(i + 1);
+  let g = txt(6, 12, title, { fill: '#e2e8f0', size: 11 }) + axes({ L, R, T, B, H, y0: lo, y1: hi, sy, xTicks: xTickList(n, L, R, lab), xTitle, yTitle, yFmt });
   for (const s of series) {
     const pts = s.values.map((v, i) => `${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(' ');
     const base = sy(Math.max(lo, Math.min(0, hi)));
@@ -25,25 +48,27 @@ export function svgLine(series, { height = 150, fill = false, title = '' } = {})
   return frame(H, g);
 }
 
-export function svgBars(bins, { title = '', height = 130, colorFn = (b) => (b.to <= 0 ? '#ef4444' : '#22c55e') } = {}) {
-  const H = height, pad = 22; if (!bins.length) return frame(H, txt(6, 12, title));
-  const mx = Math.max(...bins.map((b) => b.count)) || 1, bw = (W - pad - 6) / bins.length;
-  let g = txt(6, 12, title);
-  bins.forEach((b, i) => { const h = (b.count / mx) * (H - pad - 14); g += `<rect x="${(pad + i * bw + 1).toFixed(1)}" y="${(H - pad / 2 - h).toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h.toFixed(1)}" fill="${colorFn(b)}"><title>${esc(`${f2(b.from)} to ${f2(b.to)}: ${b.count}`)}</title></rect>`; });
-  g += txt(pad, H - 1, f2(bins[0].from), { size: 9 }) + txt(W - 6, H - 1, f2(bins[bins.length - 1].to), { size: 9, anchor: 'end' });
+export function svgBars(bins, { title = '', height = 130, colorFn = (b) => (b.to <= 0 ? '#ef4444' : '#22c55e'), xTitle = '', yTitle = 'Trades' } = {}) {
+  const H = height, L = 40, R = 8, T = 18, B = xTitle ? 30 : 20; if (!bins.length) return frame(H, txt(6, 12, title));
+  const mx = Math.max(...bins.map((b) => b.count)) || 1, bw = (W - L - R) / bins.length, sy = (v) => H - B - (v / mx) * (H - B - T);
+  const lo = bins[0].from, hi = bins[bins.length - 1].to, sxv = (v) => L + ((v - lo) / (hi - lo || 1)) * (W - L - R);
+  const xt = niceTicks(lo, hi, 6).map((v) => ({ x: sxv(v), label: short(v) }));
+  let g = txt(6, 12, title, { fill: '#e2e8f0', size: 11 }) + axes({ L, R, T, B, H, y0: 0, y1: mx, sy, xTicks: xt, xTitle, yTitle, yFmt: (v) => String(Math.round(v)) });
+  bins.forEach((b, i) => { const h = (b.count / mx) * (H - B - T); g += `<rect x="${(L + i * bw + 1).toFixed(1)}" y="${(H - B - h).toFixed(1)}" width="${Math.max(1, bw - 2).toFixed(1)}" height="${h.toFixed(1)}" fill="${colorFn(b)}"><title>${esc(`${f2(b.from)} to ${f2(b.to)}: ${b.count}`)}</title></rect>`; });
   return frame(H, g);
 }
 
 export function svgScatter(points, { title = '', height = 200, xLabel = 'x', yLabel = 'y', color = () => '#38bdf8' } = {}) {
-  const H = height, pad = 30, pts = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-  let g = txt(6, 12, `${title}   (x: ${xLabel}, y: ${yLabel}, ${pts.length} points)`);
+  const H = height, L = 46, R = 8, T = 18, B = 32, pts = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  let g = txt(6, 12, `${title}   (${pts.length} points)`, { fill: '#e2e8f0', size: 11 });
   if (!pts.length) return frame(H, g);
-  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
-  const sx = (v) => pad + ((v - x0) / (x1 - x0 || 1)) * (W - pad - 8), sy = (v) => H - pad / 2 - ((v - y0) / (y1 - y0 || 1)) * (H - pad - 10);
-  if (y0 < 0 && y1 > 0) g += `<line x1="${pad}" x2="${W - 8}" y1="${sy(0)}" y2="${sy(0)}" stroke="#334155"/>`;
-  if (x0 < 0 && x1 > 0) g += `<line y1="16" y2="${H - 8}" x1="${sx(0)}" x2="${sx(0)}" stroke="#334155"/>`;
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y); let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  if (x1 === x0) { x1 += 1; x0 -= 1; } if (y1 === y0) { y1 += 1; y0 -= 1; }
+  const sx = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), sy = (v) => H - B - ((v - y0) / (y1 - y0)) * (H - B - T);
+  g += axes({ L, R, T, B, H, y0, y1, sy, xTicks: niceTicks(x0, x1, 6).map((v) => ({ x: sx(v), label: short(v) })), xTitle: xLabel, yTitle: yLabel });
+  if (y0 < 0 && y1 > 0) g += `<line x1="${L}" x2="${W - R}" y1="${sy(0).toFixed(1)}" y2="${sy(0).toFixed(1)}" stroke="#64748b" stroke-dasharray="3 3"/>`;
+  if (x0 < 0 && x1 > 0) g += `<line y1="${T}" y2="${H - B}" x1="${sx(0).toFixed(1)}" x2="${sx(0).toFixed(1)}" stroke="#64748b" stroke-dasharray="3 3"/>`;
   for (const p of pts.slice(0, 3000)) g += `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="3" fill="${color(p)}" fill-opacity="0.8"><title>${esc(`${p.label || ''} ${p.tip || ''} (${f2(p.x)}, ${f2(p.y)})`)}</title></circle>`;
-  g += txt(pad, H - 1, f2(x0), { size: 9 }) + txt(W - 6, H - 1, f2(x1), { size: 9, anchor: 'end' }) + txt(2, 26, f2(y1), { size: 9 }) + txt(2, H - 14, f2(y0), { size: 9 });
   return frame(H, g);
 }
 
@@ -68,7 +93,7 @@ export function svgHeat(rows, optParams, metric, { title = '' } = {}) {
 export function svgMonteCarlo(mc, { title = 'Monte Carlo equity' } = {}) {
   if (!mc) return '';
   const straw = mc.curves.straw.map((v) => ({ values: v, color: '#64748b', width: 0.6, opacity: 0.45 }));
-  return svgLine([...straw, { values: mc.curves.max, color: '#22c55e', width: 1.2 }, { values: mc.curves.min, color: '#ef4444', width: 1.2 }, { values: mc.curves.avg, color: '#38bdf8', width: 1.8 }], { title: `${title} (${mc.runs} runs: min / average / max)`, height: 190 });
+  return svgLine([...straw, { values: mc.curves.max, color: '#22c55e', width: 1.2 }, { values: mc.curves.min, color: '#ef4444', width: 1.2 }, { values: mc.curves.avg, color: '#38bdf8', width: 1.8 }], { title: `${title} (${mc.runs} runs: min / average / max)`, height: 190, xTitle: 'Trade number', yTitle: 'Equity' });
 }
 
 const heat = (v) => (v === null || v === undefined ? '' : v > 0 ? `background:rgba(34,197,94,${Math.min(0.6, 0.12 + Math.abs(v) / 25)})` : `background:rgba(239,68,68,${Math.min(0.6, 0.12 + Math.abs(v) / 25)})`);
@@ -89,12 +114,12 @@ export function statsHtml(stats) {
 }
 
 export function chartsFor(result, { distSpacing = 1, big = false } = {}) {
-  const eq = result.equityCurve.map((p) => p.equity); let pk = -Infinity; const dd = eq.map((v) => { pk = Math.max(pk, v); return pk > 0 ? (v / pk - 1) * 100 : 0; });
+  const eq = result.equityCurve.map((p) => p.equity), dates = result.equityCurve.map((p) => p.t); let pk = -Infinity; const dd = eq.map((v) => { pk = Math.max(pk, v); return pk > 0 ? (v / pk - 1) * 100 : 0; });
   const h = histogram(result.trades.map((t) => t.pctProfit), distSpacing), k = big ? 2 : 1;
   return {
-    equity: svgLine([{ values: eq, color: '#38bdf8' }], { title: 'Equity', fill: true, height: 150 * k }),
-    drawdown: svgLine([{ values: dd, color: '#ef4444' }], { title: 'Drawdown %', height: 100 * k, fill: true }),
-    distribution: svgBars(h.bins, { title: `Profit distribution (% per trade, bar width ${h.width}%)`, height: 130 * k }),
+    equity: svgLine([{ values: eq, color: '#38bdf8' }], { title: 'Equity', fill: true, height: 150 * k, dates, xTitle: 'Date', yTitle: 'Equity' }),
+    drawdown: svgLine([{ values: dd, color: '#ef4444' }], { title: 'Drawdown %', height: 110 * k, fill: true, dates, xTitle: 'Date', yTitle: 'Drawdown %', yFmt: (v) => short(v) + '%' }),
+    distribution: svgBars(h.bins, { title: `Profit distribution (% per trade, bar width ${h.width}%)`, height: 130 * k, xTitle: 'Profit per trade %', yTitle: 'Number of trades' }),
     mae: svgScatter(result.trades.map((t) => ({ x: t.mae, y: t.pctProfit, label: t.symbol })), { title: 'MAE vs profit', xLabel: 'MAE %', yLabel: 'profit %', height: 200 * (big ? 1.6 : 1), color: (p) => (p.y >= 0 ? '#22c55e' : '#ef4444') }),
     mfe: svgScatter(result.trades.map((t) => ({ x: t.mfe, y: t.pctProfit, label: t.symbol })), { title: 'MFE vs profit', xLabel: 'MFE %', yLabel: 'profit %', height: 200 * (big ? 1.6 : 1), color: (p) => (p.y >= 0 ? '#22c55e' : '#ef4444') }),
   };
