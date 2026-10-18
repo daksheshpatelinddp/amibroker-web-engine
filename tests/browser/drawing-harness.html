@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>drawing harness</title></head>
+<body style="margin:0;background:#020617">
+<div id="ws" style="position:relative;width:900px;height:500px"><div id="cc" style="position:absolute;inset:0"></div></div>
+<script type="module">
+import { DrawingLayer } from '/js/drawing-layer.js';
+import { DrawingStore } from '/js/drawing-store.js';
+const N = 100, labels = Array.from({ length: N }, (_, i) => new Date(Date.UTC(2024, 0, 1 + i)).toISOString().slice(0, 10));
+const c = Float64Array.from({ length: N }, (_, i) => 100 + i * 0.5 + Math.sin(i / 5) * 5);
+const arrays = { t: labels, o: c, h: c.map((x) => x + 1), l: c.map((x) => x - 1), c };
+const ws = document.getElementById('ws'), cc = document.getElementById('cc');
+const series = { priceToCoordinate: (p) => 450 - p * 3, coordinateToPrice: (y) => (450 - y) / 3, priceScale: () => ({ options: () => ({ mode: 0 }) }) };
+const chart = { timeScale: () => ({ logicalToCoordinate: (i) => 20 + i * 8, coordinateToLogical: (x) => (x - 20) / 8, subscribeVisibleLogicalRangeChange() {} }), panes: () => [{ getHTMLElement: () => cc }], priceScale: () => ({ width: () => 50 }) };
+const engine = { chart, paneSeries: [series], arrays, sheet: { symbol: 'TEST', panes: [{ id: 'p1' }] }, container: cc };
+const mem = new Map(); const store = new DrawingStore({ getItem: (k) => mem.get(k) || null, setItem: (k, v) => mem.set(k, v) }, 'h');
+window.layer = new DrawingLayer({ engine, workspace: ws, store }); window.store = store;
+window.layer.onRendered(); window.ready = true;
+</script></body></html>
