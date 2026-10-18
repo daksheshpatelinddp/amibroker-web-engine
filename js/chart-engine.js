@@ -100,9 +100,18 @@ export class ChartEngine {
     sheet.panes.forEach((p, i) => { if (panes[i]) panes[i].setStretchFactor(p.weight || 1); });
     if (sheet.logScale) { try { chart.priceScale('right', 0).applyOptions({ mode: 1 }); } catch (e) { /* log scale not available */ } }   // View > Logarithmic scale
 
+    // tap a candle = select it: its information stays in the header (and a line marks it) until you tap it again
+    if (!keepRange || this.selected === null || this.selected === undefined || this.selected >= this.barCount) this.selected = null;
+    if (chart.subscribeClick) chart.subscribeClick((param) => {
+      if (!param || param.logical === undefined || param.logical === null || !param.point) return;
+      if (this.suppressSelect && this.suppressSelect()) return;
+      const i = Math.round(param.logical); if (i < 0 || i >= this.barCount) return;
+      this.select(i === this.selected ? null : i);
+    });
+    try { chart.timeScale().subscribeVisibleLogicalRangeChange(() => this._placeSel()); } catch (e) { /* ignore */ }
     chart.subscribeCrosshairMove((param) => {
       if (!this.onHover) return;
-      if (!param || param.logical === undefined || param.logical === null || !param.point) { this.onHover(null); return; }
+      if (!param || param.logical === undefined || param.logical === null || !param.point) { this.onHover(this.selected === null ? null : this.selected); return; }
       const i = Math.round(param.logical);
       this.onHover(i >= 0 && i < this.barCount ? i : null);
     });
@@ -117,7 +126,7 @@ export class ChartEngine {
     }
     try { this._drawTrades(LWC); } catch (e) { console.warn('Trade arrows failed:', e); }
     if (this.onRendered) { try { this.onRendered(); } catch (e) { console.warn('Drawing layer failed:', e); } }
-    this._scheduleLabels();
+    this._placeSel(); this._scheduleLabels();
     this.triggers = {}; this.guiEvents = {};      // a button press fires exactly once
     if (this.onFormulaErrors) {
       for (const [paneId, info] of this.paneInfo) if (info.errors.length) this.onFormulaErrors(paneId, info.errors);
@@ -535,6 +544,18 @@ export class ChartEngine {
     return box;
   }
 
+  /** Select one candle (null = none): header information of that candle plus a thin line on it. */
+  select(i) {
+    this.selected = i === null || i === undefined ? null : i;
+    this._placeSel(); if (this.onHover) this.onHover(this.selected);
+  }
+  _placeSel() {
+    const ws = this.container && this.container.parentNode; if (!ws) return;
+    if (!this.selLine) { this.selLine = document.createElement('div'); Object.assign(this.selLine.style, { position: 'absolute', top: '0', bottom: '0', width: '0', borderLeft: '1px dashed rgba(56,189,248,0.8)', pointerEvents: 'none', zIndex: '15', display: 'none' }); ws.appendChild(this.selLine); }
+    let x = NaN; if (this.chart && this.selected !== null && this.selected !== undefined) { try { x = this.chart.timeScale().logicalToCoordinate(this.selected); } catch (e) { /* ignore */ } }
+    if (x === null || x === undefined || !Number.isFinite(x)) { this.selLine.style.display = 'none'; return; }
+    this.selLine.style.left = `${Math.round(x)}px`; this.selLine.style.display = 'block';
+  }
   defaultBars() { return this.intraday ? DEFAULT_BARS_INTRADAY : DEFAULT_BARS_SHOWN; }
   /** Crosshair on / off (remembered by the caller). */
   setCrosshair(on) {

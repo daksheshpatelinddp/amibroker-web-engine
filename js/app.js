@@ -113,6 +113,7 @@ class Application {
         chartEngine.onGuiState = (paneId, state) => this.ws.setPaneGuiState(this.ws.active().id, paneId, state);
         chartEngine.onGuiEvent = (paneId, ev) => { chartEngine.guiEvents = { [paneId]: [ev] }; this.relayout(); };
         chartEngine.onHover = (i) => this.updateHeader(i);
+        chartEngine.suppressSelect = () => !!(this.drawings && (this.drawings.tool || this.drawings.build));   // while a drawing tool is active, taps draw instead
         chartEngine.onPaneClick = (paneId) => openPaneEditor(this.ws, this.ws.active(), paneId, () => this.relayout());
         const on = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
         const tf = document.getElementById('tf-select');
