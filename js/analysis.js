@@ -228,6 +228,7 @@ export function openAnalysis({ formulaId = null } = {}) {
     // ---- progress with time left; keeps the screen awake while busy
     const fmtDur = (ms) => { const t = Math.max(0, Math.round(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), x = t % 60; return h ? `${h} h ${m} min` : m ? `${m} min ${x} s` : `${x} s`; };
     let phase = null, lock = null; const baseTitle = document.title;
+    const longMs = () => (typeof window !== "undefined" && window.__longMs) || 15 * 60 * 1000; let longAsk = null, skipLong = false, runT0 = 0;
     const setProgress = (i, n, s, stage) => {
       if (!n) { phase = null; progress.textContent = ''; pbar.classList.add('hidden'); progText = ''; document.title = baseTitle; return; }
       const f = Math.min(1, i / n);
@@ -240,6 +241,10 @@ export function openAnalysis({ formulaId = null } = {}) {
       if ((stage === 'load' || stage === 'run') && f > phase.f0 + 0.002 && f < 1) text += `\n${fmtDur(el0)} so far, about ${fmtDur((el0 * (1 - f)) / (f - phase.f0))} left`;
       if (stage === 'run' && s) text += `\n${s}`;
       progress.textContent = text; pbar.classList.remove('hidden'); barFill.style.width = `${(f * 100).toFixed(1)}%`;
+      if (!skipLong && !longAsk && stage !== 'load' && !cancel.stop && Date.now() - phase.t0 >= 8000 && f > phase.f0 + 0.003 && f < 1) {
+        const left = ((Date.now() - phase.t0) * (1 - f)) / (f - phase.f0);
+        if (left > longMs()) { longAsk = { left }; cancel.stop = true; }   // pause here and ask first
+      }
       progText = `${Math.round(f * 100)}%`; document.title = `(${Math.round(f * 100)}%) ${baseTitle}`;
       if (chip.style.display !== 'none') chipText();
     };
@@ -353,7 +358,21 @@ export function openAnalysis({ formulaId = null } = {}) {
     }
 
     let forced = null;   // a saved job being resumed: its own formula text and symbol list
+    // Before a long analysis: after a few seconds the speed is known; if more than 15 minutes are left, ask.
     const run = async (mode) => {
+      longAsk = null; skipLong = false;
+      await runOnce(mode);
+      while (longAsk) {
+        const a = longAsk; longAsk = null;
+        const mins = Math.round(a.left / 60000), txt = mins >= 90 ? `${(mins / 60).toFixed(1)} hours` : `${mins} minutes`;
+        const resumable = mode === 'optimize' || mode === 'walk';
+        if (confirm(`This ${MODES[mode] || mode} needs about ${txt} more at the current speed.\n\nKeep the screen on (it is kept awake for you) and continue?\n\nOK = continue    Cancel = do not run`)) {
+          skipLong = true; const job = resumable ? await loadJob() : null;
+          if (job) { forced = job; try { await runOnce(mode); } finally { forced = null; } } else await runOnce(mode);
+        } else { await deleteJob(); R = null; pane.innerHTML = ''; tabsBar.classList.add('hidden'); hasResults = false; chipText(); toast('Cancelled. Nothing was changed.'); }
+      }
+    };
+    const runOnce = async (mode) => {
       const f = forced ? { name: forced.formulaName, code: forced.code } : formulaStore.get(fsel.value); if (!f) { toast('Choose a formula'); return; }
       const sy = forced ? { symbols: forced.symbols } : symbols(); if (!sy.symbols.length) { toast('No symbols to analyse. Choose Apply to, or add symbols to the filter.'); return; }
       if (sy.capped) toast(`Using the first ${sy.symbols.length} symbols (Settings > General > largest number of symbols)`);
