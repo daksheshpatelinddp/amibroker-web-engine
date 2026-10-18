@@ -1,0 +1,26 @@
+// Run: node tests/browser/chart-nav.mjs -- scroll bar, one-candle arrows, zoom, crosshair switch (stand-in time scale)
+import { chromium } from '/opt/npm-tools/node_modules/playwright/index.mjs';
+import http from 'http'; import fs from 'fs'; import path from 'path'; import { fileURLToPath } from 'url';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const server = http.createServer((q, r) => { const f = path.join(root, decodeURIComponent(q.url.split('?')[0])); fs.readFile(f, (e, b) => { if (e) { r.writeHead(404); r.end(); } else { r.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : 'text/html' }); r.end(b); } }); }).listen(0);
+await new Promise((r) => server.once('listening', r)); const port = server.address().port;
+let pass = 0, fail = 0; const ok = (c, m) => { if (c) pass++; else { fail++; console.log('FAIL', m); } };
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }), pg = await b.newPage({ viewport: { width: 390, height: 200 } });
+const errs = []; pg.on('pageerror', (e) => errs.push(e.message));
+await pg.goto(`http://localhost:${port}/tests/browser/chart-nav.html`); await pg.waitForFunction(() => window.ready);
+const R = () => pg.evaluate(() => window.getRange());
+ok(await pg.evaluate(() => window.subCount()) === 1, 'rebinding on a new render keeps one subscription');
+await pg.click('button[aria-label="One candle to the left"]'); let r = await R(); ok(r.from === 254 && r.to === 303, 'left arrow moves exactly one candle');
+await pg.click('button[aria-label="One candle to the right"]'); await pg.click('button[aria-label="One candle to the right"]'); r = await R(); ok(r.from === 256 && r.to === 305, 'right arrow moves one candle each tap');
+await pg.keyboard.press('ArrowLeft'); r = await R(); ok(r.from === 255, 'keyboard left arrow');
+const w0 = r.to - r.from; await pg.click('button[aria-label="Zoom in"]'); r = await R(); ok(r.to - r.from < w0, 'zoom in shows fewer candles');
+await pg.click('button[aria-label="Zoom out"]'); await pg.click('button[aria-label="Zoom out"]'); r = await R(); ok(r.to - r.from > w0, 'zoom out shows more candles');
+const tb = await pg.evaluate(() => { const t = window.nav.track.getBoundingClientRect(), h = window.nav.thumb.getBoundingClientRect(); return { tl: t.left, tw: t.width, ty: t.top + t.height / 2, hl: h.left, hw: h.width, hy: h.top + h.height / 2 }; });
+ok(tb.hw >= 24 && tb.hw < tb.tw, 'thumb is smaller than the track: ' + JSON.stringify(tb));
+await pg.mouse.move(tb.hl + tb.hw / 2, tb.hy); await pg.mouse.down(); await pg.mouse.move(tb.tl + 20, tb.hy, { steps: 5 }); await pg.mouse.up();
+r = await R(); ok(r.from < 60, 'dragging the thumb to the left end scrolls to the old candles: ' + r.from);
+await pg.mouse.click(tb.tl + tb.tw - 3, tb.ty); r = await R(); ok(r.to > 280, 'tapping the right end of the bar jumps to the latest: ' + r.to);
+await pg.click('button[aria-label="Crosshair on / off"]'); ok(await pg.evaluate(() => window.engine.crosshairOn) === false, 'crosshair off');
+await pg.click('button[aria-label="Crosshair on / off"]'); ok(await pg.evaluate(() => window.engine.crosshairOn) === true, 'crosshair on again');
+ok(!errs.length, 'no page errors ' + errs.join('|'));
+console.log(`${pass} passed, ${fail} failed`); await b.close(); server.close(); process.exit(fail ? 1 : 0);

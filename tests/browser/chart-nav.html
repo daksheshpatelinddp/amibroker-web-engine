@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><style>.flex{display:flex;align-items:center}.relative{position:relative}.absolute{position:absolute}.flex-1{flex:1 1 0%}.h-5{height:20px}.h-full{height:100%}.min-w-0{min-width:0}.shrink-0{flex-shrink:0}.w-8{width:32px}.h-7{height:28px}.h-9{height:36px}.px-2{padding:0 8px}.top-0{top:0}</style><body style="margin:0;width:390px"><div id="nav"></div>
+<script type="module">
+import { ChartNav } from '/js/chart-nav.js';
+let range = { from: 255, to: 304 }, subs = [];
+const ts = { getVisibleLogicalRange: () => ({ ...range }), setVisibleLogicalRange: (r) => { range = { ...r }; subs.forEach((f) => f()); }, subscribeVisibleLogicalRangeChange: (f) => subs.push(f), unsubscribeVisibleLogicalRangeChange: (f) => { subs = subs.filter((x) => x !== f); } };
+const engine = { barCount: 300, crosshairOn: true, chart: { timeScale: () => ts }, setCrosshair(on) { this.crosshairOn = on; } };
+window.engine = engine; window.getRange = () => range; window.subCount = () => subs.length;
+window.nav = new ChartNav({ engine, root: document.getElementById('nav') }); window.nav.onRendered(); window.nav.onRendered(); window.ready = true;
+</script>
