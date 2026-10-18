@@ -299,6 +299,8 @@ export class Workspace {
     p.params.layers.splice(i, 1); this.save(); return true;
   }
 
+  setLogScale(sheetId, on) { const s = this.get(sheetId); if (!s) return false; s.logScale = !!on; this.save(); return true; }
+
   setPriceStyle(sheetId, style) {
     const s = this.get(sheetId); if (!s || !['candle', 'bar', 'line', 'area'].includes(style)) return false;
     s.priceStyle = style; this.save(); return true;

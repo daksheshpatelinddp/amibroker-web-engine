@@ -335,7 +335,7 @@ export function openCategories(opts = {}) {
 
 /** A ★ button in the symbol bar that adds / removes the current symbol from Favorites. */
 export function initFavoriteStar() {
-  const bar = document.getElementById('btn-add-pane'); if (!bar || document.getElementById('btn-fav')) return;
+  const bar = document.getElementById('btn-fit'); if (!bar || document.getElementById('btn-fav')) return;
   const st = categoryStore();
   const b = el('button', 'px-2 py-1 rounded bg-slate-800 border border-slate-700 text-[13px] leading-none', '★'); b.type = 'button'; b.id = 'btn-fav'; b.title = 'Add / remove from Favorites';
   const paint = () => { const on = st.isFavorite(host.symbol() || ''); b.className = 'px-2 py-1 rounded bg-slate-800 border border-slate-700 text-[13px] leading-none ' + (on ? 'text-amber-400' : 'text-slate-500'); };

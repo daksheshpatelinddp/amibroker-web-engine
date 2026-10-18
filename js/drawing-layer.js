@@ -132,6 +132,21 @@ export class DrawingLayer {
     if (id) this._select(null);
     this._buildPanel(); this.redraw();
   }
+  // ---- public API for the menu bar
+  panelOpen() { return !this.panel.classList.contains('hidden'); }
+  showPanel(open = true) { if (open !== this.panelOpen()) this.toggle.click(); }
+  pickTool(id) { this.showPanel(true); this._setTool(id); }
+  hasSelection() { return !!this._selected(); }
+  copy() { this._copy(); } paste() { this._paste(); } remove() { this._delete(); }
+  properties_() { const d = this._selected(); if (d) this.properties(d); else toast('Select a drawing first.'); }
+  deleteAll() { const n = this.store.list(this._syms()).length; if (!n) { toast('No drawings on this symbol.'); return; } if (confirm(`Delete all ${n} drawings of ${this._syms()}?`)) { this.store.clear(this._syms()); this.sel = null; } }
+  isHidden() { return !!this.hidden; }
+  toggleHidden() { this.hidden = !this.hidden; LS('drawings_hidden', this.hidden ? '1' : '0'); this._buildPanel(); this.redraw(); }
+  isMagnet() { return !!this.magnet; }
+  toggleMagnet() { this.magnet = !this.magnet; this._buildPanel(); }
+  /** Format of the selected drawing, or (nothing selected) of the next ones. */
+  format(patch) { Object.assign(this.style, patch); Object.assign(this.touched, patch); this._applyStyle(patch); this._buildPanel(); }
+  currentStyle() { const d = this._selected(); return { width: (d && d.width) || this.style.width, dash: (d && d.dash) || this.style.dash }; }
   _selected() { return this.sel ? this.store.get(this._syms(), this.sel) : null; }
   _select(id) { this.sel = id; this._syncBar(); this.redraw(); }
   _applyStyle(patch) { const d = this._selected(); if (d) this.store.update(this._syms(), d.id, patch); }

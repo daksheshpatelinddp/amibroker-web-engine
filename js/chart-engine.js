@@ -98,6 +98,7 @@ export class ChartEngine {
 
     const panes = chart.panes();
     sheet.panes.forEach((p, i) => { if (panes[i]) panes[i].setStretchFactor(p.weight || 1); });
+    if (sheet.logScale) { try { chart.priceScale('right', 0).applyOptions({ mode: 1 }); } catch (e) { /* log scale not available */ } }   // View > Logarithmic scale
 
     chart.subscribeCrosshairMove((param) => {
       if (!this.onHover) return;

@@ -6,7 +6,7 @@ import { Workspace } from './workspace.js';
 import { openAddPane, openPaneEditor } from './pane-ui.js';
 import { DATABASES, ACTIVE_DB, setActiveDb, symbolListKey } from './config.js';
 import { host } from './host.js';
-import { initToolsMenu } from './tools-menu.js';
+import { initMenuBar } from './menu-bar.js';
 import { formulaStore } from './formula-store.js';
 import { resample } from './timeframe.js';
 import { pseudoStore } from './pseudo-store.js';
@@ -99,10 +99,11 @@ class Application {
         // scroll bar, arrows, zoom + / -, crosshair switch (chains after the drawing layer)
         try {
             chartEngine.crosshairOn = readCrosshair();
-            const nav = new ChartNav({ engine: chartEngine, root: document.getElementById('chart-nav') });
+            const nav = this.nav = new ChartNav({ engine: chartEngine, root: document.getElementById('chart-nav') });
             const prev = chartEngine.onRendered; chartEngine.onRendered = () => { if (prev) prev(); nav.onRendered(); };
         } catch (e) { console.error('Chart navigation failed:', e); }
-        try { initToolsMenu('tools-root'); } catch (e) { console.error('Tools menu failed:', e); }
+        try { initMenuBar('menu-bar', { app: this, engine: chartEngine, nav: this.nav }); } catch (e) { console.error('Menu bar failed:', e); }
+        import('./categories-ui.js').then((m) => m.initFavoriteStar()).catch((e) => console.warn('Favorite star failed', e));
         chartEngine.onFormulaErrors = (paneId, errors) => {
             const pane = this.ws.active().panes.find((p) => p.id === paneId);
             const f = pane && formulaStore.get(pane.params.formulaId);
@@ -127,7 +128,6 @@ class Application {
         });
         on('btn-fit', () => chartEngine.fitAll());
         on('btn-latest', () => chartEngine.goLatest());
-        on('btn-add-pane', () => openAddPane(this.ws, this.ws.active(), () => this.relayout()));
         // Tap the footer message to read the whole text (useful for errors)
         const footerMsg = document.getElementById('cache-status');
         if (footerMsg) footerMsg.addEventListener('click', () => alert(this.fullStatus || ''));

@@ -2,7 +2,7 @@
 // The chart is rebuilt on every render, so onRendered() re-attaches to the new time scale.
 const KEY = 'chart_crosshair_on';
 export const readCrosshair = () => { try { return localStorage.getItem(KEY) !== '0'; } catch (e) { return true; } };
-const writeCrosshair = (on) => { try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) { /* private mode */ } };
+export const writeCrosshair = (on) => { try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) { /* private mode */ } };
 
 export class ChartNav {
   constructor({ engine, root }) {
