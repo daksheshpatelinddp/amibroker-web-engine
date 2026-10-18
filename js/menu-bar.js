@@ -61,7 +61,7 @@ export function buildMenus(api) {
   return [
     { label: 'File', items: () => [
       { label: 'New sheet', run: () => app.sheetManager.add() },
-      { label: 'Open formula…', hint: 'Library', run: lazy('./formula-library.js', 'openLibrary').bind(null, { mode: 'manage' }) },
+      { label: 'Formula library…', run: () => import('./formula-library.js').then((m) => m.openLibrary({ mode: 'manage' })) },
       { label: 'Open database', sub: dbItems() },
       { label: 'Database settings (intraday server)…', run: lazy('./intraday-ui.js', 'openIntradaySettings') },
       '-',
@@ -102,7 +102,6 @@ export function buildMenus(api) {
     ] },
     { label: 'Insert', items: () => [
       { label: 'Indicator / formula pane…', run: async () => (await import('./pane-ui.js')).openAddPane(ws(), sheet(), () => app.relayout()) },
-      { label: 'Formula as a new sheet…', run: () => import('./formula-library.js').then((m) => m.openLibrary({ mode: 'manage' })) },
       '-', ...drawingItems(),
     ] },
     { label: 'Format', items: () => [
@@ -130,7 +129,6 @@ export function buildMenus(api) {
       { label: 'New analysis… (Scan · Explore · Backtest · Optimize · Walk-Forward)', run: lazy('./analysis.js', 'openAnalysis') },
       { label: 'Formula editor…', run: () => import('./formula-editor.js').then((m) => m.openFormulaEditor()) },
       { label: 'AFL code wizard (AI assistant)…', run: () => import('./ai-assistant.js').then((m) => m.openAIAssistant()) },
-      { label: 'Formula library…', run: () => import('./formula-library.js').then((m) => m.openLibrary({ mode: 'manage' })) },
       '-',
       { label: 'Analysis settings…', run: () => import('./analysis-settings-ui.js').then((m) => m.openAnalysisSettings()) },
       { label: 'AFL reference', run: () => import('./tools-menu.js').then((m) => m.openReference()) },
@@ -138,7 +136,6 @@ export function buildMenus(api) {
     { label: 'Tools', items: () => [
       { label: 'Preferences (analysis settings)…', run: () => import('./analysis-settings-ui.js').then((m) => m.openAnalysisSettings()) },
       { label: 'Intraday data…', run: lazy('./intraday-ui.js', 'openIntradaySettings') },
-      { label: 'Indicator maintenance (formula library)…', run: () => import('./formula-library.js').then((m) => m.openLibrary({ mode: 'manage' })) },
     ] },
     { label: 'Window', items: () => [
       { label: 'New sheet', run: () => app.sheetManager.add() },

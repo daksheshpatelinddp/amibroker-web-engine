@@ -335,11 +335,11 @@ export function openCategories(opts = {}) {
 
 /** A ★ button in the symbol bar that adds / removes the current symbol from Favorites. */
 export function initFavoriteStar() {
-  const bar = document.getElementById('btn-fit'); if (!bar || document.getElementById('btn-fav')) return;
+  const inp = document.getElementById('symbol-input'), bar = inp && inp.parentNode; if (!bar || document.getElementById('btn-fav')) return;
   const st = categoryStore();
   const b = el('button', 'px-2 py-1 rounded bg-slate-800 border border-slate-700 text-[13px] leading-none', '★'); b.type = 'button'; b.id = 'btn-fav'; b.title = 'Add / remove from Favorites';
-  const paint = () => { const on = st.isFavorite(host.symbol() || ''); b.className = 'px-2 py-1 rounded bg-slate-800 border border-slate-700 text-[13px] leading-none ' + (on ? 'text-amber-400' : 'text-slate-500'); };
+  const paint = () => { const on = st.isFavorite(host.symbol() || ''); b.className = 'hidden min-[360px]:block px-2 py-1 rounded bg-slate-800 border border-slate-700 text-[13px] leading-none ' + (on ? 'text-amber-400' : 'text-slate-500'); };
   b.onclick = () => { const s = host.symbol(); if (!s) return; toast(st.toggleFavorite(s) ? `${s} added to Favorites` : `${s} removed from Favorites`); paint(); };
-  bar.parentNode.insertBefore(b, bar); paint();
+  bar.parentNode.insertBefore(b, bar); paint();   // between the time frame and the symbol search
   st.onChange(paint); setInterval(paint, 1500);
 }
