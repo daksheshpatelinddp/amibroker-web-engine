@@ -16,6 +16,7 @@ import { refreshTfSelect, openCustomFrame, openIntradaySettings } from './intrad
 import { tradeState, mountTradeBar } from './trade-view.js';
 import { DrawingLayer } from './drawing-layer.js';
 import { drawingStore } from './drawing-store.js';
+import { ChartNav, readCrosshair } from './chart-nav.js';
 
 // Indian-style short numbers for the header line: 1.2K, 3.4L (lakh), 5.6Cr (crore)
 function fmtQty(n) {
@@ -95,6 +96,12 @@ class Application {
             this.drawings = new DrawingLayer({ engine: chartEngine, workspace: document.getElementById('chart-workspace'), store: drawingStore });
             chartEngine.onRendered = () => this.drawings.onRendered();
         } catch (e) { console.error('Drawing tools failed:', e); }
+        // scroll bar, arrows, zoom + / -, crosshair switch (chains after the drawing layer)
+        try {
+            chartEngine.crosshairOn = readCrosshair();
+            const nav = new ChartNav({ engine: chartEngine, root: document.getElementById('chart-nav') });
+            const prev = chartEngine.onRendered; chartEngine.onRendered = () => { if (prev) prev(); nav.onRendered(); };
+        } catch (e) { console.error('Chart navigation failed:', e); }
         try { initToolsMenu('tools-root'); } catch (e) { console.error('Tools menu failed:', e); }
         chartEngine.onFormulaErrors = (paneId, errors) => {
             const pane = this.ws.active().panes.find((p) => p.id === paneId);

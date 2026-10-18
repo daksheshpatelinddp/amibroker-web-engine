@@ -14,7 +14,8 @@ import { CloudPrimitive, VapPrimitive } from './chart-primitives.js';
 import { tradeMarkers, signalMarkers, tradeSpan } from './trade-view.js';
 
 const COLORS = { up: '#22c55e', down: '#ef4444', grid: '#1e293b', border: '#334155', text: '#94a3b8', bg: '#020617' };
-const DEFAULT_BARS_SHOWN = 250;   // a fresh chart opens on about one year; "Fit" shows everything
+const DEFAULT_BARS_SHOWN = 45;       // a fresh chart opens on about 2 months of daily bars so every candle is readable; "Fit" shows everything
+const DEFAULT_BARS_INTRADAY = 120;
 
 export class ChartEngine {
   constructor(containerId, labelsId) {
@@ -81,12 +82,12 @@ export class ChartEngine {
       localization: { locale: 'en-IN' },   // fixed, so an odd browser language setting can never break the chart
       layout: { background: { color: COLORS.bg }, textColor: COLORS.text, fontSize: 11, panes: { separatorColor: COLORS.border, separatorHoverColor: '#475569' } },
       grid: { vertLines: { color: COLORS.grid }, horzLines: { color: COLORS.grid } },
-      crosshair: { mode: LWC.CrosshairMode ? LWC.CrosshairMode.Normal : 1 },
+      crosshair: { mode: LWC.CrosshairMode ? (this.crosshairOn === false ? LWC.CrosshairMode.Hidden : LWC.CrosshairMode.Normal) : 1 },
       rightPriceScale: { borderColor: COLORS.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
       timeScale: { borderColor: COLORS.border, timeVisible: this.intraday, secondsVisible: false, rightOffset: 4 },
     });
     this.chart = chart;
-    this.firstVisible = prevRange ? Math.max(0, Math.floor(prevRange.from)) : Math.max(0, this.arrays.t.length - DEFAULT_BARS_SHOWN);
+    this.firstVisible = prevRange ? Math.max(0, Math.floor(prevRange.from)) : Math.max(0, this.arrays.t.length - this.defaultBars());
 
     // remember the first series of every pane: the drawing tools use it to turn prices into pixels
     this.paneSeries = [];
@@ -109,7 +110,7 @@ export class ChartEngine {
     if (n > 0) {
       try {
         if (prevRange) chart.timeScale().setVisibleLogicalRange(prevRange);
-        else if (n > DEFAULT_BARS_SHOWN + 50) chart.timeScale().setVisibleLogicalRange({ from: n - DEFAULT_BARS_SHOWN, to: n + 4 });
+        else if (n > this.defaultBars() + 10) chart.timeScale().setVisibleLogicalRange({ from: n - this.defaultBars(), to: n + 4 });
         else chart.timeScale().fitContent();
       } catch (e) { chart.timeScale().fitContent(); }
     }
@@ -531,6 +532,15 @@ export class ChartEngine {
     (input._disable || input).disabled = !def.enabled;
     box.appendChild(input);
     return box;
+  }
+
+  defaultBars() { return this.intraday ? DEFAULT_BARS_INTRADAY : DEFAULT_BARS_SHOWN; }
+  /** Crosshair on / off (remembered by the caller). */
+  setCrosshair(on) {
+    this.crosshairOn = !!on;
+    const LWC = window.LightweightCharts; if (!this.chart || !LWC || !LWC.CrosshairMode) return;
+    try { this.chart.applyOptions({ crosshair: { mode: on ? LWC.CrosshairMode.Normal : LWC.CrosshairMode.Hidden } }); } catch (e) { /* ignore */ }
+    if (!on && this.onHover) this.onHover(null);
   }
 
   // ---- view buttons ----
