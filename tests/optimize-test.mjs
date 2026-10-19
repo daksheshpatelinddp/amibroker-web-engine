@@ -50,6 +50,21 @@ const wfPart = await walkForward({ ...wfArgs, session: session(), cancel: c2, ch
 ok(cp2 && cp2.next >= 4 && !wfPart.completed, 'walk-forward stopped and checkpointed');
 const wfRes = await walkForward({ ...wfArgs, session: session(), resume: cp2 });
 ok(wfRes.completed && JSON.stringify(wfRes.steps.map((s) => s.values)) === JSON.stringify(wfFull.steps.map((s) => s.values)), 'walk-forward resume gives the same chosen values');
+
+// shards: 3 machines each do every third combination; merged = the same as one machine
+{
+  const parts = []; for (let i = 0; i < 3; i++) parts.push(await optimize({ code: small, symbols: syms, session: session(), metric: 'netProfit', keep: 0, shard: { index: i, count: 3 } }));
+  const merged = parts.flatMap((x) => x.rows).sort((a, b) => b.stats.netProfit - a.stats.netProfit);
+  ok(parts.reduce((t, x) => t + x.combinations, 0) === full.combinations && parts.every((x) => x.completed), 'shards cover every combination once');
+  ok(merged.length === full.rows.length && JSON.stringify(merged[0].values) === JSON.stringify(full.rows[0].values) && merged[0].stats.netProfit === full.rows[0].stats.netProfit, 'merged shards give the same best row');
+  const wfParts = []; for (let i = 0; i < 3; i++) wfParts.push(await walkForward({ ...wfArgs, session: session(), shard: { index: i, count: 3 }, searchOnly: true }));
+  ok(wfParts.every((x) => x.searchDone && x.completed), 'walk-forward shards finish the search');
+  const best = wfParts[0].best.map((_, k) => wfParts.map((x) => x.best[k]).reduce((a, b) => ((b.score === null ? -Infinity : b.score) > (a.score === null ? -Infinity : a.score) ? b : a)));
+  const fin = await walkForward({ ...wfArgs, session: session(), bestIn: best });
+  ok(fin.completed && JSON.stringify(fin.steps.map((x) => x.values)) === JSON.stringify(wfFull.steps.map((x) => x.values)) && fin.stats.netProfit === wfFull.stats.netProfit, 'walk-forward: merged shards + final runs equal one machine');
+  const sm = await optimize({ code: small, symbols: syms, session: session(), metric: 'netProfit', engine: 'smart', maxEval: 20, runs: 1, shard: { index: 1, count: 2 } });
+  ok(sm.completed && sm.rows.length > 0, 'smart search works inside a shard');
+}
 const wfMany = await walkForward({ ...wfArgs, code: big, session: session(), maxCombos: 100 });
 ok(wfMany.steps.length === 0 && /too many/.test(wfMany.errors[0]), 'an explicit limit still works');
 ok(pickStats({ netProfit: 1, zzz: 2 }, 'zzz').zzz === 2, 'pickStats keeps the target');
