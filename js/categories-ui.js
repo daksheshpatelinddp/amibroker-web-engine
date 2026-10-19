@@ -194,7 +194,7 @@ export function openCategories(opts = {}) {
         const hit = st.names(state.type).find((x) => x.toLowerCase() === nm.toLowerCase());
         const r = st.importInto(state.type, hit, f.text, all); state.name = hit;
         if (!r.total) { toast(`No symbols found in "${f.name}". It starts with: ${f.text.trim().slice(0, 60) || '(empty file)'}`, 7000); render(); return; }
-        toast(`${r.added} added to "${hit}"${r.unknown.length ? `, ${r.unknown.length} not in database` : ''}`); render();
+        toast(`${r.added} added to "${hit}"${r.unknown.length ? `, ${r.unknown.length} not in database (${r.unknown.slice(0, 6).join(', ')}${r.unknown.length > 6 ? ' …' : ''})` : ''}`); render();
       });
       left.appendChild(bar);
       if (t.kind === 'industry') { /* sector shown on each row */ }
@@ -293,13 +293,13 @@ export function openCategories(opts = {}) {
           pb.appendChild(el('div', 'text-[11px] text-slate-400', 'Paste symbols separated by commas, spaces or new lines. TradingView lists (NSE:TCS), RELIANCE.NS, a CSV with a Symbol column, all work.'));
           const ta = el('textarea', INPUT + ' w-full h-40'); ta.placeholder = 'RELIANCE, TCS, INFY ...'; pb.appendChild(ta);
           const go = el('button', BTN_PRIMARY + ' w-full', 'Add to list'); go.type = 'button';
-          go.onclick = () => { const r = st.importInto(state.type, state.name, ta.value, all); if (!r.total) { toast('No symbols found in the pasted text.'); return; } pclose.force(); toast(`${r.added} added to "${state.name}" (${r.total - r.added} already there)${r.unknown.length ? `, ${r.unknown.length} not in database` : ''}`); render(); };
+          go.onclick = () => { const r = st.importInto(state.type, state.name, ta.value, all); if (!r.total) { toast('No symbols found in the pasted text.'); return; } pclose.force(); toast(`${r.added} added to "${state.name}" (${r.total - r.added} already there)${r.unknown.length ? `, ${r.unknown.length} not in database (${r.unknown.slice(0, 6).join(', ')}${r.unknown.length > 6 ? ' …' : ''})` : ''}`); render(); };
           pb.appendChild(go);
         }, { stack: true }));
         mk('Import TXT / TLS file…', async () => {   // works for every list: Favorites, watchlists, groups, sectors ...
           const f = await pickFile('.txt,.tls,.csv,.lst,text/plain'); if (!f) return;
           const r = st.importInto(state.type, state.name, f.text, all);
-          toast(r.total ? `${r.added} added to "${state.name}" (${r.total - r.added} already there)${r.unknown.length ? `, ${r.unknown.length} not in database` : ''}` : 'No symbols found in that file'); render();
+          toast(r.total ? `${r.added} added to "${state.name}" (${r.total - r.added} already there)${r.unknown.length ? `, ${r.unknown.length} not in database (${r.unknown.slice(0, 6).join(', ')}${r.unknown.length > 6 ? ' …' : ''})` : ''}` : 'No symbols found in that file'); render();
         });
         if (t.kind === 'free' || t.kind === 'fav') mk('Clear', () => { if (members.length && confirm(`Remove all ${members.length} symbols from "${state.name}"?`)) { st.clear(state.type, state.name, all); render(); } }, BTN_DANGER);
         else mk('Unassign all', () => { if (members.length && confirm(`Move all ${members.length} symbols out of "${state.name}"?`)) { st.clear(state.type, state.name, all); render(); } }, BTN_DANGER);

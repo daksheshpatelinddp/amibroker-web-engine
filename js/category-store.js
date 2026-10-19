@@ -7,7 +7,7 @@ export const UNASSIGNED = '(Unassigned)';
 
 export const TYPES = [
   { id: 'all', label: 'All', kind: 'all', one: 'All symbols', help: 'Every symbol in the database.' },
-  { id: 'groups', label: 'Groups', kind: 'exclusive', one: 'group', help: 'Each symbol is in exactly one group (Stocks, Indices, ETFs...).' },
+  { id: 'groups', label: 'Groups', kind: 'free', one: 'group', help: 'A symbol can be in any number of groups (NIFTY 500, NIFTY 50, Stocks ...). Putting it in a new group does not take it out of the others.' },
   { id: 'markets', label: 'Markets', kind: 'exclusive', one: 'market', help: 'Each symbol is in exactly one market (NSE, BSE...).' },
   { id: 'sectors', label: 'Sectors', kind: 'sector', one: 'sector', help: 'Top-level classification. Giving a symbol an industry also gives it that industry\'s sector.' },
   { id: 'industries', label: 'Industries', kind: 'industry', one: 'industry', help: 'Finer classification inside a sector.' },
@@ -142,7 +142,7 @@ function fresh(db = 'nse') {
     sectors: [...DEFAULT_SECTORS],
     industries: DEFAULT_INDUSTRIES.map((x) => ({ ...x })),
     assign: { groups: {}, markets: {}, sectors: {}, industries: {}, gics: {}, icb: {} },
-    lists: { watchlists: {}, indexes: {} },
+    lists: { watchlists: {}, indexes: {}, groups: {} },
     favorites: [],
     indexSym: {},          // index name -> the database symbol whose chart it opens (when the automatic match is wrong)
   };
@@ -155,12 +155,24 @@ export class CategoryStore {
     this.listeners = [];
     this.data = this._load() || fresh(dbId);
     if (!this.data.indexSym) this.data.indexSym = {};
+    this._groupsToLists();
     if (dbId === 'nse') this._migrateOld();
+    this._groupsToLists();
   }
   _load() { try { const s = this.storage && this.storage.getItem(this.KEY); if (s) { const d = JSON.parse(s); if (d && d.v === 2) return d; } } catch (e) {} return null; }
   save() { try { this.storage && this.storage.setItem(this.KEY, JSON.stringify(this.data)); } catch (e) {} this.listeners.forEach((f) => { try { f(); } catch (e) {} }); }
   onChange(fn) { this.listeners.push(fn); return () => { this.listeners = this.listeners.filter((x) => x !== fn); }; }
 
+  /** Groups used to hold one group per symbol; now a symbol can be in many. Old assignments move into lists (nothing is lost). */
+  _groupsToLists() {
+    const d = this.data; d.lists = d.lists || {}; let ch = false;
+    if (!d.lists.groups) { d.lists.groups = {}; ch = true; }
+    const old = (d.assign && d.assign.groups) || {};
+    for (const s of Object.keys(old)) { const g = old[s]; if (!g) continue; if (!d.names.groups.includes(g)) d.names.groups.push(g); const l = (d.lists.groups[g] = d.lists.groups[g] || []); if (!l.includes(s)) l.push(s); ch = true; }
+    if (d.assign) d.assign.groups = {};
+    for (const n of d.names.groups) if (!d.lists.groups[n]) d.lists.groups[n] = [];
+    if (ch) this.save();
+  }
   /** Folders you made in the first version of this screen (groups / sectors / industries / watchlists / favorites) move over. */
   _migrateOld() {
     let old = null; try { const s = this.storage && this.storage.getItem(OLD_KEY); if (s) old = JSON.parse(s); } catch (e) {}
@@ -376,19 +388,19 @@ export class CategoryStore {
   exportTls(type, name, all = []) { return this.members(type, name, all).join(',') + '\r\n'; }
   exportCsv(all = []) {
     const syms = new Set(all); Object.values(this.data.assign).forEach((m) => Object.keys(m).forEach((s) => syms.add(s)));
-    for (const t of ['watchlists', 'indexes']) Object.values(this.data.lists[t]).forEach((l) => l.forEach((s) => syms.add(s)));
+    for (const t of ['watchlists', 'indexes', 'groups']) Object.values(this.data.lists[t]).forEach((l) => l.forEach((s) => syms.add(s)));
     this.data.favorites.forEach((s) => syms.add(s));
     const q = (x) => (/[",\r\n]/.test(x) ? `"${String(x).replace(/"/g, '""')}"` : x), d = this.data;
     const lines = ['Symbol,Group,Market,Sector,Industry,GICS,ICB,Watchlist,Index,Favorite'];
     for (const s of [...syms].sort()) {
       const wl = d.names.watchlists.filter((n) => (d.lists.watchlists[n] || []).includes(s)).join('|');
       const ix = d.names.indexes.filter((n) => (d.lists.indexes[n] || []).includes(s)).join('|');
-      lines.push([s, d.assign.groups[s] || '', d.assign.markets[s] || '', this._sectorOf(s), d.assign.industries[s] || '', d.assign.gics[s] || '', d.assign.icb[s] || '', wl, ix, d.favorites.includes(s) ? 'yes' : ''].map(q).join(','));
+      lines.push([s, d.names.groups.filter((n) => (d.lists.groups[n] || []).includes(s)).join('|'), d.assign.markets[s] || '', this._sectorOf(s), d.assign.industries[s] || '', d.assign.gics[s] || '', d.assign.icb[s] || '', wl, ix, d.favorites.includes(s) ? 'yes' : ''].map(q).join(','));
     }
     return lines.join('\r\n') + '\r\n';
   }
   exportJson() { return JSON.stringify(this.data, null, 1); }
-  importJson(text) { const d = JSON.parse(text); if (!d || d.v !== 2 || !d.names) throw new Error('Not a categories backup file'); this.data = d; this.save(); }
+  importJson(text) { const d = JSON.parse(text); if (!d || d.v !== 2 || !d.names) throw new Error('Not a categories backup file'); this.data = d; this._groupsToLists(); this.save(); }
   resetDefaults() { this.data = fresh(this.dbId); this.save(); }
 
   // ------------------------------------------------------------ indexes (the index instruments of this market)
