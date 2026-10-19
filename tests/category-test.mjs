@@ -25,7 +25,7 @@ s.addSymbols('sectors', 'Technology', ['TCS']); s.addSymbols('sectors', 'Energy'
 ok(s.members('sectors', 'Technology', all).length === 0 && s.members('sectors', 'Energy', all).join() === 'TCS', 'moving a symbol to another sector');
 ok(s.members('sectors', UNASSIGNED, all).length === 4, 'unassigned = the rest: ' + s.members('sectors', UNASSIGNED, all).length);
 s.addSymbols('groups', 'Stocks', all); s.addSymbols('groups', 'ETFs', ['ITC']);
-ok(s.members('groups', 'Stocks', all).length === 6 && s.members('groups', 'ETFs', all).join() === 'ITC', 'group is exclusive');
+ok(s.members('groups', 'Stocks', all).length === 7 && s.members('groups', 'ETFs', all).join() === 'ITC', 'a symbol can be in many groups (Stocks and ETFs)');
 // free: watchlists
 ok(s.add('watchlists', 'Swing') && !s.add('watchlists', 'swing'), 'create watchlist, duplicate refused');
 s.addSymbols('watchlists', 'Swing', ['TCS', 'INFY']); s.add('watchlists', 'Long term'); s.addSymbols('watchlists', 'Long term', ['TCS']);
@@ -59,7 +59,7 @@ ok(c.rows === 2 && s.members('industries', 'Tobacco Products', all).join() === '
 ok(s.members('watchlists', 'FMCG').join() === 'ITC', 'pipe = several watchlists');
 // export / backup round trip
 ok(s.exportTxt('watchlists', 'Imp', all).split(/\r?\n/).filter(Boolean).length === 3 && s.exportTls('watchlists', 'Imp', all).startsWith('RELIANCE,TCS'), 'txt/tls export');
-const csv = s.exportCsv(all); ok(csv.split('\r\n')[0].startsWith('Symbol,Group') && /ITC,ETFs/.test(csv), 'csv export');
+const csv = s.exportCsv(all); ok(csv.split('\r\n')[0].startsWith('Symbol,Group') && /ITC,Stocks\|ETFs/.test(csv), 'csv export');
 const js = s.exportJson(), s2 = new CategoryStore(mem()); s2.importJson(js); ok(s2.members('watchlists', 'Imp').length === 3, 'json backup restores');
 // codes import
 ok(s.importCodes('gics', '9999 My code\n8888\tAnother') === 2 && s.names('gics').includes('9999 My code'), 'import GICS-style code file');
