@@ -369,7 +369,8 @@ export async function smartSearch(optParams, evalFn, { maxEval = 500, runs = 3, 
  * Optimization. engine: 'exhaustive' (every combination, up to maxCombos) or 'smart' (particle swarm, maxEval tests per run).
  * A formula can choose with OptimizerSetEngine("spso"|"trib"|"cmae") and OptimizerSetOption("MaxEval"|"Runs", n).
  */
-export async function optimize({ code, symbols, session, range, from, to, params, overrides, settings = null, metric = 'carMdd', engine = 'exhaustive', maxEval = 500, runs: nRuns = 3, maxCombos = Infinity, keep = 100000, resume = null, onCheckpoint = null, checkpointEvery = 45000, onProgress, cancel }) {
+export async function optimize({ code, symbols, session, range, from, to, params, overrides, settings = null, metric = 'carMdd', engine = 'exhaustive', maxEval = 500, runs: nRuns = 3, maxCombos = Infinity, keep = 100000, resume = null, onCheckpoint = null, checkpointEvery = 45000, shard = null, seed = 7, onProgress, cancel }) {
+  const sh = shard || { index: 0, count: 1 };   // shard i of n: combinations i, i+n, i+2n ... (used to share one optimization between several machines)
   const probeRuns = await runAll({ code, symbols: symbols.slice(0, 1), session, params });
   const optParams = probeRuns[0] ? probeRuns[0].res.optParams : [];
   if (!optParams.length) return { rows: [], optParams, errors: ['This formula has no Optimize() calls. Use Optimize("name", default, min, max, step) in place of a fixed number.'] };
@@ -388,27 +389,28 @@ export async function optimize({ code, symbols, session, range, from, to, params
     if (!r.stats) return null;
     rows.push({ values: vals, stats: pickStats(r.stats, metric) }); return dir * r.stats[metric];
   };
-  let next = 0, total = grid.total;
+  const shardTotal = Math.max(0, Math.ceil((grid.total - sh.index) / sh.count));
+  let next = 0, total = shardTotal;
   if (engine === 'smart') {
     total = maxEval * nRuns;
-    await smartSearch(optParams, async (vals) => { sub = null; const v = await evalCombo(vals); trim(); return v; }, { maxEval, runs: nRuns, cancel, onProgress });
+    await smartSearch(optParams, async (vals) => { sub = null; const v = await evalCombo(vals); trim(); return v; }, { maxEval, runs: nRuns, cancel, onProgress, seed: seed + sh.index * 101 });
     next = total;
   } else {
-    let lastCp = Date.now(); next = resume && resume.next > 0 ? Math.min(resume.next, grid.total) : 0;
-    for (; next < grid.total; next++) {
+    let lastCp = Date.now(); next = resume && resume.next > 0 ? Math.min(resume.next, shardTotal) : 0;
+    for (; next < shardTotal; next++) {
       if (cancel && cancel.stop) break;
-      const vals = grid.at(next), label = JSON.stringify(vals), at = next;
-      if (onProgress) onProgress(at, grid.total, label, 'run');
-      sub = onProgress ? (si, sn) => onProgress(at + (sn ? si / sn : 0), grid.total, label, 'run') : null;
+      const vals = grid.at(sh.index + next * sh.count), label = JSON.stringify(vals), at = next;
+      if (onProgress) onProgress(at, shardTotal, label, 'run');
+      sub = onProgress ? (si, sn) => onProgress(at + (sn ? si / sn : 0), shardTotal, label, 'run') : null;
       await evalCombo(vals); trim();
       await tick();
       if (onCheckpoint && Date.now() - lastCp > checkpointEvery) { lastCp = Date.now(); await onCheckpoint({ next: next + 1, rows }); }
     }
-    if (onProgress && !(cancel && cancel.stop)) onProgress(grid.total, grid.total, '', 'run');
+    if (onProgress && !(cancel && cancel.stop)) onProgress(shardTotal, shardTotal, '', 'run');
   }
   trim(true); rows.sort((x, y) => dir * (y.stats[metric] - x.stats[metric]));
   const completed = !(cancel && cancel.stop);
-  return { rows, optParams, errors: rows.length ? [] : ['No combination produced trades'], engine, tested: rows.length, combinations: total, next, completed, metric };
+  return { rows, optParams, errors: rows.length ? [] : ['No combination produced trades'], engine, tested: rows.length, combinations: total, gridTotal: grid.total, next, completed, metric };
 }
 
 // ------------------------------------------------------------------ Walk-Forward
@@ -432,7 +434,8 @@ export function walkSegments({ start, last, isLength, isUnit, oosLength, oosUnit
  * Walk-forward: optimise on each in-sample period, then test the best values on the following out-of-sample period.
  * Every OOS period starts with the equity the previous one ended with. Returns the steps and the combined OOS result.
  */
-export async function walkForward({ code, symbols, session, params, overrides = {}, settings = null, wf, metric = 'carMdd', engine = 'exhaustive', maxEval = 300, maxCombos = Infinity, resume = null, onCheckpoint = null, checkpointEvery = 45000, onProgress, cancel }) {
+export async function walkForward({ code, symbols, session, params, overrides = {}, settings = null, wf, metric = 'carMdd', engine = 'exhaustive', maxEval = 300, maxCombos = Infinity, resume = null, onCheckpoint = null, checkpointEvery = 45000, shard = null, searchOnly = false, bestIn = null, onProgress, cancel }) {
+  const sh = shard || { index: 0, count: 1 };   // see optimize(): the combinations (or, for the smart search, the periods) of this shard
   const errors = [];
   let minD = '9999', maxD = '0000';
   for (const s of symbols) { const b = await session.get(s); if (b) { if (b.t[0] < minD) minD = b.t[0]; if (b.t[b.t.length - 1] > maxD) maxD = b.t[b.t.length - 1]; } }
@@ -447,29 +450,34 @@ export async function walkForward({ code, symbols, session, params, overrides = 
   if (grid && grid.total > maxCombos) return { steps: [], errors: [`${grid.total} combinations x ${segs.length} periods is too many. Narrow the ranges (limit ${maxCombos} combinations) or use the smart search.`] };
   await preloadSession({ symbols, session, onProgress, cancel });
   const rng = (s) => ({ range: { mode: 'dates', from: s.isFrom, to: s.isTo } });
-  const best = resume && Array.isArray(resume.best) && resume.best.length === segs.length ? resume.best.map((b) => ({ ...b, score: b.score === null ? -Infinity : b.score })) : segs.map(() => ({ score: -Infinity, values: null, stats: null }));
+  const shardTotal = grid ? Math.max(0, Math.ceil((grid.total - sh.index) / sh.count)) : 0;
+  const best = bestIn ? bestIn.map((b) => ({ ...b, score: b.score === null ? -Infinity : b.score })) : resume && Array.isArray(resume.best) && resume.best.length === segs.length ? resume.best.map((b) => ({ ...b, score: b.score === null ? -Infinity : b.score })) : segs.map(() => ({ score: -Infinity, values: null, stats: null }));
   const consider = (k, vals, stats) => { const sc = dir * stats[metric]; if (Number.isFinite(sc) && sc > best[k].score) best[k] = { score: sc, values: vals, stats }; };
   let next = resume && resume.next > 0 ? resume.next : 0, completedSearch = true;
-  if (grid) {
+  if (bestIn) { /* the search was done elsewhere (several shards): only the out-of-sample runs are left */ }
+  else if (grid) {
     // every combination is run once on the full history; each in-sample period then only slices it
     let lastCp = Date.now();
-    for (; next < grid.total; next++) {
+    next = Math.min(next, shardTotal);
+    for (; next < shardTotal; next++) {
       if (cancel && cancel.stop) { completedSearch = false; break; }
-      const vals = grid.at(next), label = JSON.stringify(vals), at = next;
-      if (onProgress) onProgress(at, grid.total, label, 'run');
-      const runs = await runAll({ code, symbols, session, params, optValues: vals, errors, onProgress: onProgress ? (si, sn) => onProgress(at + (sn ? si / sn : 0), grid.total, label, 'run') : null });
+      const vals = grid.at(sh.index + next * sh.count), label = JSON.stringify(vals), at = next;
+      if (onProgress) onProgress(at, shardTotal, label, 'run');
+      const runs = await runAll({ code, symbols, session, params, optValues: vals, errors, onProgress: onProgress ? (si, sn) => onProgress(at + (sn ? si / sn : 0), shardTotal, label, 'run') : null });
       if (runs.length) segs.forEach((sg, k) => { const sim = simulate(runs, { ...rng(sg), overrides, settings }); if (sim && sim.stats) consider(k, vals, sim.stats); });
       await tick();
       if (onCheckpoint && Date.now() - lastCp > checkpointEvery) { lastCp = Date.now(); await onCheckpoint({ next: next + 1, best: best.map((b) => ({ ...b, score: Number.isFinite(b.score) ? b.score : null })) }); }
     }
-    if (onProgress && completedSearch) onProgress(grid.total, grid.total, '', 'run');
+    if (onProgress && completedSearch) onProgress(shardTotal, shardTotal, '', 'run');
   } else {
     for (let k = 0; k < segs.length; k++) {
       if (cancel && cancel.stop) break;
+      if (k % sh.count !== sh.index) continue;
       await smartSearch(optParams, async (vals) => { const b = await backtest({ code, symbols, session, ...rng(segs[k]), params, optValues: vals, overrides, settings }); if (!b.stats) return null; consider(k, vals, b.stats); return dir * b.stats[metric]; },
         { maxEval, runs: 1, cancel, onProgress: (i, n, s) => onProgress && onProgress(k * maxEval + i, segs.length * maxEval, `period ${k + 1}: ${s}`) });
     }
   }
+  if (searchOnly) return { searchDone: true, optParams, errors, metric, segments: segs.length, total: shardTotal, gridTotal: grid ? grid.total : 0, next, completed: completedSearch && !(cancel && cancel.stop), best: best.map((b) => ({ ...b, score: Number.isFinite(b.score) ? b.score : null })) };
   // out-of-sample runs, chained
   const steps = [], allTrades = [], curve = []; let equity = (overrides.initialEquity !== undefined ? overrides.initialEquity : (settings ? settings.general.initialEquity : 100000)), firstEq = equity;
   for (let k = 0; k < segs.length; k++) {

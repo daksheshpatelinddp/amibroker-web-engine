@@ -11,6 +11,7 @@ import { monteCarlo } from './bt-report.js';
 import { loadSettings } from './analysis-settings.js';
 import { loadConfig as loadIntradayConfig, saveConfig as saveIntradayConfig, frameId, frameName, frameMinutes, isIntraday } from './intraday.js';
 import { openCustomFrame } from './intraday-ui.js';
+import { DATABASES, ACTIVE_DB } from './config.js';
 import { saveJob, loadJob, deleteJob } from './job-store.js';
 import { esc, f2, money, svgLine, svgScatter, svgHeat, svgMonteCarlo, monthlyHtml, mcTableHtml, statsHtml, chartsFor, reportHtml } from './report-charts.js';
 
@@ -202,7 +203,8 @@ export function openAnalysis({ formulaId = null } = {}) {
     const buttons = {}, bgrid = el('div', 'grid grid-cols-3 gap-2');
     for (const [m, label] of Object.entries(MODES)) { const x = el('button', m === 'backtest' ? BTN_PRIMARY : BTN, label); x.type = 'button'; buttons[m] = x; bgrid.appendChild(x); }
     const setBtn = el('button', BTN, 'Settings…'); setBtn.type = 'button'; setBtn.onclick = async () => { const m = await import('./analysis-settings-ui.js'); m.openAnalysisSettings({ onSave: (s) => { S = s; refreshInfo(); } }); };
-    bgrid.appendChild(setBtn); body.appendChild(bgrid);
+    bgrid.appendChild(setBtn);
+    const ghBtn = el('button', BTN, 'Run on GitHub…'); ghBtn.type = 'button'; ghBtn.id = 'aa-github'; bgrid.appendChild(ghBtn); body.appendChild(bgrid);
     const row2 = el('div', 'flex space-x-2'); row2.appendChild(btSel);
     const proj = el('button', BTN, 'Projects…'); proj.type = 'button'; row2.appendChild(proj);
     const bre = el('button', BTN, 'Market breadth'); bre.type = 'button'; bre.title = 'Build advancing / declining issues for ADLine, TRIN...'; row2.appendChild(bre); body.appendChild(row2);
@@ -348,6 +350,42 @@ export function openAnalysis({ formulaId = null } = {}) {
     }
     const exportBtn = (r, f, mc, nSyms) => { const b = el('button', BTN + ' w-full', 'Export report (HTML)…'); b.type = 'button'; b.onclick = () => download(`${f.name.replace(/[^\w\- ]+/g, '')}-report.html`, reportHtml({ title: 'Backtest report', formulaName: f.name, code: f.code, result: r, mc, settings: S, includeTrades: S.report.includeTradeList, meta: { symbols: nSyms, range: `${rangeNow().mode}` } }), 'text/html'); return b; };
 
+    function optViews(r, o) {
+      const { f, sy, common, resumeNote } = o, infoLines = o.infoLines, views = {};
+          if (!r.rows.length) views.Results = el('div', 'text-xs text-slate-400', r.errors[0] || 'No results');
+          else {
+            const names = r.optParams.map((p) => p.name), res = el('div', 'space-y-2');
+            if (resumeNote) res.appendChild(el('div', 'p-2 rounded border border-amber-700 bg-amber-950/40 text-[11px] text-amber-100', resumeNote));
+            res.appendChild(el('div', 'text-[11px] text-slate-400', `${(r.combinations || r.rows.length).toLocaleString()} combinations (${r.engine}), best ${r.rows.length < (r.combinations || 0) ? r.rows.length.toLocaleString() + ' ' : ''}first by ${METRICS[r.metric][0]}. Tap a row to run a backtest with those values.`));
+            res.appendChild(table([...names, 'Net profit', 'Net %', 'CAR %', 'Max DD %', 'Trades', 'PF', 'Exposure %', 'RAR %', METRICS[r.metric][0]], r.rows.map((x) => [...names.map((n) => x.values[n]), x.stats.netProfit, x.stats.netProfitPct, x.stats.cagr, x.stats.maxDrawdownPct, x.stats.trades, x.stats.profitFactor, x.stats.exposure, x.stats.riskAdjReturn, x.stats[r.metric]]),
+              { csvName: 'optimization.csv', onRow: async (row) => {
+                const vals = {}; names.forEach((n, i) => { vals[n] = row[i]; }); setBusy(true);
+                const b = await backtest({ ...common, optValues: vals, mode: btSel.value }); setBusy(false);
+                if (b.stats) { pseudoStore.setEquity(b.equityCurve); const rr = tradeListViews(b, f, sy.symbols.length); rr.prepend(el('div', 'text-[11px] text-sky-300', 'Backtest with ' + JSON.stringify(vals))); show({ ...views, Backtest: rr, Report: () => reportView(b, null), Charts: () => chartsView(b) }); tab = 'Backtest'; drawTabs(); }
+              } }));
+            const best = r.rows[0]; res.appendChild(el('div', 'text-[11px] text-emerald-300', 'Best: ' + names.map((n) => `${n} = ${best.values[n]}`).join(', ') + '. Put these numbers in the formula (second argument of Optimize) to keep them.'));
+            views.Results = res;
+            if (r.optParams.length === 2) views.Charts = () => html(svgHeat(r.rows, r.optParams, r.metric, { title: 'Optimization map:' }));
+          }
+          views.Info = infoPane(infoLines([`Search: ${r.engine || ''}`, `Combinations: ${(r.combinations || 0).toLocaleString()} · kept in the list: ${r.tested || 0}`, `Target: ${METRICS[r.metric][0]}`, ...(o.extra || [])]), r.rows.length ? [] : r.errors);
+      return views;
+    }
+    function walkViews(r, o) {
+      const { resumeNote, infoLines } = o;
+          const names = r.optParams ? r.optParams.map((p) => p.name) : [], views = {};
+          if (!r.steps.length) views.Results = el('div', 'text-xs text-slate-400', r.errors[0] || 'No walk-forward steps');
+          else {
+            const m = o.target, res = el('div', 'space-y-2'); if (resumeNote) res.appendChild(el('div', 'p-2 rounded border border-amber-700 bg-amber-950/40 text-[11px] text-amber-100', resumeNote));
+            res.appendChild(el('div', 'text-[11px] text-slate-400', `Each step optimises on the in-sample period (target ${METRICS[m][0]}) and tests the best values out of sample. Equity carries over from step to step.`));
+            res.appendChild(table(['Step', 'In-sample', 'Out-of-sample', ...names, `IS ${METRICS[m][0]}`, `OOS ${METRICS[m][0]}`, 'OOS net %', 'OOS trades', 'End equity'],
+              r.steps.map((s) => [s.step || '-', `${s.isFrom} → ${s.isTo}`, `${s.oosFrom} → ${s.oosTo}`, ...names.map((n) => (s.values ? s.values[n] : '')), s.isStats ? s.isStats[m] : '', s.oosStats ? s.oosStats[m] : (s.error || ''), s.oosStats ? s.oosStats.netProfitPct : '', s.oosStats ? s.oosStats.trades : '', s.endEquity || '']), { csvName: 'walk-forward.csv' }));
+            views.Results = res;
+            if (r.stats) { pseudoStore.setEquity(r.equityCurve); views.Report = () => reportView(r, null); views.Charts = () => chartsView(r); }
+          }
+          views.Info = infoPane(infoLines([`Periods: ${r.segments || 0}`, 'The combined out-of-sample equity is saved as ~~~EQUITY.', ...(o.extra || [])]), r.errors);
+      return views;
+    }
+
     function show(views) { R = views; hasResults = true; if (chip.style.display !== 'none') chipText(); if (!views[tab]) tab = 'Results'; drawTabs(); }
     function drawTabs() {
       pane.innerHTML = ''; tabsBar.innerHTML = '';
@@ -418,22 +456,7 @@ export function openAnalysis({ formulaId = null } = {}) {
           let resumeNote = null;
           if (r.completed) await deleteJob();
           else if (r.engine !== 'smart' && r.next > 0) { await saveJob({ ...jobBase, state: { next: r.next, rows: r.rows }, savedAt: Date.now() }); resumeNote = `Stopped after ${r.next.toLocaleString()} of ${r.combinations.toLocaleString()} combinations. The progress is saved: open Analysis later and tap Resume.`; }
-          if (!r.rows.length) views.Results = el('div', 'text-xs text-slate-400', r.errors[0] || 'No results');
-          else {
-            const names = r.optParams.map((p) => p.name), res = el('div', 'space-y-2');
-            if (resumeNote) res.appendChild(el('div', 'p-2 rounded border border-amber-700 bg-amber-950/40 text-[11px] text-amber-100', resumeNote));
-            res.appendChild(el('div', 'text-[11px] text-slate-400', `${(r.combinations || r.rows.length).toLocaleString()} combinations (${r.engine}), best ${r.rows.length < (r.combinations || 0) ? r.rows.length.toLocaleString() + ' ' : ''}first by ${METRICS[r.metric][0]}. Tap a row to run a backtest with those values.`));
-            res.appendChild(table([...names, 'Net profit', 'Net %', 'CAR %', 'Max DD %', 'Trades', 'PF', 'Exposure %', 'RAR %', METRICS[r.metric][0]], r.rows.map((x) => [...names.map((n) => x.values[n]), x.stats.netProfit, x.stats.netProfitPct, x.stats.cagr, x.stats.maxDrawdownPct, x.stats.trades, x.stats.profitFactor, x.stats.exposure, x.stats.riskAdjReturn, x.stats[r.metric]]),
-              { csvName: 'optimization.csv', onRow: async (row) => {
-                const vals = {}; names.forEach((n, i) => { vals[n] = row[i]; }); setBusy(true);
-                const b = await backtest({ ...common, optValues: vals, mode: btSel.value }); setBusy(false);
-                if (b.stats) { pseudoStore.setEquity(b.equityCurve); const rr = tradeListViews(b, f, sy.symbols.length); rr.prepend(el('div', 'text-[11px] text-sky-300', 'Backtest with ' + JSON.stringify(vals))); show({ ...views, Backtest: rr, Report: () => reportView(b, null), Charts: () => chartsView(b) }); tab = 'Backtest'; drawTabs(); }
-              } }));
-            const best = r.rows[0]; res.appendChild(el('div', 'text-[11px] text-emerald-300', 'Best: ' + names.map((n) => `${n} = ${best.values[n]}`).join(', ') + '. Put these numbers in the formula (second argument of Optimize) to keep them.'));
-            views.Results = res;
-            if (r.optParams.length === 2) views.Charts = () => html(svgHeat(r.rows, r.optParams, r.metric, { title: 'Optimization map:' }));
-          }
-          views.Info = infoPane(infoLines([`Search: ${r.engine || ''}`, `Combinations: ${(r.combinations || 0).toLocaleString()} · kept in the list: ${r.tested || 0}`, `Target: ${METRICS[S.optimize.target][0]}`]), r.rows.length ? [] : r.errors); show(views);
+          show(optViews(r, { f, sy, common, resumeNote, infoLines }));
         } else if (mode === 'walk') {
           const jobBase = { v: 1, mode: 'walk', formulaName: f.name, code: f.code, symbols: sy.symbols, ui: getState(), settings: S, startedAt: Date.now() };
           const resume = forced ? forced.state : null; if (!forced) await deleteJob();
@@ -442,17 +465,7 @@ export function openAnalysis({ formulaId = null } = {}) {
           let resumeNote = null;
           if (r.completed) await deleteJob();
           else if (r.resumeState) { await saveJob({ ...jobBase, state: r.resumeState, savedAt: Date.now() }); resumeNote = 'Stopped before all combinations were tested. The progress is saved: open Analysis later and tap Resume.'; }
-          const names = r.optParams ? r.optParams.map((p) => p.name) : [], views = {};
-          if (!r.steps.length) views.Results = el('div', 'text-xs text-slate-400', r.errors[0] || 'No walk-forward steps');
-          else {
-            const m = S.walkForward.target, res = el('div', 'space-y-2'); if (resumeNote) res.appendChild(el('div', 'p-2 rounded border border-amber-700 bg-amber-950/40 text-[11px] text-amber-100', resumeNote));
-            res.appendChild(el('div', 'text-[11px] text-slate-400', `Each step optimises on the in-sample period (target ${METRICS[m][0]}) and tests the best values out of sample. Equity carries over from step to step.`));
-            res.appendChild(table(['Step', 'In-sample', 'Out-of-sample', ...names, `IS ${METRICS[m][0]}`, `OOS ${METRICS[m][0]}`, 'OOS net %', 'OOS trades', 'End equity'],
-              r.steps.map((s) => [s.step || '-', `${s.isFrom} → ${s.isTo}`, `${s.oosFrom} → ${s.oosTo}`, ...names.map((n) => (s.values ? s.values[n] : '')), s.isStats ? s.isStats[m] : '', s.oosStats ? s.oosStats[m] : (s.error || ''), s.oosStats ? s.oosStats.netProfitPct : '', s.oosStats ? s.oosStats.trades : '', s.endEquity || '']), { csvName: 'walk-forward.csv' }));
-            views.Results = res;
-            if (r.stats) { pseudoStore.setEquity(r.equityCurve); views.Report = () => reportView(r, null); views.Charts = () => chartsView(r); }
-          }
-          views.Info = infoPane(infoLines([`Periods: ${r.segments || 0}`, 'The combined out-of-sample equity is saved as ~~~EQUITY.']), r.errors); show(views);
+          show(walkViews(r, { resumeNote, infoLines, target: S.walkForward.target }));
         }
       } catch (e) { console.error(e); pane.appendChild(el('div', 'text-xs text-red-300', 'Analysis failed: ' + (e.message || e))); }
       setBusy(false); setProgress(0, 0, '');
@@ -468,6 +481,29 @@ export function openAnalysis({ formulaId = null } = {}) {
       go.onclick = async () => { banner.classList.add('hidden'); forced = job; try { applyState(job.ui); S = job.settings; await run(job.mode); } finally { forced = null; } };
       no.onclick = async () => { await deleteJob(); banner.classList.add('hidden'); };
       row.appendChild(go); row.appendChild(no); banner.appendChild(row); banner.classList.remove('hidden');
+    };
+
+    // ---- Run on GitHub: Optimize / Walk-Forward on the runner repo, result fetched later
+    const buildSpec = (mode) => {
+      const f = formulaStore.get(fsel.value); if (!f) { toast('Choose a formula'); return null; }
+      const sy = symbols(); if (!sy.symbols.length) { toast('No symbols to analyse. Choose Apply to, or add symbols to the filter.'); return null; }
+      if (isIntraday(tf.value)) { toast('GitHub runs use end-of-day data only. Set the time frame to Daily.'); return null; }
+      save(); const D = DATABASES[ACTIVE_DB];
+      return { mode, formulaName: f.name, code: f.code, symbols: sy.symbols, interval: 'D', range: rangeNow(), settings: S,
+        metric: mode === 'walk' ? S.walkForward.target : S.optimize.target, engine: S.optimize.engine, maxEval: S.optimize.maxEval, runs: S.optimize.runs, keep: S.optimize.serverKeep || 5000, wf: S.walkForward,
+        dataset: { id: D.id, baseUrl: D.baseUrl, firstYear: D.firstYear, currency: D.currency }, ui: getState() };
+    };
+    const viewRemote = async (entry, file, spec) => {
+      const base = spec || {}, r = file.result || {}, f = { name: entry.formulaName || base.formulaName, code: base.code || '' }, sy = { symbols: base.symbols || [] };
+      const note = `Result from GitHub (${entry.mode === 'walk' ? 'Walk-Forward' : 'Optimize'}), finished ${new Date(file.finishedAt).toLocaleString()}, took ${fmtDur(file.elapsedMs || 0)}.`;
+      const common = { code: f.code, symbols: sy.symbols, session: makeSession((s, iv) => host.loadBars(s, iv), 'D'), range: base.range || rangeNow(), onProgress: setProgress, cancel, settings: base.settings || S };
+      const infoLines = (extra = []) => [`Formula: ${f.name}`, `Ran on GitHub: ${entry.shards || base.shards || '?'} machines`, `Symbols: ${sy.symbols.length}`, ...extra];
+      const views = file.mode === 'walk' || entry.mode === 'walk' ? walkViews(r, { resumeNote: note, infoLines, target: base.metric || S.walkForward.target }) : optViews(r, { f, sy, common, resumeNote: note, infoLines });
+      show(views); tab = 'Results'; drawTabs();
+    };
+    ghBtn.onclick = async () => {
+      const m = await import('./remote-analysis.js');
+      m.openRemotePanel({ buildSpec, onView: viewRemote });
     };
     showBanner();
     bre.onclick = async () => {
