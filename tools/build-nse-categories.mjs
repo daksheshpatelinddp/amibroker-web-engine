@@ -4,12 +4,16 @@
 //   Sectors    = the "Industry" column of NSE's files (Financial Services, Healthcare, Information Technology ...)
 //   Industries = the narrowest sector index the symbol is in (Private Bank, PSU Bank, IT, Pharma, Auto ...)
 // Run where niftyindices.com can be reached (your computer, or a GitHub Action):
-//   node tools/build-nse-categories.mjs [out.csv]
+//   node tools/build-nse-categories.mjs [out.csv] [--dir folder]
+// --dir folder: do not download, read the ind_*.csv files you saved in that folder (download them in a browser from niftyindices.com).
 // An index file that cannot be downloaded is skipped and listed at the end; edit INDEXES below to add / fix names.
 import fs from 'fs';
+import path from 'path';
 import { pathToFileURL } from 'url';
 
-export const BASE = 'https://www.niftyindices.com/IndexConstituent/';
+// niftyindices.com often answers 503 to cloud machines (bot protection), so NSE's own archive hosts are tried too.
+export const BASES = ['https://www.niftyindices.com/IndexConstituent/', 'https://nsearchives.nseindia.com/content/indices/', 'https://archives.nseindia.com/content/indices/'];
+export const BASE = BASES[0];
 // [group name, file, narrow?]  narrow = a sector index: gives the symbol its Industry (first one listed wins, so list narrow before wide)
 export const INDEXES = [
   ['NIFTY 50', 'ind_nifty50list.csv'], ['NIFTY NEXT 50', 'ind_niftynext50list.csv'], ['NIFTY 100', 'ind_nifty100list.csv'], ['NIFTY 200', 'ind_nifty200list.csv'], ['NIFTY 500', 'ind_nifty500list.csv'],
@@ -34,13 +38,27 @@ export function parseConstituents(text) {
   return rows.slice(1).map((r) => ({ symbol: (r[si] || '').toUpperCase(), industry: ii >= 0 ? (r[ii] || '') : '' })).filter((x) => x.symbol);
 }
 
-export async function build({ fetchFn = fetch, indexes = INDEXES, log = console.log } = {}) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function download(fetchFn, file, tries = 3) {
+  let last = '';
+  for (const base of BASES) for (let t = 0; t < tries; t++) {
+    try {
+      const r = await fetchFn(base + file, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36', Accept: 'text/csv,text/plain,*/*', Referer: 'https://www.niftyindices.com/indices/equity/broad-based-indices', 'Accept-Language': 'en-US,en;q=0.9' } });
+      if (r.ok) { const txt = await r.text(); if (/symbol/i.test(txt.slice(0, 300))) return txt; last = 'not a constituent file'; break; }
+      last = 'HTTP ' + r.status; if (r.status === 404) break;          // not there on this host: next host
+    } catch (e) { last = e.message; }
+    await sleep(t * 1500);
+  }
+  throw new Error(last || 'failed');
+}
+
+export async function build({ fetchFn = fetch, indexes = INDEXES, dir = '', log = console.log } = {}) {
   const sym = new Map(), skipped = [], done = [];   // symbol -> {groups:Set, sector, industry}
   for (const [group, file, narrow] of indexes) {
     let text = '';
     try {
-      const r = await fetchFn(BASE + file, { headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36', Accept: 'text/csv,*/*' } });
-      if (!r.ok) throw new Error('HTTP ' + r.status); text = await r.text();
+      if (dir) { const f = path.join(dir, file); if (!fs.existsSync(f)) throw new Error('file not in the folder'); text = fs.readFileSync(f, 'utf8'); }
+      else text = await download(fetchFn, file);
     } catch (e) { skipped.push(`${group} (${file}): ${e.message}`); continue; }
     const list = parseConstituents(text); if (!list.length) { skipped.push(`${group} (${file}): no symbols in the file`); continue; }
     done.push(`${group}: ${list.length}`);
@@ -63,7 +81,8 @@ export async function build({ fetchFn = fetch, indexes = INDEXES, log = console.
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  const out = process.argv[2] || 'nse-categories.csv';
-  const r = await build(); if (!r.symbols) { console.error('Nothing downloaded: is niftyindices.com reachable from here?'); process.exit(1); }
+  const args = process.argv.slice(2), di = args.indexOf('--dir'), dir = di >= 0 ? args.splice(di, 2)[1] : '';
+  const out = args[0] || 'nse-categories.csv';
+  const r = await build({ dir }); if (!r.symbols) { console.error('Nothing downloaded: is niftyindices.com reachable from here?'); process.exit(1); }
   fs.writeFileSync(out, r.csv); console.log('Wrote ' + out);
 }
