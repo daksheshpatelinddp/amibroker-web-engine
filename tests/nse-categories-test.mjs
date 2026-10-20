@@ -21,7 +21,7 @@ ok(r.skipped.length > 20 && r.indices.length === 7, 'missing files are skipped a
 const row = (s) => r.csv.split('\r\n').find((l) => l.startsWith(s + ','));
 ok(/^HDFCBANK,NIFTY 50\|NIFTY 500\|NIFTY PRIVATE BANK\|NIFTY BANK,Financial Services,Private Bank$/.test(row('HDFCBANK')), 'HDFCBANK in many groups, narrowest industry first: ' + row('HDFCBANK'));
 ok(/^SBIN,.*PSU Bank$/.test(row('SBIN')), 'SBIN PSU Bank');
-ok(/^DABUR,NIFTY NEXT 50\|NIFTY 500,Fast Moving Consumer Goods,$/.test(row('DABUR')), 'no sector index: sector only: ' + row('DABUR'));
+ok(/^DABUR,NIFTY NEXT 50\|NIFTY 500,Fast Moving Consumer Goods,Fast Moving Consumer Goods$/.test(row('DABUR')), 'no sector index: industry named like the sector: ' + row('DABUR'));
 // into the store
 const mem = {}; const st = new CategoryStore({ getItem: (k) => mem[k] ?? null, setItem: (k, v) => { mem[k] = v; } }, 'nsetest');
 const all = ['HDFCBANK', 'TCS', 'SBIN', 'BAJFINANCE', 'DABUR', 'XYZ'];
@@ -30,6 +30,15 @@ ok(imp.rows === 6, 'rows imported');
 ok(st.count('groups', 'NIFTY 500', all) === 6 && st.count('groups', 'NIFTY 50', all) === 3 && st.count('groups', 'NIFTY NEXT 50', all) === 2, 'groups keep every member (500 not reduced)');
 ok(st.members('industries', 'PSU Bank', all).join() === 'SBIN', 'industry PSU Bank');
 ok(st.members('sectors', 'Financial Services', all).sort().join() === 'BAJFINANCE,HDFCBANK,SBIN', 'sector Financial Services includes industry members: ' + st.members('sectors', 'Financial Services', all));
-ok(st.members('sectors', 'Healthcare', all).join() === 'XYZ', 'sector without industry');
+ok(st.members('sectors', 'Healthcare', all).join() === 'XYZ' && st.members('industries', 'Healthcare', all).join() === 'XYZ', 'sector and same-named industry');
 ok(st.sectorOfIndustry('Private Bank') === 'Financial Services', 'industry parent sector');
+// importing again replaces the groups (an old import had a symbol that has since left NIFTY 50)
+st.addSymbols('groups', 'NIFTY 50', ['OLDSTOCK']); ok(st.count('groups', 'NIFTY 50', all) === 4, 'stale member present before re-import');
+const again = st.importClassification(r.csv, all);
+ok(st.count('groups', 'NIFTY 50', all) === 3 && !st.members('groups', 'NIFTY 50').includes('OLDSTOCK'), 're-import replaces group members: ' + st.members('groups', 'NIFTY 50'));
+ok(again.emptied > 0, 'reports emptied groups');
+// remove empty (AmiBroker default sectors / industries nobody uses)
+const nSec = st.names('sectors').length, rm = st.removeEmpty('sectors', all);
+ok(rm > 5 && st.names('sectors').includes('Financial Services') && !st.names('sectors').includes('Basic Materials'), `removeEmpty sectors: removed ${rm} of ${nSec}`);
+ok(st.removeEmpty('industries', all) > 5 && st.names('industries').includes('PSU Bank'), 'removeEmpty industries keeps used ones');
 console.log(`${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
