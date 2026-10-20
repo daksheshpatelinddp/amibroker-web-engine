@@ -1,0 +1,21 @@
+# Lives in the amibroker-web-engine repo (this repo), not in the data / R2 repo.
+# Run it from the Actions tab (it also runs every Sunday). It writes nse-categories.csv into this repo (only when something changed).
+# In the app: Symbols · Categories · Watchlists > Import classification from link… > paste
+#   https://raw.githubusercontent.com/<you>/amibroker-web-engine/main/nse-categories.csv
+# Needs: repo Settings > Actions > General > Workflow permissions = Read and write.
+name: nse-categories
+on:
+  workflow_dispatch:
+  schedule: [{ cron: '30 3 * * 0' }]
+permissions: { contents: write }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node tools/build-nse-categories.mjs nse-categories.csv
+      - run: |
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git add nse-categories.csv; git diff --cached --quiet || git commit -m "NSE index memberships" && git push
