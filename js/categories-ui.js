@@ -189,6 +189,11 @@ export function openCategories(opts = {}) {
           const cnt = st.count(state.type, state.name, all);
           if (confirm(`Delete ${t.one} "${state.name}"${cnt ? ` (${cnt} symbols stay in the database, they just lose this ${t.one})` : ''}?`)) { st.remove(state.type, state.name); state.name = null; render(); }
         }, BTN_DANGER);
+        if (['groups', 'sectors', 'industries'].includes(state.type)) mk('Remove empty', () => {
+          const empty = st.names(state.type).filter((n) => n !== UNASSIGNED && !st.count(state.type, n, all));
+          if (!empty.length) { toast('No empty ' + t.label.toLowerCase()); return; }
+          if (confirm(`Delete the ${empty.length} ${t.label.toLowerCase()} that have no symbols?\n\n${empty.slice(0, 8).join(', ')}${empty.length > 8 ? ' …' : ''}`)) { const n = st.removeEmpty(state.type, all); state.name = null; toast(`${n} removed`); render(); }
+        });
       }
       if (t.kind === 'code') mk('Import code list…', async () => { const f = await pickFile('.txt,.csv'); if (f) { toast(`${st.importCodes(state.type, f.text)} categories added`); render(); } });
       if (t.kind === 'free') mk('Import lists…', async () => {

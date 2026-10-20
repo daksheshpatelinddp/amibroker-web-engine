@@ -285,6 +285,13 @@ export class CategoryStore {
     else { d.names[type] = d.names[type].filter((n) => n !== name); unassign(type); }
     this.save(); return true;
   }
+  /** Deletes the categories of a type that have no symbols (the AmiBroker default sectors / industries you do not use). Returns how many. */
+  removeEmpty(type, all = []) {
+    if (!['groups', 'sectors', 'industries', 'watchlists', 'indexes'].includes(type)) return 0;
+    let n = 0;
+    for (const name of this.names(type)) { if (name === UNASSIGNED) continue; if (!this.count(type, name, all) && this.remove(type, name)) n++; }
+    return n;
+  }
   setIndustrySector(industry, sector) { const x = this.data.industries.find((i) => i.name === industry); if (!x) return false; x.sector = sector || ''; this.save(); return true; }
 
   // ------------------------------------------------------------ editing members
@@ -370,12 +377,18 @@ export class CategoryStore {
    * CSV with columns like AmiBroker's ASCII import: Symbol, Group, Market, Sector, Industry, GICS, ICB, Watchlist, Index.
    * Creates missing categories, assigns each symbol. Returns {rows, assigned, created}.
    */
-  importClassification(text, all = []) {
+  importClassification(text, all = [], opts = {}) {
     const rows = csvRows(text); if (rows.length < 2) return { rows: 0, assigned: 0, created: 0 };
     const head = rows[0].map((h) => h.toLowerCase().replace(/[^a-z]/g, ''));
     const sc = head.findIndex((h) => ['symbol', 'ticker', 'scrip', 'tradingsymbol'].includes(h)); if (sc < 0) return { rows: 0, assigned: 0, created: 0, error: 'No Symbol / Ticker column' };
     const cols = { groups: ['group', 'groups'], markets: ['market', 'markets'], sectors: ['sector', 'sectors'], industries: ['industry', 'industries'], gics: ['gics'], icb: ['icb'], watchlists: ['watchlist', 'watchlists'], indexes: ['index', 'indexes'], favorites: ['favorite', 'favorites', 'favourite'] };
-    const db = dbMapOf(all); let assigned = 0, created = 0;
+    const db = dbMapOf(all); let assigned = 0, created = 0, emptied = 0;
+    // the file is the full member list of every group it names: groups from an older import / an older index list are emptied first, so they do not keep symbols that have left the index
+    const gci = head.findIndex((h) => ['group', 'groups'].includes(h));
+    if (gci >= 0 && opts.replaceGroups !== false) {
+      const named = new Set(); rows.slice(1).forEach((r) => String(r[gci] || '').split('|').forEach((x) => { if (x.trim()) named.add(x.trim().toLowerCase()); }));
+      for (const n of this.data.names.groups) if (named.has(n.toLowerCase()) && (this.data.lists.groups[n] || []).length) { this.data.lists.groups[n] = []; emptied++; }
+    }
     for (const r of rows.slice(1)) {
       const sym = normSymbol(r[sc], db); if (!sym) continue;
       for (const [type, aliases] of Object.entries(cols)) {
@@ -397,7 +410,7 @@ export class CategoryStore {
       }
     }
     this.save();
-    return { rows: rows.length - 1, assigned, created };
+    return { rows: rows.length - 1, assigned, created, emptied };
   }
 
   /**
