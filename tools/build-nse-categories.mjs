@@ -73,6 +73,8 @@ export async function build({ fetchFn = fetch, indexes = INDEXES, dir = '', log 
   for (const o of sym.values()) if (o.industry && o.sector) { const m = votes.get(o.industry) || new Map(); m.set(o.sector, (m.get(o.sector) || 0) + 1); votes.set(o.industry, m); }
   const parent = new Map([...votes].map(([ind, m]) => [ind, [...m].sort((a, b) => b[1] - a[1])[0][0]]));
   for (const o of sym.values()) if (o.industry && o.sector !== parent.get(o.industry)) o.industry = '';
+  // a symbol in no sector index gets an industry named like its sector, so the Industries list is not empty for it (NSE's files hold nothing finer)
+  for (const o of sym.values()) if (o.sector && !o.industry && (!parent.has(o.sector) || parent.get(o.sector) === o.sector)) { o.industry = o.sector; parent.set(o.sector, o.sector); }
   const q = (x) => (/[",\r\n]/.test(x) ? `"${String(x).replace(/"/g, '""')}"` : x);
   const lines = ['Symbol,Group,Sector,Industry'];
   for (const s of [...sym.keys()].sort()) { const o = sym.get(s); lines.push([s, [...o.groups].join('|'), o.sector, o.industry].map(q).join(',')); }
