@@ -66,6 +66,19 @@ export const INDEX_ALIASES = {
 export const normIndexName = (s) => String(s || '').toUpperCase().replace(/^\^/, '').replace(/[^A-Z0-9]/g, '');
 const codeOf = (name) => String(name).split(/\s+/)[0];
 
+
+// ---- NSE index files (niftyindices.com constituent lists: ind_nifty50list.csv ...) ------------------------------
+const SECTORAL = new Set(['NIFTY BANK', 'NIFTY IT', 'NIFTY AUTO', 'NIFTY FMCG', 'NIFTY PHARMA', 'NIFTY METAL', 'NIFTY REALTY', 'NIFTY ENERGY', 'NIFTY FINANCE', 'NIFTY FINANCIAL SERVICES', 'NIFTY MEDIA', 'NIFTY PSU BANK', 'NIFTY PRIVATE BANK', 'NIFTY OIL & GAS', 'NIFTY HEALTHCARE', 'NIFTY CONSUMER DURABLES', 'NIFTY INFRA', 'NIFTY COMMODITIES', 'NIFTY CHEMICALS', 'NIFTY MNC', 'NIFTY PSE']);
+/** "ind_niftybanklist.csv" -> "NIFTY BANK" (the file name niftyindices.com gives to each index list). */
+export function nseIndexNameFromFile(file) {
+  let s = String(file || '').replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '').replace(/\s*\(\d+\)$/, '').toLowerCase().replace(/^ind_/, '').replace(/list$/, '');
+  if (!s) return '';
+  s = s.toUpperCase().replace(/^NIFTY/, 'NIFTY ').replace(/(NEXT|MIDCAP|SMALLCAP|MICROCAP|LARGEMIDCAP|MIDSMALLCAP)(\d)/, '$1 $2').replace(/^NIFTY (\d)/, 'NIFTY $1')
+    .replace('PSUBANK', 'PSU BANK').replace('PRIVATEBANK', 'PRIVATE BANK').replace('OILGAS', 'OIL & GAS').replace('CONSUMERDURABLES', 'CONSUMER DURABLES').replace('FINANCIALSERVICES', 'FINANCIAL SERVICES')
+    .replace('LARGEMIDCAP', 'LARGEMIDCAP').replace(/\s+/g, ' ').trim();
+  return s;
+}
+
 // ---- symbol text helpers -------------------------------------------------------------------------------------
 /** Cleans one symbol as typed or imported: quotes, "NSE:" prefix, case; matches the database spelling when known. */
 export function normSymbol(raw, dbMap = null) {
@@ -375,8 +388,52 @@ export class CategoryStore {
           assigned += this.addSymbols(type, hit, [sym]);
         }
       }
+      // an industry belongs to a sector: a row with both tells which one (an industry gives its symbols that sector)
+      const sci = head.findIndex((h) => ['sector', 'sectors'].includes(h)), ici = head.findIndex((h) => ['industry', 'industries'].includes(h));
+      const secName = sci >= 0 ? (r[sci] || '').trim() : '', indName = ici >= 0 ? (r[ici] || '').trim() : '';
+      if (secName && indName) {
+        const ind = this.data.industries.find((x) => x.name.toLowerCase() === indName.toLowerCase()), sec = this.data.sectors.find((x) => x.toLowerCase() === secName.toLowerCase());
+        if (ind && !ind.sector && sec) ind.sector = sec;
+      }
     }
+    this.save();
     return { rows: rows.length - 1, assigned, created };
+  }
+
+  /**
+   * One constituent list of an NSE index (CSV: Company Name, Industry, Symbol, Series, ISIN). Creates / fills:
+   * the Group and the Index of that name, the Sector of each stock (the file's Industry column), and - for sectoral indices like NIFTY BANK - an Industry.
+   * Returns {name, added, total, unknown, sectors}.
+   */
+  importNseIndex(text, fileName, all = [], nameOverride = '') {
+    const rows = csvRows(text); if (rows.length < 2) return { name: '', added: 0, total: 0, unknown: [], sectors: 0, error: 'Empty file' };
+    const head = rows[0].map((h) => h.toLowerCase().replace(/[^a-z]/g, ''));
+    const sc = head.findIndex((h) => ['symbol', 'ticker'].includes(h)), ic = head.findIndex((h) => ['industry', 'sector'].includes(h));
+    if (sc < 0) return { name: '', added: 0, total: 0, unknown: [], sectors: 0, error: `No Symbol column in ${fileName}` };
+    const name = this._clean(nameOverride || nseIndexNameFromFile(fileName)); if (!name) return { name: '', added: 0, total: 0, unknown: [], sectors: 0, error: 'No index name' };
+    const db = dbMapOf(all), d = this.data, syms = [], sectorOf = new Map(), count = new Map();
+    for (const r of rows.slice(1)) {
+      const sym = normSymbol(r[sc], db); if (!sym || !looksLikeSymbol(sym)) continue; syms.push(sym);
+      const sec = ic >= 0 ? this._clean(r[ic]) : ''; if (sec) { sectorOf.set(sym, sec); count.set(sec, (count.get(sec) || 0) + 1); }
+    }
+    const unknown = all.length ? syms.filter((x) => !db.has(x.toUpperCase())) : [];
+    for (const type of ['groups', 'indexes']) { if (!this.names(type).some((n) => n.toLowerCase() === name.toLowerCase())) this.add(type, name); }
+    const gname = this.names('groups').find((n) => n.toLowerCase() === name.toLowerCase()), iname = this.names('indexes').find((n) => n.toLowerCase() === name.toLowerCase());
+    const added = this.addSymbols('groups', gname, syms); this.addSymbols('indexes', iname, syms);
+    let sectors = 0;
+    for (const [sym, sec] of sectorOf) {
+      if (!d.sectors.some((x) => x.toLowerCase() === sec.toLowerCase())) { d.sectors.push(sec); }
+      const hit = d.sectors.find((x) => x.toLowerCase() === sec.toLowerCase());
+      if (!d.assign.industries[sym]) { d.assign.sectors[sym] = hit; sectors++; }
+    }
+    if (SECTORAL.has(name.toUpperCase()) && count.size) {
+      const top = [...count.entries()].sort((a, b) => b[1] - a[1])[0][0], parent = d.sectors.find((x) => x.toLowerCase() === top.toLowerCase()) || top;
+      if (!d.industries.some((x) => x.name.toLowerCase() === name.toLowerCase())) d.industries.push({ name, sector: parent });
+      const ind = d.industries.find((x) => x.name.toLowerCase() === name.toLowerCase()); if (!ind.sector) ind.sector = parent;
+      for (const sym of syms) { if (sectorOf.get(sym) && sectorOf.get(sym).toLowerCase() !== ind.sector.toLowerCase()) continue; d.assign.industries[sym] = ind.name; delete d.assign.sectors[sym]; }
+    }
+    this.save();
+    return { name, added, total: syms.length, unknown, sectors };
   }
   /** Lines "code name" (like AmiBroker's GICS.txt / ICB.txt) become GICS / ICB categories. */
   importCodes(type, text) {

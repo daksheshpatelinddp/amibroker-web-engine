@@ -21,6 +21,13 @@ async function readText(f) {
   if (b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder('utf-16be').decode(b);
   return new TextDecoder('utf-8').decode(b);
 }
+function pickFiles(accept) {
+  return new Promise((resolve) => {
+    const i = document.createElement('input'); i.type = 'file'; i.accept = accept; i.multiple = true; i.style.display = 'none';
+    i.onchange = async () => { const fs = [...(i.files || [])]; i.remove(); resolve(await Promise.all(fs.map(async (f) => ({ name: f.name, text: await readText(f) })))); };
+    document.body.appendChild(i); i.click();
+  });
+}
 function pickFile(accept) {
   return new Promise((resolve) => {
     const i = document.createElement('input'); i.type = 'file'; i.accept = accept; i.style.display = 'none';
@@ -323,6 +330,19 @@ export function openCategories(opts = {}) {
     fbtn('Import classification CSV…', async () => {
       const f = await pickFile('.csv,.txt'); if (!f) return; const r = st.importClassification(f.text, allSymbols());
       if (r.error) toast(r.error); else { toast(`${r.rows} rows, ${r.assigned} assignments, ${r.created} new categories`); render(); }
+    });
+    fbtn('Import NSE index files…', async () => {
+      if (!confirm('Pick the constituent CSV files you downloaded from niftyindices.com (for example ind_nifty50list.csv, ind_nifty500list.csv, ind_niftybanklist.csv). You can select many at once.\n\nEach file becomes a Group and an Index of that name; the Industry column becomes the Sector; sectoral indices (NIFTY BANK, NIFTY IT ...) also become an Industry.')) return;
+      const files = await pickFiles('.csv,.txt'); if (!files.length) return;
+      const all2 = allSymbols(); let tot = 0, miss = [], bad = [];
+      for (const f of files) { const r = st.importNseIndex(f.text, f.name, all2); if (r.error) bad.push(r.error); else { tot++; r.unknown.forEach((u) => miss.push(u)); } }
+      toast(`${tot} of ${files.length} files imported${miss.length ? `. ${miss.length} symbols not in database (${[...new Set(miss)].slice(0, 6).join(', ')}${miss.length > 6 ? ' …' : ''})` : ''}${bad.length ? '. ' + bad[0] : ''}`, 8000); state.type = 'groups'; state.name = null; render();
+    });
+    fbtn('Import classification from link…', async () => {   // e.g. the nse-categories.csv your GitHub Action wrote (raw.githubusercontent.com link)
+      const u = (prompt('Link to the classification CSV (for example the raw link of nse-categories.csv in your GitHub repo):') || '').trim(); if (!u) return;
+      try { const r0 = await fetch(u, { cache: 'no-store' }); if (!r0.ok) throw new Error('HTTP ' + r0.status); const r = st.importClassification(await r0.text(), allSymbols());
+        if (r.error) toast(r.error); else { toast(`${r.rows} rows, ${r.assigned} assignments, ${r.created} new categories`, 6000); state.type = 'groups'; state.name = null; render(); } }
+      catch (e) { toast('Could not load the link: ' + e.message); }
     });
     fbtn('Export everything (CSV)', () => download('symbol-categories.csv', st.exportCsv(allSymbols()), 'text/csv'));
     fbtn('Backup (JSON)', () => download('categories-backup.json', st.exportJson(), 'application/json'));
