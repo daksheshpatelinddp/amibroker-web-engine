@@ -38,6 +38,7 @@ export function parseConstituents(text) {
   return rows.slice(1).map((r) => ({ symbol: (r[si] || '').toUpperCase(), industry: ii >= 0 ? (r[ii] || '') : '' })).filter((x) => x.symbol);
 }
 
+function splitCsv(l) { const o = []; let c = '', qq = false; for (const ch of l) { if (ch === '"') qq = !qq; else if (ch === ',' && !qq) { o.push(c); c = ''; } else c += ch; } o.push(c); return o; }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function download(fetchFn, file, tries = 3) {
   let last = '';
@@ -78,13 +79,18 @@ export async function build({ fetchFn = fetch, indexes = INDEXES, dir = '', log 
   const q = (x) => (/[",\r\n]/.test(x) ? `"${String(x).replace(/"/g, '""')}"` : x);
   const lines = ['Symbol,Group,Sector,Industry'];
   for (const s of [...sym.keys()].sort()) { const o = sym.get(s); lines.push([s, [...o.groups].join('|'), o.sector, o.industry].map(q).join(',')); }
+  // the same data in parts: groups only, and sectors + industries only (smaller files, each can be imported on its own)
+  const part = (cols) => { const idx = cols.map((c) => lines[0].split(',').indexOf(c)); return lines.map((l, i) => { const f = i === 0 ? l.split(',') : splitCsv(l); return ['Symbol', ...cols].map((c) => (c === 'Symbol' ? f[0] : f[lines[0].split(',').indexOf(c)])).map(q).join(','); }).join('\r\n') + '\r\n'; };
+  const report = ['NSE categories report', `${sym.size} symbols`, '', 'Indices read (members in the file):', ...done.map((x) => '  ' + x), '', skipped.length ? 'Skipped:' : 'Nothing skipped', ...skipped.map((x) => '  ' + x)].join('\n') + '\n';
   log(`${sym.size} symbols from ${done.length} indices`); if (skipped.length) log('Skipped:\n  ' + skipped.join('\n  '));
-  return { csv: lines.join('\r\n') + '\r\n', symbols: sym.size, indices: done, skipped, parent };
+  return { csv: lines.join('\r\n') + '\r\n', groupsCsv: part(['Group']), sectorsCsv: part(['Sector', 'Industry']), report, symbols: sym.size, indices: done, skipped, parent };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const args = process.argv.slice(2), di = args.indexOf('--dir'), dir = di >= 0 ? args.splice(di, 2)[1] : '';
   const out = args[0] || 'nse-categories.csv';
   const r = await build({ dir }); if (!r.symbols) { console.error('Nothing downloaded: is niftyindices.com reachable from here?'); process.exit(1); }
-  fs.writeFileSync(out, r.csv); console.log('Wrote ' + out);
+  fs.writeFileSync(out, r.csv); const base = out.replace(/\.csv$/, '');
+  fs.writeFileSync(base + '-groups.csv', r.groupsCsv); fs.writeFileSync(base + '-sectors.csv', r.sectorsCsv); fs.writeFileSync(base + '-report.txt', r.report);
+  console.log(r.report); console.log(`Wrote ${out}, ${base}-groups.csv, ${base}-sectors.csv, ${base}-report.txt`);
 }
