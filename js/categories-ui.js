@@ -2,7 +2,7 @@
 import { el, openModal, toast, BTN, BTN_PRIMARY, BTN_DANGER, INPUT } from './ui.js';
 import { host } from './host.js';
 import { categoryStore, TYPES, typeInfo, UNASSIGNED, parseSymbolText } from './category-store.js';
-import { DATABASES, addUserDatabase, removeUserDatabase } from './config.js';
+import { DATABASES, addUserDatabase, removeUserDatabase, APP_BUILD } from './config.js';
 
 const CHIP = 'px-2 py-1 rounded-full border text-[11px] whitespace-nowrap ';
 const CHIP_ON = CHIP + 'bg-sky-600 border-sky-500 text-white', CHIP_OFF = CHIP + 'bg-slate-800 border-slate-700 text-slate-300';
@@ -143,7 +143,7 @@ export function openCategories(opts = {}) {
       dbBar.appendChild(row);
       const info = el('div', 'flex flex-wrap items-center gap-2 text-[11px] text-slate-400');
       const n = allSymbols().length;
-      info.appendChild(el('span', '', `${(DATABASES[state.db] || {}).name || state.db}: ${n ? n.toLocaleString('en-IN') + ' symbols' : 'loading symbols…'} · its own categories, watchlists, favorites and indexes`));
+      info.appendChild(el('span', '', `${(DATABASES[state.db] || {}).name || state.db}: ${n ? n.toLocaleString('en-IN') + ' symbols' : 'loading symbols…'} · its own categories, watchlists, favorites and indexes · build ${APP_BUILD}`));
       if (!isActive()) {
         const go = el('button', BTN_PRIMARY + ' !px-2 !py-1', 'Open this database ▶'); go.type = 'button';
         go.onclick = () => { if (confirm(`Show the ${(DATABASES[state.db] || {}).name} database on the chart? The app reloads.`)) host.switchDb(state.db); };

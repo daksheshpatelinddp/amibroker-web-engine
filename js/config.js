@@ -5,6 +5,9 @@
 //   <R2_PUBLIC_URL>/nse/2023.parquet   <R2_PUBLIC_URL>/bse/2023.parquet   ...
 export const R2_PUBLIC_URL = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
 
+// shown in Symbols · Categories so you can see that the new files are the ones running (Render deploys, browser cache)
+export const APP_BUILD = '2026-10-21b';
+
 export const DATABASES = {
   nse: {
     id: 'nse',
