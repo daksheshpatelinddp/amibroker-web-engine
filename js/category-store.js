@@ -173,7 +173,9 @@ export class CategoryStore {
     this._groupsToLists();
   }
   _load() { try { const s = this.storage && this.storage.getItem(this.KEY); if (s) { const d = JSON.parse(s); if (d && d.v === 2) return d; } } catch (e) {} return null; }
-  save() { try { this.storage && this.storage.setItem(this.KEY, JSON.stringify(this.data)); } catch (e) {} this.listeners.forEach((f) => { try { f(); } catch (e) {} }); }
+  /** Run many edits and save / notify once at the end (an import of thousands of rows used to save the whole store after every row and crashed the page). */
+  batch(fn) { this._quiet = (this._quiet || 0) + 1; try { return fn(); } finally { if (--this._quiet === 0 && this._dirty) { this._dirty = false; this.save(); } } }
+  save() { if (this._quiet) { this._dirty = true; return; } try { this.storage && this.storage.setItem(this.KEY, JSON.stringify(this.data)); } catch (e) {} this.listeners.forEach((f) => { try { f(); } catch (e) {} }); }
   onChange(fn) { this.listeners.push(fn); return () => { this.listeners = this.listeners.filter((x) => x !== fn); }; }
 
   /** Groups used to hold one group per symbol; now a symbol can be in many. Old assignments move into lists (nothing is lost). */
@@ -368,7 +370,8 @@ export class CategoryStore {
     return { added, total: symbols.length, unknown };
   }
   /** A file that has "###Section" headings (TradingView) becomes one new list per section. Returns [{name, added}] or null when there are none. */
-  importSections(type, text, all = []) {
+  importSections(type, text, all = []) { return this.batch(() => this._importSections(type,text,all)); }
+  _importSections(type, text, all = []) {
     const { sections } = parseSymbolText(text, all); const names = Object.keys(sections);
     if (!names.length || this.kind(type) !== 'free') return null;
     return names.map((n) => { this.add(type, n); const hit = this.names(type).find((x) => x.toLowerCase() === n.toLowerCase()) || n; return { name: hit, ...this._finishImport(type, hit, sections[n], all) }; });
@@ -377,7 +380,8 @@ export class CategoryStore {
    * CSV with columns like AmiBroker's ASCII import: Symbol, Group, Market, Sector, Industry, GICS, ICB, Watchlist, Index.
    * Creates missing categories, assigns each symbol. Returns {rows, assigned, created}.
    */
-  importClassification(text, all = [], opts = {}) {
+  importClassification(text, all = [], opts = {}) { return this.batch(() => this._importClassification(text,all,opts)); }
+  _importClassification(text, all = [], opts = {}) {
     const rows = csvRows(text); if (rows.length < 2) return { rows: 0, assigned: 0, created: 0 };
     const head = rows[0].map((h) => h.toLowerCase().replace(/[^a-z]/g, ''));
     const sc = head.findIndex((h) => ['symbol', 'ticker', 'scrip', 'tradingsymbol'].includes(h)); if (sc < 0) return { rows: 0, assigned: 0, created: 0, error: 'No Symbol / Ticker column' };
@@ -418,7 +422,8 @@ export class CategoryStore {
    * the Group and the Index of that name, the Sector of each stock (the file's Industry column), and - for sectoral indices like NIFTY BANK - an Industry.
    * Returns {name, added, total, unknown, sectors}.
    */
-  importNseIndex(text, fileName, all = [], nameOverride = '') {
+  importNseIndex(text, fileName, all = [], nameOverride = '') { return this.batch(() => this._importNseIndex(text,fileName,all,nameOverride)); }
+  _importNseIndex(text, fileName, all = [], nameOverride = '') {
     const rows = csvRows(text); if (rows.length < 2) return { name: '', added: 0, total: 0, unknown: [], sectors: 0, error: 'Empty file' };
     const head = rows[0].map((h) => h.toLowerCase().replace(/[^a-z]/g, ''));
     const sc = head.findIndex((h) => ['symbol', 'ticker'].includes(h)), ic = head.findIndex((h) => ['industry', 'sector'].includes(h));
