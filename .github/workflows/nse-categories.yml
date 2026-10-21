@@ -20,4 +20,4 @@ jobs:
           if ls nse-index-files/*.csv >/dev/null 2>&1; then node tools/build-nse-categories.mjs nse-categories.csv --dir nse-index-files; else node tools/build-nse-categories.mjs nse-categories.csv; fi
       - run: |
           git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
-          git add nse-categories.csv; git diff --cached --quiet || git commit -m "NSE index memberships" && git push
+          git add nse-categories*.csv nse-categories-report.txt; git diff --cached --quiet || git commit -m "NSE index memberships" && git push
