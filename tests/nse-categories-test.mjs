@@ -22,6 +22,10 @@ const row = (s) => r.csv.split('\r\n').find((l) => l.startsWith(s + ','));
 ok(/^HDFCBANK,NIFTY 50\|NIFTY 500\|NIFTY PRIVATE BANK\|NIFTY BANK,Financial Services,Private Bank$/.test(row('HDFCBANK')), 'HDFCBANK in many groups, narrowest industry first: ' + row('HDFCBANK'));
 ok(/^SBIN,.*PSU Bank$/.test(row('SBIN')), 'SBIN PSU Bank');
 ok(/^DABUR,NIFTY NEXT 50\|NIFTY 500,Fast Moving Consumer Goods,Fast Moving Consumer Goods$/.test(row('DABUR')), 'no sector index: industry named like the sector: ' + row('DABUR'));
+// the parts
+ok(r.groupsCsv.split('\r\n')[0] === 'Symbol,Group' && /^HDFCBANK,NIFTY 50\|/.test(r.groupsCsv.split('\r\n')[1]) || /HDFCBANK,NIFTY 50\|/.test(r.groupsCsv), 'groups part');
+ok(r.sectorsCsv.split('\r\n')[0] === 'Symbol,Sector,Industry' && /SBIN,Financial Services,PSU Bank/.test(r.sectorsCsv), 'sectors part');
+ok(/NIFTY 50: 3/.test(r.report) && /Skipped:/.test(r.report), 'report lists counts per index');
 // into the store
 const mem = {}; const st = new CategoryStore({ getItem: (k) => mem[k] ?? null, setItem: (k, v) => { mem[k] = v; } }, 'nsetest');
 const all = ['HDFCBANK', 'TCS', 'SBIN', 'BAJFINANCE', 'DABUR', 'XYZ'];
