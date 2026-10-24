@@ -151,7 +151,8 @@ export function openAnalysis({ formulaId = null } = {}) {
     let busyNow = false, progText = '', hasResults = false;
     const chipText = () => { chip.textContent = busyNow ? `🔎 Analysis running ${progText}` : hasResults ? '🔎 Analysis: results ready' : '🔎 Analysis'; };
     const minimize = () => { root.style.display = 'none'; chip.style.display = ''; chipText(); };
-    const showWin = () => { root.style.display = ''; chip.style.display = 'none'; };
+    let refreshFormulas = null;   // set below: re-reads the formula list (a formula saved after this window opened must appear)
+    const showWin = () => { root.style.display = ''; chip.style.display = 'none'; if (refreshFormulas) refreshFormulas(); };
     chip.onclick = showWin; hideWin = minimize;
     cleanup = () => { chip.remove(); win = null; };
     win = { root, show: showWin, setFormula: (id) => { if (all.some((f) => f.id === id)) { fsel.value = id; fsel.dispatchEvent(new Event('change')); } } };
@@ -165,10 +166,12 @@ export function openAnalysis({ formulaId = null } = {}) {
     let S = loadSettings();
 
     // ---- formula
-    const all = formulaStore.all(), fsel = el('select', INPUT + ' w-full');
+    let all = formulaStore.all(); const fsel = el('select', INPUT + ' w-full');
     const group = (label, list) => { if (!list.length) return; const g = document.createElement('optgroup'); g.label = label; list.forEach((f) => { const o = el('option', '', f.name); o.value = f.id; g.appendChild(o); }); fsel.appendChild(g); };
-    group('Systems (backtest)', all.filter((f) => f.kind === 'system')); group('Explorations / scans', all.filter((f) => f.kind === 'exploration'));
-    group('My formulas', all.filter((f) => !f.builtin)); group('Other formulas', all.filter((f) => f.builtin && f.kind === 'chart'));
+    const fillFormulas = () => { fsel.innerHTML = ''; group('Systems (backtest)', all.filter((f) => f.kind === 'system')); group('Explorations / scans', all.filter((f) => f.kind === 'exploration'));
+      group('My formulas', all.filter((f) => !f.builtin)); group('Other formulas', all.filter((f) => f.builtin && f.kind === 'chart')); };
+    fillFormulas();
+    refreshFormulas = () => { const keep = fsel.value, n0 = all.length; all = formulaStore.all(); fillFormulas(); if (all.some((f) => f.id === keep)) fsel.value = keep; };
     fsel.value = all.some((f) => f.id === st.formulaId) ? st.formulaId : 'b:sys-macd';
     const edit = el('button', BTN + ' !px-2', 'Edit'); edit.type = 'button'; edit.onclick = async () => { const { openFormulaEditor } = await import('./formula-editor.js'); openFormulaEditor({ formulaId: fsel.value }); };
     const frow = el('div', 'flex space-x-2 items-end'); const fw = labeled('Formula', fsel); fw.classList.add('flex-1'); frow.appendChild(fw); frow.appendChild(edit); body.appendChild(frow);
@@ -487,9 +490,9 @@ export function openAnalysis({ formulaId = null } = {}) {
     const buildSpec = (mode) => {
       const f = formulaStore.get(fsel.value); if (!f) { toast('Choose a formula'); return null; }
       const sy = symbols(); if (!sy.symbols.length) { toast('No symbols to analyse. Choose Apply to, or add symbols to the filter.'); return null; }
-      if (isIntraday(tf.value)) { toast('GitHub runs use end-of-day data only. Set the time frame to Daily.'); return null; }
+      if (isIntraday(tf.value)) { toast('GitHub runs use end-of-day data only. Set the time frame to Daily, Weekly or Monthly.'); return null; }
       save(); const D = DATABASES[ACTIVE_DB];
-      return { mode, formulaName: f.name, code: f.code, symbols: sy.symbols, interval: 'D', range: rangeNow(), settings: S,
+      return { mode, formulaName: f.name, code: f.code, symbols: sy.symbols, interval: tf.value, range: rangeNow(), settings: S,   // the runner builds weekly / monthly bars exactly like a local run
         metric: mode === 'walk' ? S.walkForward.target : S.optimize.target, engine: S.optimize.engine, maxEval: S.optimize.maxEval, runs: S.optimize.runs, keep: S.optimize.serverKeep || 5000, wf: S.walkForward,
         dataset: { id: D.id, baseUrl: D.baseUrl, firstYear: D.firstYear, currency: D.currency }, ui: getState() };
     };
