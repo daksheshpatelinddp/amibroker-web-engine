@@ -2,6 +2,7 @@
 //   tokenize -> parse -> run. No DOM. Arrays are Float64Array (NaN = Null), scalars are numbers.
 //   aflEngine.run(code, bars, { symbol, params }) returns plots, shapes, Buy/Sell/Filter/columns, errors...
 import * as L from './afl-lib.js';
+import { addTimeFrame, IN as TF_IN, MODES as TF_MODES } from './afl-timeframe.js';
 import { isArr, newArr, toArr } from './afl-lib.js';
 import { addExtras } from './afl-extra.js';
 
@@ -322,7 +323,8 @@ const SPECIAL = ['buy', 'sell', 'short', 'cover', 'filter', 'title', 'buyprice',
 
 class Interp {
   constructor(bars, opts, res) {
-    this.bars = bars; this.opts = opts || {}; this.res = res;
+    this.bars = bars; this.bars0 = bars; this.opts = opts || {}; this.res = res;   // bars0 = the base time frame; this.bars changes between TimeFrameSet / TimeFrameRestore
+    this.tfSaved = null; this.tfIv = null;
     this.n = bars.t.length;
     this.globals = new Map();
     this.funcs = new Map();
@@ -360,14 +362,24 @@ class Interp {
       formatChar: -9001, formatDateTime: -9002, categoryMarket: 0, categoryGroup: 1, categorySector: 2, categoryIndustry: 3, categoryWatchlist: 4, categoryFavorite: 5, categoryIndex: 6, categoryAll: 7,
       actionIndicator: 1, actionCommentary: 2, actionScan: 3, actionExplore: 4, actionBacktest: 5, actionOptimize: 6, actionPortfolio: 7,
       backtestRegular: 0, backtestRotational: 1, backtestRegularRaw: 2, backtestRegularRawMulti: 3,
-      inDaily: 86400, inWeekly: 604800, inMonthly: 2592000, inQuarterly: 7776000, inYearly: 31536000, inHourly: 3600, inMinute: 60, in1Minute: 60,
       chartShowArrows: 1, chartShowDates: 2, chartLogarithmic: 4, chartGrid30: 1, chartGrid50: 2, chartGrid70: 4, chartGridMiddle: 8,
       chartGridPercent: 16, chartWrapTitle: 16, chartNoGaps: 8, chartHideQuoteMarker: 32,
       xshift: 0, enableTextOutput: 0 }).forEach(([k, v]) => c.set(k.toLowerCase(), v));
+    for (const [k, v] of Object.entries({ ...TF_IN, ...TF_MODES })) c.set(k.toLowerCase(), v);      // inDaily, inWeekly ... expandFirst, compressHigh ...
     for (const k of ['buyprice', 'sellprice', 'shortprice', 'coverprice']) c.set(k, C);   // default trade prices = Close
     c.set('openint', newArr(n, 0)); c.set('openinterest', newArr(n, 0));
     for (const nm of ['xshift', 'enabletextoutput']) c.delete(nm);
     this.consts = c;
+  }
+
+  /** At the end of the formula: back to the base time frame (like AmiBroker), then check nothing from another time frame leaks into the results. */
+  finishRun() {
+    if (this.tfSaved && this.lib.timeframerestore) this.lib.timeframerestore();
+    const n = this.n, g = this.globals;
+    const chk = (what, v) => { if (isArr(v) && v.length !== n) this.fail(`${what} has ${v.length} bars but the chart has ${n}: it was calculated in another time frame. Use TimeFrameExpand(${what.startsWith('Plot') ? 'array' : 'array'}, interval) after TimeFrameRestore() to bring it back.`); };
+    for (const k of ['buy', 'sell', 'short', 'cover', 'filter', 'buyprice', 'sellprice', 'shortprice', 'coverprice', 'positionsize', 'positionscore']) if (g.has(k)) chk(k === 'buy' ? 'Buy' : k === 'sell' ? 'Sell' : k === 'short' ? 'Short' : k === 'cover' ? 'Cover' : k, g.get(k));
+    this.res.plots.forEach((pl, i) => { if (pl && pl.data) chk(`Plot #${i + 1}${pl.name ? ' "' + pl.name + '"' : ''}`, pl.data); });
+    this.res.columns.forEach((cl) => { if (cl && !cl.text) chk(`Column "${cl.name}"`, cl.data); });
   }
 
   tick() { if (++this.steps > MAX_STEPS) throw new AFLError('Execution limit exceeded (infinite loop?)', this.line); }
@@ -375,6 +387,9 @@ class Interp {
 
   // ---- values
   A(v) { return toArr(v, this.n); }
+  badLength(l1, l2) {
+    this.fail(`Arrays of different time frames are mixed (${l1} bars and ${l2} bars). An array made after TimeFrameSet()/TimeFrameCompress() must be brought back with TimeFrameExpand(array, interval) before it is combined with arrays of the chart's time frame.`);
+  }
   scalar(v) { return isArr(v) ? v[v.length - 1] : (typeof v === 'number' ? v : NaN); }
   cond(v) { return isArr(v) ? truthy(v[v.length - 1]) : (typeof v === 'string' ? v.length > 0 : truthy(v)); }
 
@@ -387,7 +402,8 @@ class Interp {
     }
     const f = NUM[op], aa = isArr(a), ba = isArr(b);
     if (!aa && !ba) return f(a, b);
-    const n = this.n, out = new Float64Array(n);
+    if (aa && ba && a.length !== b.length) this.badLength(a.length, b.length);
+    const n = aa ? a.length : b.length, out = new Float64Array(n);     // arrays of a compressed time frame keep their own length
     if (aa && ba) for (let i = 0; i < n; i++) out[i] = f(a[i], b[i]);
     else if (aa) for (let i = 0; i < n; i++) out[i] = f(a[i], b);
     else for (let i = 0; i < n; i++) out[i] = f(a, b[i]);
@@ -558,7 +574,6 @@ function buildFunctions(E) {
   const n = () => E.n;
   const A = (v) => E.A(v);
   const S = (v, d = NaN) => (v === undefined ? d : E.scalar(v));
-  const bars = E.bars;
   const col = (name) => E.consts.get(name);
 
   // --- generic: moving type functions (array, periods)
@@ -612,7 +627,7 @@ function buildFunctions(E) {
   F.iif = (a) => {
     const c = a[0], x = a[1], y = a[2];
     if (!isArr(c)) return truthy(c) ? x : y;
-    const out = new Float64Array(n()), xa = isArr(x), ya = isArr(y);
+    const out = new Float64Array(c.length), xa = isArr(x), ya = isArr(y);
     for (let i = 0; i < out.length; i++) out[i] = truthy(c[i]) ? (xa ? x[i] : x) : (ya ? y[i] : y);
     return out;
   };
@@ -634,7 +649,7 @@ function buildFunctions(E) {
   F.barindex = () => Float64Array.from({ length: n() }, (_, i) => i);
 
   // --- date / symbol
-  const dateParts = () => bars.t.map((t) => { const p = String(t).slice(0, 10).split('-').map(Number); return { y: p[0], m: p[1], d: p[2] }; });
+  const dateParts = () => E.bars.t.map((t) => { const p = String(t).slice(0, 10).split('-').map(Number); return { y: p[0], m: p[1], d: p[2] }; });
   F.datenum = () => Float64Array.from(dateParts(), (p) => (p.y - 1900) * 10000 + p.m * 100 + p.d);
   F.day = () => Float64Array.from(dateParts(), (p) => p.d);
   F.month = () => Float64Array.from(dateParts(), (p) => p.m);
@@ -642,7 +657,7 @@ function buildFunctions(E) {
   F.dayofweek = () => Float64Array.from(dateParts(), (p) => new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay());
   F.name = () => String(E.opts.symbol || '');
   F.fullname = F.name;
-  F.interval = () => { const iv = E.opts.interval || 'D'; return /^\d+m$/.test(iv) ? parseInt(iv, 10) * 60 : ({ D: 86400, W: 604800, M: 2592000, Q: 7776000, Y: 31536000 })[iv] || 86400; };
+  // F.interval is defined in afl-timeframe.js (it follows TimeFrameSet)
   F.version = () => 6;
 
   // --- text
@@ -718,7 +733,7 @@ function buildFunctions(E) {
     const id = S(a[0]), d = gFind(id), st = E.guiState[id] || {};
     if (d && d.type === 'slider') return clampTo(d, st.value !== undefined ? st.value : d.min);
     if (d && d.type === 'datetime') {
-      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(st.text || bars.t[bars.t.length - 1] || '');
+      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(st.text || E.bars.t[E.bars.t.length - 1] || '');
       return m ? (+m[1] - 1900) * 10000 + +m[2] * 100 + +m[3] : 0;
     }
     const v = Number(st.text); return Number.isFinite(v) ? v : (st.value !== undefined ? st.value : 0);
@@ -727,7 +742,7 @@ function buildFunctions(E) {
     const id = S(a[0]), d = gFind(id), st = E.guiState[id] || {};
     if (d && TEXTUAL.has(d.type)) return d.text;
     if (d && d.type === 'slider') return String(F.guigetvalue([id]));
-    if (d && d.type === 'datetime') return st.text || bars.t[bars.t.length - 1] || '';
+    if (d && d.type === 'datetime') return st.text || E.bars.t[E.bars.t.length - 1] || '';
     return st.text === undefined ? '' : String(st.text);
   };
   F.guisettext = (a) => {                                // note the order: GuiSetText("text", id)
@@ -861,14 +876,16 @@ function buildFunctions(E) {
     E.res.columns.push({ name: a[1] === undefined ? 'Text' : String(a[1]), data: String(a[0]), format: 0, text: true });
     return 0;
   };
-  return addExtras(F, E, { A, S, STYLE, truthy, strFormat, toStr, colorToHex });
+  const FF = addExtras(F, E, { A, S, STYLE, truthy, strFormat, toStr, colorToHex });
+  return addTimeFrame(FF, E, { A, S });
 }
 
 Interp.prototype.binary2 = function (a, b, f) {
   const aa = isArr(a), ba = isArr(b);
   if (!aa && !ba) return f(a, b);
-  const out = new Float64Array(this.n);
-  for (let i = 0; i < this.n; i++) out[i] = f(aa ? a[i] : a, ba ? b[i] : b);
+  if (aa && ba && a.length !== b.length) this.badLength(a.length, b.length);
+  const n = aa ? a.length : b.length, out = new Float64Array(n);
+  for (let i = 0; i < n; i++) out[i] = f(aa ? a[i] : a, ba ? b[i] : b);
   return out;
 };
 
@@ -898,7 +915,7 @@ export class AFLEngine {
     catch (e) { res.errors.push(e.message); res.errorLine = e.line || 0; return res; }
 
     const it = new Interp(bars, opts, res);
-    try { it.runProgram(ast); }
+    try { it.runProgram(ast); it.finishRun(); }
     catch (e) {
       if (e instanceof AFLError) { res.errors.push(e.message); res.errorLine = e.line || 0; }
       else { res.errors.push(`Internal error: ${e && e.message ? e.message : e}`); res.errorLine = it.line; }

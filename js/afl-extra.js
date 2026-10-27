@@ -14,7 +14,6 @@ const BASE_FIELDS = ['Open', 'High', 'Low', 'Close', 'Volume', 'Open Interest', 
 export function addExtras(F, E, H) {
   const { A, S, STYLE, truthy, strFormat, toStr } = H;
   const n = () => E.n;
-  const bars = E.bars;
   const arrPer = (fn) => (a) => fn(A(a[0]), S(a[1]));
 
   // ------------------------------------------------------------------ indicators
@@ -57,7 +56,7 @@ export function addExtras(F, E, H) {
   F.hhvbars = F.hhvbars; F.ref = F.ref;
 
   // ------------------------------------------------------------------ date & time
-  const parts = () => bars.t.map((d) => { const s = String(d), p = s.slice(0, 10).split('-').map(Number); return { y: p[0], m: p[1], d: p[2], hh: s.length > 10 ? +s.slice(11, 13) : 0, mm: s.length > 10 ? +s.slice(14, 16) : 0 }; });
+  const parts = () => E.bars.t.map((d) => { const s = String(d), p = s.slice(0, 10).split('-').map(Number); return { y: p[0], m: p[1], d: p[2], hh: s.length > 10 ? +s.slice(11, 13) : 0, mm: s.length > 10 ? +s.slice(14, 16) : 0 }; });
   const hms = (p) => p.hh * 10000 + p.mm * 100;   // intraday bars carry their start time (IST); daily bars are 0
   F.datetime = () => Float64Array.from(parts(), (p) => ((p.y - 1900) * 10000 + p.m * 100 + p.d) * 1e6 + hms(p));
   F.timenum = () => Float64Array.from(parts(), (p) => hms(p));
@@ -150,12 +149,13 @@ export function addExtras(F, E, H) {
   // ------------------------------------------------------------------ foreign symbols
   const needs = new Set();
   const aligned = (sym) => {
-    const f = (E.opts.foreign || {})[sym] || (E.opts.foreign || {})[String(sym).toUpperCase()];
+    let f = (E.opts.foreign || {})[sym] || (E.opts.foreign || {})[String(sym).toUpperCase()];
     if (!f) { needs.add(String(sym)); return null; }
+    if (E.tfForeign) f = E.tfForeign(f);                       // inside TimeFrameSet(): the other symbol's bars of that time frame
     const map = new Map(f.t.map((d, i) => [d, i])), out = { o: newArr(N0()), h: newArr(N0()), l: newArr(N0()), c: newArr(N0()), v: newArr(N0()) };
     let last = -1;
     for (let i = 0; i < n(); i++) {
-      const j = map.get(bars.t[i]);
+      const j = map.get(E.bars.t[i]);
       if (j !== undefined) last = j;
       if (last >= 0 && (j !== undefined || E.opts.padForeign !== false)) { out.o[i] = f.o[last]; out.h[i] = f.h[last]; out.l[i] = f.l[last]; out.c[i] = f.c[last]; out.v[i] = j !== undefined ? f.v[last] : 0; }
     }
@@ -280,7 +280,7 @@ export function addExtras(F, E, H) {
     const sig = { buy: g('buy') && A(g('buy')), sell: g('sell') && A(g('sell')), short: g('short') && A(g('short')), cover: g('cover') && A(g('cover')),
       buyPrice: g('buyprice'), sellPrice: g('sellprice'), shortPrice: g('shortprice'), coverPrice: g('coverprice'), stops: E.res.stops };
     const opt = optionsFromResult(E.res, { initialEquity: E.res.options.initialequity || 100000 });
-    const b = { t: bars.t, o: E.O, h: E.H, l: E.Lw, c: E.C };
+    const b = { t: E.bars.t, o: E.O, h: E.H, l: E.Lw, c: E.C };
     return singleEquity(b, sig, opt).equity;
   };
   F.setoption = (a) => { E.res.options[String(a[0]).toLowerCase()] = a[1]; return 0; };

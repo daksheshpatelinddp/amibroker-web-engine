@@ -40,6 +40,17 @@ Plot( m, _DEFAULT_NAME(), ParamColor("Color", ColorCycle), ParamStyle("Style"), 
   avg('tsf', 'TSF', 'Time series forecast (linear regression projected one bar ahead)'),
   avg('wilders', 'Wilders', 'Wilder\'s smoothing'),
   avg('wma', 'WMA', 'Linearly weighted moving average'),
+  f('tf-ma', 'Higher Time Frame Moving Average', 'Averages', 'A weekly / monthly moving average drawn on the daily chart with TimeFrameSet + TimeFrameExpand (pick the time frame in Parameters)', R`
+tf = ParamList("Time frame", "Weekly,Monthly,Quarterly");
+Periods = Param("Periods", 10, 2, 100, 1);
+interval = IIf( tf == "Weekly", inWeekly, IIf( tf == "Monthly", inMonthly, inQuarterly ) );
+
+TimeFrameSet( interval );        // everything below runs on weekly / monthly / quarterly bars
+htfMA = MA( Close, Periods );
+TimeFrameRestore();              // back to the chart's own time frame
+
+Plot( Close, "Price", colorDefault, styleCandle );
+Plot( TimeFrameExpand( htfMA, interval ), tf + " MA(" + NumToStr( Periods, 1.0 ) + ")", ParamColor( "Color", colorOrange ), styleLine | styleThick );`, { overlay: false, weight: 1 }),
 ];
 
 const BANDS = [

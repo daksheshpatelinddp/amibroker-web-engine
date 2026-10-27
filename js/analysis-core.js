@@ -72,6 +72,9 @@ const wildcard = (p) => new RegExp('^' + p.trim().replace(/[.+^${}()|[\]\\]/g, '
  * apply: 'current' | 'all' | 'filter'.  filter = {include:[keys], exclude:[keys], names:'RELI*, TCS', typed:'A, B', limit:N}
  * keys are "type|name" from CategoryStore.options(). Empty include = every symbol.
  */
+/** Index symbols (^NIFTY50, ^NIFTYBANK ...) share the data files with the stocks but are left out of 'all stocks' runs. */
+export const isIndexSym = (s) => String(s).startsWith('^');
+
 export function resolveSymbols({ apply = 'all', current = '', all = [], filter = {}, store = null, maxSymbols = 0 }) {
   let list;
   if (apply === 'current') list = current ? [current] : [];
@@ -79,12 +82,13 @@ export function resolveSymbols({ apply = 'all', current = '', all = [], filter =
     const f = filter || {}, up = (s) => String(s).toUpperCase();
     const inc = (f.include || []).length ? new Set((f.include || []).flatMap((k) => (store ? store.resolve(k, all) : []).map(up))) : null;
     const exc = new Set((f.exclude || []).flatMap((k) => (store ? store.resolve(k, all) : []).map(up)));
-    const pats = String(f.names || '').split(/[,\s]+/).filter(Boolean).map(wildcard);
-    list = all.filter((s) => (!inc || inc.has(up(s))) && !exc.has(up(s)) && (!pats.length || pats.some((p) => p.test(s))));
+    const rawPats = String(f.names || '').split(/[,\s]+/).filter(Boolean), pats = rawPats.map(wildcard);
+    const wantIdx = rawPats.some((x) => x.startsWith('^'));            // indices (^NIFTY50 ...) only when asked for by a pattern starting with ^ (or typed / in a chosen list)
+    list = all.filter((s) => (!isIndexSym(s) || wantIdx || (inc && inc.has(up(s)))) && (!inc || inc.has(up(s))) && !exc.has(up(s)) && (!pats.length || pats.some((p) => p.test(s))));
     const typed = String(f.typed || '').split(/[,\s]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
     for (const t of typed) if (!list.some((s) => up(s) === t) && !exc.has(t)) list.push(all.find((s) => up(s) === t) || t);
     if (f.limit > 0) list = list.slice(0, f.limit);
-  } else list = [...all];
+  } else list = all.filter((x) => !isIndexSym(x));        // 'all' = stocks only; indices are not part of a scan unless named
   let capped = false;
   if (maxSymbols > 0 && list.length > maxSymbols && apply !== 'current') { list = list.slice(0, maxSymbols); capped = true; }
   return { symbols: list, capped };
@@ -101,12 +105,12 @@ export function makeSession(loadBars, interval = 'D') {
     cache.set(sym, b); return b;
   };
   const runOn = async (sym, bars, code, opts) => {
-    let res = aflEngine.run(code, bars, { ...opts, symbol: sym, foreign });
+    let res = aflEngine.run(code, bars, { interval, ...opts, symbol: sym, foreign });
     for (let tries = 0; tries < 2 && res.needSymbols && res.needSymbols.length; tries++) {
       let any = false;
       for (const need of res.needSymbols) if (!foreign[need]) { const fb = await get(need); if (fb) { foreign[need] = fb; any = true; } }
       if (!any) break;
-      res = aflEngine.run(code, bars, { ...opts, symbol: sym, foreign });
+      res = aflEngine.run(code, bars, { interval, ...opts, symbol: sym, foreign });
     }
     return res;
   };
@@ -139,7 +143,7 @@ export async function scan({ code, symbols, session, range, from, to, lastBars =
   await eachSymbol(symbols, onProgress, cancel, async (sym, i) => {
     const b = await session.get(sym); if (!b) return;
     const [a, z] = rangeOf(b, range, from, to); if (z < a) return;
-    const res = await session.runOn(sym, b, code, { action: 3, stockNum: i, rangeFrom: a, rangeTo: z, params, interval: 'D' });
+    const res = await session.runOn(sym, b, code, { action: 3, stockNum: i, rangeFrom: a, rangeTo: z, params });
     if (res.errors.length) { errors.push(`${sym}: ${res.errors[0]}`); return; }
     if (!res.usesSignals || excluded(res, z)) return;
     const pr = { buy: 'buyprice', sell: 'sellprice', short: 'shortprice', cover: 'coverprice' };
@@ -159,7 +163,7 @@ export async function scan({ code, symbols, session, range, from, to, lastBars =
 export async function signalEvents({ code, symbol, session, params }) {
   const b = await session.get(symbol); if (!b || !b.t.length) return [];
   const z = b.t.length - 1;
-  const res = await session.runOn(symbol, b, code, { action: 3, stockNum: 0, rangeFrom: 0, rangeTo: z, params, interval: 'D' });
+  const res = await session.runOn(symbol, b, code, { action: 3, stockNum: 0, rangeFrom: 0, rangeTo: z, params });
   if (res.errors.length || !res.usesSignals) return [];
   const pr = { buy: 'buyprice', sell: 'sellprice', short: 'shortprice', cover: 'coverprice' }, out = [];
   for (let k = 0; k <= z; k++) for (const kind of ['buy', 'sell', 'short', 'cover']) {
@@ -190,7 +194,7 @@ export async function explore({ code, symbols, session, range, from, to, params,
   await eachSymbol(symbols, onProgress, cancel, async (sym, i) => {
     const b = await session.get(sym); if (!b) return;
     const [a, z] = rangeOf(b, range, from, to); if (z < a) return;
-    const res = await session.runOn(sym, b, code, { action: 4, stockNum: i, rangeFrom: a, rangeTo: z, params, interval: 'D' });
+    const res = await session.runOn(sym, b, code, { action: 4, stockNum: i, rangeFrom: a, rangeTo: z, params });
     if (res.errors.length) { errors.push(`${sym}: ${res.errors[0]}`); return; }
     for (const [name, c] of Object.entries(res.xy || {})) {
       const t = (xy[name] = xy[name] || { points: [], xLabel: c.xLabel, yLabel: c.yLabel });
@@ -270,7 +274,7 @@ export async function runAll({ code, symbols, session, params, optValues, action
   const runs = [];
   await eachSymbol(symbols, onProgress, cancel, async (sym, i) => {
     const b = await session.get(sym); if (!b) return;
-    const res = await session.runOn(sym, b, code, { action, stockNum: i, rangeFrom: 0, rangeTo: b.t.length - 1, params, optValues, interval: 'D' });
+    const res = await session.runOn(sym, b, code, { action, stockNum: i, rangeFrom: 0, rangeTo: b.t.length - 1, params, optValues });
     if (res.errors.length) { errors.push(`${sym}: ${res.errors[0]}`); return; }
     if (excluded(res, b.t.length - 1)) return;
     runs.push({ sym, b, res });

@@ -36,9 +36,22 @@ LOGIC / SERIES
  Cross(a,b) (a crosses ABOVE b)  Flip(a,b)  BarsSince(cond)  ValueWhen(cond,array,n)  IIf(cond,x,y)
  Max(a,b)  Min(a,b)  Abs  Sqrt  Log  Log10  Exp  Int  Floor  Ceil  Round(x,decimals)  Sign  Sin  Cos  Tan  Atan  Mod(a,b)
  Nz(x) (Null to 0)  IsNull(x)  LastValue(array)  BeginValue(array)  BarIndex()
+TIME FRAMES (like AmiBroker; the formula starts in the chart's / analysis time frame and can only go to LONGER bars)
+ TimeFrameSet(interval)  replaces Open High Low Close Volume Avg BarCount DateNum() ... with bars of that interval; everything after it runs on those bars
+ TimeFrameRestore()  back to the chart's time frame (done automatically when the formula ends). Arrays made in between keep their shorter length
+ TimeFrameExpand(array, interval [, expandLast | expandFirst | expandPoint])  maps such an array back to the chart's bars (needed for Plot, Buy, Sell, Filter)
+   expandLast (default): a period's value appears on its LAST bar and holds until the next period ends (no look-ahead, e.g. weekly close on Friday)
+   expandFirst: from the first bar of the period (weekly Open on Monday; a weekly High or Close would peek into the future)   expandPoint: last bar only
+ TimeFrameCompress(array, interval [, compressLast | compressOpen | compressHigh | compressLow | compressVolume])  one array to the longer bars without switching
+ TimeFrameGetPrice("O"|"H"|"L"|"C"|"V", interval, shift = 0, mode = expandFirst)  e.g. previous week's high: TimeFrameGetPrice("H", inWeekly, -1)
+ Intervals (seconds): in1Minute in5Minute in15Minute inHourly inDaily inWeekly inMonthly inQuarterly inYearly, multiples such as 3*inDaily or 45*in1Minute
+ Minutes need intraday data; weekly = Monday-Friday weeks, monthly = calendar months. Foreign("SYMBOL","C") inside TimeFrameSet gives that symbol's bars of the same time frame.
+ Example (weekly trend filter for a daily system):
+   TimeFrameSet( inWeekly ); wTrend = Close > MA( Close, 10 ); TimeFrameRestore();
+   Buy = Cross( Close, MA( Close, 20 ) ) AND TimeFrameExpand( wTrend, inWeekly ); Sell = Cross( MA( Close, 20 ), Close );
 OTHER SYMBOLS: Foreign("SYMBOL","C")  (fields O H L C V)  SetForeign("SYMBOL") ... RestorePriceArrays()  PlotForeign("SYMBOL","name",color,style)
 CATEGORIES: InWatchList(n) InWatchListName("name") InFavorites() InGroup(n) InMarket(n) InSector(n) InIndustry(n) InIndex(n)  GroupID() MarketID() SectorID() IndustryID()  CategoryGetSymbols(categoryWatchlist,n) (comma list)  CategoryGetName(cat,n)  CategoryFind("name",cat)  CategoryAddSymbol("SYM",cat,n)  CategoryRemoveSymbol  (cat = categoryMarket categoryGroup categorySector categoryIndustry categoryWatchlist categoryFavorite categoryIndex categoryAll; n = position in the list, starting at 0)
-DATE / SYMBOL: DateTime() DateTimeToStr(x) DateNum() (YYMMDD from 1900)  Day()  Month()  Year()  DayOfWeek() (0=Sunday)  Name()  Interval() (seconds per bar: daily 86400)
+DATE / SYMBOL: DateTime() DateTimeToStr(x) DateNum() (YYMMDD from 1900)  Day()  Month()  Year()  DayOfWeek() (0=Sunday)  Name()  Interval() (seconds per bar: daily 86400, weekly inWeekly = 432001)
 STATUS: Status("action") (actionIndicator actionCommentary actionScan actionExplore actionBacktest actionOptimize)  Status("firstvisiblebar") Status("lastbarinrange") Status("stocknum")
 VARIABLES / TEXT: VarSet("name",x)  VarGet("name")  printf("%s",text)  WriteIf(cond,"a","b")  StrExtract(list,i)  StrFind StrMid StrLeft StrRight StrReplace StrToNum
  NumToStr(x,1.2)  WriteVal(x,1.2)  StrFormat("%g %.2f %s %d",...)  StrLen(text)  text + text

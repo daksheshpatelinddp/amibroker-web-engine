@@ -499,7 +499,7 @@ export function openAnalysis({ formulaId = null } = {}) {
     const viewRemote = async (entry, file, spec) => {
       const base = spec || {}, r = file.result || {}, f = { name: entry.formulaName || base.formulaName, code: base.code || '' }, sy = { symbols: base.symbols || [] };
       const note = `Result from GitHub (${entry.mode === 'walk' ? 'Walk-Forward' : 'Optimize'}), finished ${new Date(file.finishedAt).toLocaleString()}, took ${fmtDur(file.elapsedMs || 0)}.`;
-      const common = { code: f.code, symbols: sy.symbols, session: makeSession((s, iv) => host.loadBars(s, iv), 'D'), range: base.range || rangeNow(), onProgress: setProgress, cancel, settings: base.settings || S };
+      const common = { code: f.code, symbols: sy.symbols, session: makeSession((s, iv) => host.loadBars(s, iv), base.interval || 'D'), range: base.range || rangeNow(), onProgress: setProgress, cancel, settings: base.settings || S };
       const infoLines = (extra = []) => [`Formula: ${f.name}`, `Ran on GitHub: ${entry.shards || base.shards || '?'} machines`, `Symbols: ${sy.symbols.length}`, ...extra];
       const views = file.mode === 'walk' || entry.mode === 'walk' ? walkViews(r, { resumeNote: note, infoLines, target: base.metric || S.walkForward.target }) : optViews(r, { f, sy, common, resumeNote: note, infoLines });
       show(views); tab = 'Results'; drawTabs();
