@@ -185,7 +185,7 @@ console.log('zigzag + options');
   ok(r.errors.length === 0 && r.vars.a === 500000 && r.vars.b === 10, 'SetOption / GetOption');
   ok(r.options.tradedelays.join() === '1,1,1,1' && r.stops.length === 1 && r.stops[0].amount === 5 && r.options.positionsizeset.size === 10, 'delays, size and stops are recorded for the backtester');
   r = aflEngine.run('x = Interval(); Title = "{{INTERVAL}}";', bars, { interval: 'W', intervalName: 'Weekly' });
-  ok(r.vars.x === 604800 && r.title === 'Weekly', 'Interval() follows the chart time frame');
+  ok(r.vars.x === 432001 && r.title === 'Weekly', 'Interval() follows the chart time frame');
 }
 
 // ---------------------------------------------------------------- time frames + saved-layout migration
@@ -204,7 +204,7 @@ console.log('time frames + migration');
   ok(w.every((b) => new Date(b.date + 'T00:00:00Z').getUTCDay() >= 1 && new Date(b.date + 'T00:00:00Z').getUTCDay() <= 5), 'weekly bars end on a weekday');
   const barsW = { t: w.map((b) => b.date), o: w.map((b) => b.open), h: w.map((b) => b.high), l: w.map((b) => b.low), c: w.map((b) => b.close), v: w.map((b) => b.volume), dq: w.map((b) => b.delivery), delpct: w.map((b) => 0) };
   const rw = aflEngine.run('Plot(RSI(14),"r",colorRed); x = Interval();', barsW, { interval: 'W' });
-  ok(rw.errors.length === 0 && rw.vars.x === 604800, 'formulas run on weekly bars');
+  ok(rw.errors.length === 0 && rw.vars.x === 432001, 'formulas run on weekly bars');
 
   // an old saved layout (native panes with moving averages) becomes formula panes with the same settings
   const old = { v: 1, activeId: 's1', sheets: [{ id: 's1', name: 'Sheet 1', symbol: 'X', locked: false, symbolLinkIdx: 0, intervalLinkIdx: 0, panes: [

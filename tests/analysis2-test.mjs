@@ -131,6 +131,12 @@ const sig = (n, buy = [], sell = [], extra = {}) => ({ buy: Float64Array.from({ 
   const all = ['RELIANCE', 'TCS', 'INFY', 'ITC', 'SBIN'];
   ok(resolveSymbols({ apply: 'all', all }).symbols.length === 5, 'apply to all');
   ok(resolveSymbols({ apply: 'current', current: 'ITC', all }).symbols.join() === 'ITC', 'apply to current');
+  { const withIdx = [...all, '^NIFTY50', '^NIFTYBANK'];
+    ok(resolveSymbols({ apply: 'all', all: withIdx }).symbols.length === 5, 'all stocks leaves indices out');
+    ok(resolveSymbols({ apply: 'filter', all: withIdx, filter: { names: 'N*' } }).symbols.every((x) => !x.startsWith('^')), 'filter pattern without ^ leaves indices out');
+    ok(resolveSymbols({ apply: 'filter', all: withIdx, filter: { names: '^NIFTY*' } }).symbols.join() === '^NIFTY50,^NIFTYBANK', 'pattern starting with ^ finds indices');
+    ok(resolveSymbols({ apply: 'filter', all: withIdx, filter: { typed: '^NIFTY50' } }).symbols.join().includes('^NIFTY50'), 'typed index is run');
+    ok(resolveSymbols({ apply: 'current', current: '^NIFTY50', all: withIdx }).symbols.join() === '^NIFTY50', 'current index'); }
   ok(resolveSymbols({ apply: 'filter', all, store: st, filter: { include: ['watchlists|W'] } }).symbols.join() === 'RELIANCE,TCS', 'filter include watchlist');
   ok(resolveSymbols({ apply: 'filter', all, store: st, filter: { include: ['watchlists|W'], exclude: ['groups|Stocks'] } }).symbols.join() === 'RELIANCE', 'filter exclude group');
   ok(resolveSymbols({ apply: 'filter', all, store: st, filter: { names: 'I*' } }).symbols.join() === 'INFY,ITC', 'filter name pattern');
