@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>bulk harness</title>
+<script type="module">
+import { RangeEngine } from '/js/range-engine.js';
+import { WorkerPool } from '/js/worker-pool.js';
+window.WorkerPool = WorkerPool;
+import { ComputePool } from '/js/compute-pool.js';
+import { smaCross } from '/js/bench-task.js';
+window.ComputePool = ComputePool; window.smaCross = smaCross;
+// count IndexedDB transactions so the test can prove reads/writes are batched
+window.txCount = { readonly: 0, readwrite: 0 };
+const orig = IDBDatabase.prototype.transaction;
+IDBDatabase.prototype.transaction = function (s, mode, ...r) { window.txCount[mode || 'readonly']++; return orig.call(this, s, mode, ...r); };
+window.RangeEngine = RangeEngine;
+window.makeEngine = (id) => new RangeEngine({ id, name: id, baseUrl: '/r2/nse', firstYear: 2000, currency: 'INR' });
+window.collect = async (eng, syms) => {
+  const out = {};
+  for await (const s of eng.iterMany(syms)) {
+    let sum = 0; for (let i = 0; i < s.n; i++) sum += s.c[i];
+    out[s.symbol] = { n: s.n, sumClose: sum, lastClose: s.c[s.n - 1] };
+  }
+  return { out, stats: eng.lastBulk };
+};
+window.ready = true;
+</script>
