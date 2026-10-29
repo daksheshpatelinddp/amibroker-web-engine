@@ -66,5 +66,12 @@ const t7 = Date.now();
 const w3 = await pg.evaluate(async (s) => { const e = makeEngine('wk3'); e.pool = new WorkerPool({ url: '/js/does-not-exist.js' }); const r = await collect(e, s); return { ...r, why: e.pool.fallbackReason }; }, pick);
 check(w3, pick, 'worker start failure'); console.log('start failure ->', w3.stats.decode, '|', w3.why, '|', Date.now() - t7, 'ms');
 ok(w3.stats.decode === 'in page' && Date.now() - t7 < 5000, 'start failure falls back to the page without a long wait');
+
+// 8) workers that take 7 s to start (slow mobile network on the first start) must still be used: the first version gave up after 6 s
+await pg.route('**/js/data-worker.js', async (r) => { await new Promise((res) => setTimeout(res, 7000)); r.continue(); });
+const t8 = Date.now();
+const w4 = await pg.evaluate(async (s) => collect(makeEngine('wk4'), s), pick);
+check(w4, pick, 'slow worker start'); console.log('slow worker start (7 s):', w4.stats.decode, Date.now() - t8, 'ms');
+ok(/workers$/.test(w4.stats.decode), 'slow-starting workers are still used: ' + w4.stats.decode + ' ' + w4.stats.decodeNote);
 await b.close(); server.close();
 console.log(fail ? `${fail} FAILED` : `bulk-load: all ${pass} checks passed`); process.exit(fail ? 1 : 0);
