@@ -26,6 +26,9 @@ const q = new URLSearchParams(location.search);
 const cfg = q.get('base') ? { id: 'test', name: 'test', baseUrl: q.get('base'), firstYear: 2000, currency: 'INR' } : DATABASES[ACTIVE_DB];
 const out = document.getElementById('out');
 const log = (t) => { out.textContent += '\n' + t; };
+let progLine = null;   // one line that is rewritten, instead of hundreds of lines
+const prog = (t) => { if (progLine === null) progLine = out.textContent.length; out.textContent = out.textContent.slice(0, progLine) + '\n' + t; };
+const progEnd = () => { progLine = null; };
 const mb = (b) => (b / 1048576).toFixed(1) + ' MB';
 let engine = new RangeEngine(cfg), pool = null, busy = false;
 
@@ -33,34 +36,41 @@ async function pickSymbols() {
   await engine.init();
   if (engine.mode !== 'pack') throw new Error('The pack layout is not on R2 (mode: ' + engine.mode + ')');
   const n = Math.max(10, Math.min(3000, Number(document.getElementById('n').value) || 1000));
-  return [...engine.packIdx.entries()].filter(([s]) => !s.startsWith('^')).sort((a, b) => b[1].n - a[1].n).slice(0, n).map(([s]) => s);
+  // an even spread over all active stocks (alphabetical list, every k-th), so the test is typical rather than the longest histories
+  const active = [...engine.recentIdx.keys()].filter((s) => !s.startsWith('^') && engine.packIdx.has(s)).sort();
+  const step = Math.max(1, active.length / n), pick = [];
+  for (let i = 0; i < n && Math.floor(i * step) < active.length; i++) pick.push(active[Math.floor(i * step)]);
+  return pick;
 }
 async function guarded(fn) {
   if (busy) return; busy = true;
   try { await fn(); } catch (e) { log('ERROR: ' + (e && e.message || e)); } finally { busy = false; }
 }
 const conn = navigator.connection ? navigator.connection.effectiveType : '?';
-out.textContent = `build ${APP_BUILD} | ${navigator.hardwareConcurrency || '?'} cores | network ${conn} | Tap a button.\nRun 1 twice: the second run shows the speed from browser storage.`;
+out.textContent = `build ${APP_BUILD} | ${navigator.hardwareConcurrency || '?'} cores | network ${conn} | Keep this screen on and this tab in front while a test runs.\nRun 1 twice: the second run shows the speed from browser storage.`;
 
 document.getElementById('b1').onclick = () => guarded(async () => {
   const syms = await pickSymbols();
   log(`\n[1] loading ${syms.length} stocks ...`);
   const t0 = performance.now(); let bars = 0, last = 0;
-  for await (const s of engine.iterMany(syms, { onProgress: (p) => { if (p.phase === 'download' && performance.now() - last > 700) { last = performance.now(); log(`   downloading: ${p.requests} requests, ${mb(p.bytes)}`); } } })) bars += s.n;
+  for await (const s of engine.iterMany(syms, { onProgress: (p) => { if (p.phase === 'download' && performance.now() - last > 1000) { last = performance.now(); prog(`   downloading: ${p.requests} requests, ${mb(p.bytes)}, ${((performance.now() - t0) / 1000).toFixed(0)} s`); } } })) bars += s.n;
+  progEnd();
   const L = engine.lastBulk;
-  log(`[1] done: ${L.stocks} stocks, ${bars} bars in ${((performance.now() - t0) / 1000).toFixed(1)} s\n    ${L.requests} requests, ${mb(L.bytes)} downloaded, ${L.fromBrowserCache} blocks from browser storage, decode: ${L.decode}`);
+  log(`[1] done: ${L.stocks} stocks, ${bars} bars in ${((performance.now() - t0) / 1000).toFixed(1)} s\n    download part ${L.downloadSeconds.toFixed(1)} s, decode part ${(L.seconds - L.downloadSeconds).toFixed(1)} s\n    ${L.requests} requests, ${mb(L.bytes)} downloaded, ${L.fromBrowserCache} blocks from browser storage, decode: ${L.decode}${L.decodeNote ? ' (workers did not start: ' + L.decodeNote + ')' : ''}`);
 });
 document.getElementById('b2').onclick = () => guarded(async () => {
   await engine.init(); log('\n[2] scanning the last 300 bars of every stock ...');
   let n = 0, bars = 0; for await (const s of engine.iterRecent({ bars: 300 })) { n++; bars += s.n; }
-  const L = engine.lastScan; log(`[2] done: ${n} stocks, ${bars} bars in ${L.seconds.toFixed(1)} s, ${mb(L.bytes)} downloaded${L.fromBrowserCache ? ' (recent pack came from browser storage)' : ''}`);
+  const L = engine.lastScan; log(`[2] done: ${n} stocks, ${bars} bars in ${L.seconds.toFixed(1)} s (download part ${L.downloadSeconds.toFixed(1)} s), ${mb(L.bytes)} downloaded${L.fromBrowserCache ? ' (recent pack came from browser storage)' : ''}, decode: ${L.decode}${L.decodeNote ? ' (workers did not start: ' + L.decodeNote + ')' : ''}`);
 });
 document.getElementById('b3').onclick = () => guarded(async () => {
   const syms = await pickSymbols();
   if (pool) pool.terminate();
   pool = new ComputePool();
   log(`\n[3] giving ${syms.length} stocks to the workers ...`);
-  const info = await pool.load(engine, syms);
+  let last = 0;
+  const info = await pool.load(engine, syms, { onProgress: (p) => { if (p.phase === 'download' && performance.now() - last > 1000) { last = performance.now(); prog(`   downloading: ${p.requests} requests, ${mb(p.bytes)}`); } } });
+  progEnd();
   log(`    ${info.stocks} stocks, ${info.bars} bars kept in memory by ${info.workers} workers (${info.mode}) in ${info.seconds.toFixed(1)} s`);
   if (pool.pool.fallbackReason) log('    note: workers did not start (' + pool.pool.fallbackReason + '), so this ran inside the page');
   log('    running 600 parameter combinations ...');
