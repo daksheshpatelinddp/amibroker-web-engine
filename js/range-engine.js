@@ -241,8 +241,9 @@ export class RangeEngine {
    * Gets the COMPRESSED blocks of many stocks into memory (browser storage first, then only the byte ranges still missing).
    * Returns { syms, hData, rData, saving } - Maps stock -> bytes; `saving` is the pending write to browser storage.
    */
-  async loadPackBytes(symbols, { onProgress, concurrency = 8 } = {}) {
+  async loadPackBytes(symbols, { onProgress, concurrency = 8, prewarm = true } = {}) {
     await this.init();
+    if (prewarm && this.workers !== false) this._pool().prewarm();          // the workers start while the data downloads
     if (this.mode !== 'pack') throw new Error('Bulk loading needs the pack layout: run "Convert DB to Parquet & Upload R2" first');
     this.stats.requests = 0; this.stats.bytes = 0;
     this._cachedCount = 0;
@@ -304,6 +305,7 @@ export class RangeEngine {
   async *iterMany(symbols, { onProgress, concurrency = 8 } = {}) {
     const t0 = performance.now();
     const { syms, hData, rData, saving, cachedCount } = await this.loadPackBytes(symbols, { onProgress, concurrency });
+    const tDown = (performance.now() - t0) / 1000;
     let n = 0;
     const take = (s) => { const r = { h: hData.get(s) || null, r: rData.get(s) || null }; hData.delete(s); rData.delete(s); return r; };   // free the compressed bytes as we go
     for await (const item of this._pool().decodeStream(syms, take)) {    // decoded in Web Workers (or in the page when they are not available), delivered in order
@@ -312,7 +314,7 @@ export class RangeEngine {
       yield item;
     }
     await saving;
-    this.lastBulk = { stocks: n, requests: this.stats.requests, bytes: this.stats.bytes, fromBrowserCache: cachedCount, seconds: (performance.now() - t0) / 1000, decode: this.pool.inline ? 'in page' : `${this.pool.size} workers` };
+    this.lastBulk = { stocks: n, requests: this.stats.requests, bytes: this.stats.bytes, fromBrowserCache: cachedCount, seconds: (performance.now() - t0) / 1000, downloadSeconds: tDown, decode: this.pool.inline ? 'in page' : `${this.pool.size} workers`, decodeNote: this.pool.fallbackReason || '' };
     if (onProgress) onProgress({ phase: 'done', ...this.lastBulk });
   }
 
@@ -331,6 +333,7 @@ export class RangeEngine {
     await this.init();
     if (this.mode !== 'pack') throw new Error('Scanning needs the pack layout: run "Convert DB to Parquet & Upload R2" first');
     const t0 = performance.now();
+    if (this.workers !== false) this._pool().prewarm();
     this.stats.requests = 0; this.stats.bytes = 0;
     const key = 'rk|recent';
     let pack = null, fromCache = false;
@@ -341,6 +344,7 @@ export class RangeEngine {
       this._cachePut({ key, token: this.recentMeta.token, data: pack, ts: Date.now() });
     }
     if (onProgress) onProgress({ phase: 'downloaded', bytes: pack.length, fromBrowserCache: fromCache, seconds: (performance.now() - t0) / 1000 });
+    const tDown = (performance.now() - t0) / 1000;
     let n = 0;
     const syms = [...this.recentIdx.keys()];
     const take = (sym) => { const e = this.recentIdx.get(sym); return { h: null, r: pack.subarray(e.off, e.off + e.len) }; };
@@ -349,7 +353,7 @@ export class RangeEngine {
       if (onProgress && n % 250 === 0) onProgress({ phase: 'decode', done: n, total: this.recentIdx.size });
       yield item;
     }
-    this.lastScan = { stocks: n, bytes: this.stats.bytes, fromBrowserCache: fromCache, seconds: (performance.now() - t0) / 1000 };
+    this.lastScan = { stocks: n, bytes: this.stats.bytes, fromBrowserCache: fromCache, seconds: (performance.now() - t0) / 1000, downloadSeconds: tDown, decode: this.pool.inline ? 'in page' : `${this.pool.size} workers`, decodeNote: this.pool.fallbackReason || '' };
   }
 
   // The history is rebuilt on days when a split/bonus changes old prices. If a long-open page still holds the

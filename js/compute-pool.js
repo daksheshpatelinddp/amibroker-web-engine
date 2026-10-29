@@ -36,9 +36,10 @@ export class ComputePool {
   /** Downloads (only what is missing) and distributes the stocks. Every worker decodes its own share. */
   async load(engine, symbols, { onProgress } = {}) {
     const t0 = performance.now();
+    this.pool.prewarm();                                           // workers start while the data downloads
+    const { syms, hData, rData, saving } = await engine.loadPackBytes(symbols, { onProgress, prewarm: false });
     await this.pool.ready();
     await this.pool.broadcast({ op: 'clear' });
-    const { syms, hData, rData, saving } = await engine.loadPackBytes(symbols, { onProgress });
     const weight = (s) => ((engine.packIdx.get(s) || {}).n || 0) + ((engine.recentIdx.get(s) || {}).n || 0);
     const loads = new Array(this.size).fill(0), share = Array.from({ length: this.size }, () => []);
     for (const s of syms.slice().sort((a, b) => weight(b) - weight(a))) {      // longest first, always to the least loaded worker

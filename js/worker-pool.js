@@ -1,9 +1,9 @@
 // A small pool of Web Workers (js/data-worker.js). If workers cannot start (old browser, blocked, no reply to a ping within
-// 6 s) the same work runs inside the page instead: slower, but it always finishes. Nothing here waits for fflate.
+// 30 s: on a slow mobile network the worker's own script files can take many seconds on the first start) the same work runs inside the page instead: slower, but it always finishes. Nothing here waits for fflate.
 import { newState, handle } from './worker-core.js';
 
 export class WorkerPool {
-  constructor({ size, inline = false, url, startTimeoutMs = 6000 } = {}) {
+  constructor({ size, inline = false, url, startTimeoutMs = 30000 } = {}) {
     const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
     this.size = Math.max(1, size || Math.min(6, cores - 1));
     this.inline = inline || typeof Worker === 'undefined';
@@ -13,6 +13,8 @@ export class WorkerPool {
   }
 
   ready() { if (!this._start) this._start = this._boot(); return this._start; }
+  /** Starts the workers now, without waiting, so they are up while the data is still downloading. */
+  prewarm() { this.ready().catch(() => {}); }
 
   async _boot() {
     if (!this.inline) {
