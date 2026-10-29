@@ -9,10 +9,13 @@ export async function inflate(bytes) {
 
 export const dayToIso = (d) => new Date(d * 86400000).toISOString().slice(0, 10);
 
-// -> { n, t: Int32Array (days since 1970-01-01), o, h, l, c, v, dq: Float64Array }   (dq = NaN when unknown)
-export async function decodeBlock(bytes) {
-  const raw = await inflate(bytes);
+// Inflated bytes -> { n, t: Int32Array (days since 1970-01-01), o, h, l, c, v, dq: Float64Array }   (dq / v = NaN when unknown)
+// Reads pack format v1 (float64 volume/delivery) and v2 (int32 volume/delivery, -1 = unknown, bytes regrouped in 4 planes).
+// Synchronous, so a Web Worker can call it with its own inflater.
+export function parseBlock(raw) {
   if (raw[0] !== 0x41 || raw[1] !== 0x42) throw new Error('Not a pack block');
+  const version = raw[2];
+  if (version === 2) return parseV2(raw);
   const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
   const mode = raw[3];
   const n = dv.getUint32(4, true);
@@ -40,6 +43,36 @@ export async function decodeBlock(bytes) {
   const dq = new Float64Array(raw.buffer, raw.byteOffset + off, n);
   return { n, t, o, h, l, c, v, dq };
 }
+
+// v2: after the 12-byte header come 7*n int32 values stored as 4 byte-planes (all byte 0s, all byte 1s, ...):
+// date deltas | close deltas | open-close | high-close | low-close | volume | delivery
+function parseV2(raw) {
+  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+  const n = dv.getUint32(4, true);
+  const scale = dv.getInt32(8, true);
+  const words = 7 * n;
+  const joined = new Uint8Array(4 * words);
+  const base = 12;
+  for (let k = 0; k < 4; k++) {
+    const src = base + k * words;
+    for (let i = 0, j = k; i < words; i++, j += 4) joined[j] = raw[src + i];
+  }
+  const a = new Int32Array(joined.buffer);            // joined.buffer is 4-byte aligned (fresh buffer)
+  const t = new Int32Array(n);
+  const o = new Float64Array(n), h = new Float64Array(n), l = new Float64Array(n), c = new Float64Array(n);
+  const v = new Float64Array(n), dq = new Float64Array(n);
+  for (let i = 0, sd = 0, sc = 0; i < n; i++) {
+    sd += a[i]; t[i] = sd;
+    sc += a[n + i];
+    c[i] = sc / scale;
+    o[i] = (sc + a[2 * n + i]) / scale; h[i] = (sc + a[3 * n + i]) / scale; l[i] = (sc + a[4 * n + i]) / scale;
+    const vv = a[5 * n + i], dd = a[6 * n + i];
+    v[i] = vv < 0 ? NaN : vv; dq[i] = dd < 0 ? NaN : dd;
+  }
+  return { n, t, o, h, l, c, v, dq };
+}
+
+export async function decodeBlock(bytes) { return parseBlock(await inflate(bytes)); }
 
 // History + recent: where both cover a date, the recent block wins (it is rebuilt every day).
 export function mergeBlocks(hist, rec) {

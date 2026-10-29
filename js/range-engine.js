@@ -11,6 +11,8 @@
 //    slower with every year added.
 import { parquetMetadataAsync, parquetRead } from 'https://cdn.jsdelivr.net/npm/hyparquet@1.4.0/+esm';
 import { decodeBlock, mergeBlocks, tailBlock, blockToRows } from './pack-codec.js';
+import { planRanges } from './range-plan.js';
+import { WorkerPool } from './worker-pool.js';
 
 const COLUMN_NAMES = {
   symbol: ['symbol', 'ticker', 'scrip', 'name'],
@@ -229,89 +231,88 @@ export class RangeEngine {
   }
 
   // ---------------- bulk loading (backtests, explorations) ----------------
+  /** The decode workers (created on first use). Set engine.workers = false to decode inside the page instead. */
+  _pool() {
+    if (!this.pool) this.pool = new WorkerPool({ inline: this.workers === false });
+    return this.pool;
+  }
+
   /**
-   * Streams the full history of many stocks, one at a time, as typed arrays:
-   *   for await (const s of engine.iterMany(['TCS', 'INFY', ...], { onProgress })) { s.symbol, s.n, s.t, s.o, s.h, s.l, s.c, s.v, s.dq }
-   * Downloads are shared: when a bucket file is mostly wanted it is fetched whole (one request), otherwise per stock.
-   * Everything fetched is kept in the browser, so the second run is instant. Only one stock is decoded at a time.
+   * Gets the COMPRESSED blocks of many stocks into memory (browser storage first, then only the byte ranges still missing).
+   * Returns { syms, hData, rData, saving } - Maps stock -> bytes; `saving` is the pending write to browser storage.
    */
-  async *iterMany(symbols, { onProgress, concurrency = 8 } = {}) {
+  async loadPackBytes(symbols, { onProgress, concurrency = 8 } = {}) {
     await this.init();
     if (this.mode !== 'pack') throw new Error('Bulk loading needs the pack layout: run "Convert DB to Parquet & Upload R2" first');
-    const t0 = performance.now();
     this.stats.requests = 0; this.stats.bytes = 0;
+    this._cachedCount = 0;
     const syms = [...new Set(symbols.map(s => this._resolve(s)).filter(Boolean))];
     const hData = new Map(), rData = new Map();
     const needH = [], needR = [];
-    let cachedCount = 0;
 
-    // Whole bucket files kept from an earlier bulk run: a handful of reads instead of one per stock
-    const bucketsWanted = [...new Set(syms.filter(s => this.packIdx.has(s)).map(s => this.packIdx.get(s).bucket))];
-    const wholeBuckets = new Map();
-    await Promise.all(bucketsWanted.map(async (b) => {
-      const hit = await this._cacheGet(`bk|${b}`);
-      if (hit && hit.token === this._packToken('h') && hit.data) wholeBuckets.set(b, hit.data);
-    }));
-    const recentWhole = (await this._cacheGet('rk|recent')) || null;
-    const recentOk = recentWhole && recentWhole.token === this._packToken('r') && recentWhole.data ? recentWhole.data : null;
-
-    await Promise.all(syms.map(async (s) => {
+    // 1. Ask the browser store for everything we may already have: ONE batched read
+    const keyOf = (s, kind) => `${s}|pk-${kind}`;
+    const keys = [];
+    for (const s of syms) for (const kind of ['h', 'r']) if (this._packEntry(kind, s)) keys.push(keyOf(s, kind));
+    const got = await this._cacheGetMany(keys);
+    for (const s of syms) {
       for (const kind of ['h', 'r']) {
-        const e = this._packEntry(kind, s);
-        if (!e) continue;
-        const whole = kind === 'h' ? wholeBuckets.get(e.bucket) : recentOk;
-        if (whole) { (kind === 'h' ? hData : rData).set(s, whole.subarray(e.off, e.off + e.len)); cachedCount++; continue; }
-        const hit = await this._cacheGet(`${s}|pk-${kind}`);
-        if (hit && hit.token === this._packToken(kind) && hit.data) { (kind === 'h' ? hData : rData).set(s, hit.data); cachedCount++; }
+        if (!this._packEntry(kind, s)) continue;
+        const hit = got.get(keyOf(s, kind));
+        if (hit && hit.token === this._packToken(kind) && hit.data) { (kind === 'h' ? hData : rData).set(s, hit.data); this._cachedCount++; }
         else (kind === 'h' ? needH : needR).push(s);
       }
-    }));
+    }
+    got.clear();
 
+    // 2. Download only the byte ranges we still need: neighbouring blocks are joined (gap <= 64 KB), long runs are cut at 2 MB
+    //    so several ranges download at the same time. New blocks are kept in the browser with a few batched writes.
+    const fresh = [];
     const tasks = [];
-    const store = (kind, s, bytes) => { (kind === 'h' ? hData : rData).set(s, bytes); this._cachePut({ key: `${s}|pk-${kind}`, token: this._packToken(kind), data: bytes, ts: Date.now() }); };
+    const planFor = (kind, list, url) => {
+      const items = list.map((s) => { const e = this._packEntry(kind, s); return { s, off: e.off, len: e.len }; });
+      for (const r of planRanges(items)) {
+        tasks.push(async () => {
+          const bytes = await this._fetchRange(url, r.start, r.end - r.start);
+          for (const it of r.items) {
+            const part = bytes.subarray(it.off - r.start, it.off - r.start + it.len);
+            (kind === 'h' ? hData : rData).set(it.s, part);
+            // slice() copies: storing a view would copy the whole downloaded range into every record
+            fresh.push({ key: keyOf(it.s, kind), token: this._packToken(kind), data: part.slice(), ts: Date.now() });
+          }
+        });
+      }
+    };
     const byBucket = new Map();
     for (const s of needH) { const b = this.packIdx.get(s).bucket; if (!byBucket.has(b)) byBucket.set(b, []); byBucket.get(b).push(s); }
-    for (const [bucket, list] of byBucket) {
-      const inBucket = Object.keys(this.manifest.packs.buckets[bucket].idx).length;
-      if (list.length >= Math.max(8, inBucket * 0.3)) {        // most of the file is wanted: one request for all of it
-        tasks.push(async () => {
-          const all = await this._fetchWhole(this._packUrl('h', list[0]));
-          this._cachePut({ key: `bk|${bucket}`, token: this._packToken('h'), data: all, ts: Date.now() });   // keep the whole file
-          for (const s of list) { const e = this.packIdx.get(s); hData.set(s, all.subarray(e.off, e.off + e.len)); }
-        });
-      } else {
-        for (const s of list) tasks.push(async () => { const e = this.packIdx.get(s); store('h', s, await this._fetchRange(this._packUrl('h', s), e.off, e.len)); });
-      }
-    }
-    if (needR.length > 30) {
-      tasks.push(async () => {
-        const all = await this._fetchWhole(`${this.cfg.baseUrl}/${this.recentMeta.file}`);
-        this._cachePut({ key: 'rk|recent', token: this._packToken('r'), data: all, ts: Date.now() });
-        for (const s of needR) { const e = this.recentIdx.get(s); rData.set(s, all.subarray(e.off, e.off + e.len)); }
-      });
-    } else {
-      for (const s of needR) tasks.push(async () => { const e = this.recentIdx.get(s); store('r', s, await this._fetchRange(this._packUrl('r', s), e.off, e.len)); });
-    }
+    for (const [, list] of byBucket) planFor('h', list, this._packUrl('h', list[0]));
+    if (needR.length) planFor('r', needR, `${this.cfg.baseUrl}/${this.recentMeta.file}`);
 
-    let done = 0;
-    const worker = async () => { while (tasks.length) { const t = tasks.shift(); await t(); done++; if (onProgress) onProgress({ phase: 'download', requests: this.stats.requests, bytes: this.stats.bytes }); } };
+    const worker = async () => { while (tasks.length) { const t = tasks.shift(); await t(); if (onProgress) onProgress({ phase: 'download', requests: this.stats.requests, bytes: this.stats.bytes }); } };
     await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
+    const saving = this._cachePutMany(fresh);              // runs while we decode; waited for at the end
 
+    return { syms, hData, rData, saving, cachedCount: this._cachedCount };
+  }
+
+  /**
+   * Streams the full history of many stocks, one at a time, as typed arrays:
+   *   for await (const s of engine.iterMany(['TCS', 'INFY', ...], { onProgress })) { s.symbol, s.n, s.t, s.o, s.h, s.l, s.c, s.v, s.dq }
+   * Only the byte ranges still missing are downloaded (neighbouring blocks joined); everything fetched is kept in the browser,
+   * so the second run needs no network. Decoding runs in a pool of Web Workers and the results arrive in order.
+   */
+  async *iterMany(symbols, { onProgress, concurrency = 8 } = {}) {
+    const t0 = performance.now();
+    const { syms, hData, rData, saving, cachedCount } = await this.loadPackBytes(symbols, { onProgress, concurrency });
     let n = 0;
-    const decodeOne = async (s) => {
-      const hb = hData.get(s), rb = rData.get(s);
-      hData.delete(s); rData.delete(s);                       // free the compressed bytes as we go
-      const [h, r] = await Promise.all([hb ? decodeBlock(hb) : null, rb ? decodeBlock(rb) : null]);
-      const merged = mergeBlocks(h, r);
-      return merged ? { symbol: s, ...merged } : null;
-    };
-    for await (const item of pipelined(syms, decodeOne)) {    // several blocks are decoded at once, delivered in order
-      if (!item) continue;
+    const take = (s) => { const r = { h: hData.get(s) || null, r: rData.get(s) || null }; hData.delete(s); rData.delete(s); return r; };   // free the compressed bytes as we go
+    for await (const item of this._pool().decodeStream(syms, take)) {    // decoded in Web Workers (or in the page when they are not available), delivered in order
       n++;
       if (onProgress && n % 25 === 0) onProgress({ phase: 'decode', done: n, total: syms.length });
       yield item;
     }
-    this.lastBulk = { stocks: n, requests: this.stats.requests, bytes: this.stats.bytes, fromBrowserCache: cachedCount, seconds: (performance.now() - t0) / 1000 };
+    await saving;
+    this.lastBulk = { stocks: n, requests: this.stats.requests, bytes: this.stats.bytes, fromBrowserCache: cachedCount, seconds: (performance.now() - t0) / 1000, decode: this.pool.inline ? 'in page' : `${this.pool.size} workers` };
     if (onProgress) onProgress({ phase: 'done', ...this.lastBulk });
   }
 
@@ -341,8 +342,9 @@ export class RangeEngine {
     }
     if (onProgress) onProgress({ phase: 'downloaded', bytes: pack.length, fromBrowserCache: fromCache, seconds: (performance.now() - t0) / 1000 });
     let n = 0;
-    const decodeOne = async ([sym, e]) => ({ symbol: sym, ...tailBlock(await decodeBlock(pack.subarray(e.off, e.off + e.len)), bars) });
-    for await (const item of pipelined([...this.recentIdx], decodeOne)) {
+    const syms = [...this.recentIdx.keys()];
+    const take = (sym) => { const e = this.recentIdx.get(sym); return { h: null, r: pack.subarray(e.off, e.off + e.len) }; };
+    for await (const item of this._pool().decodeStream(syms, take, { bars })) {     // decoded in the worker pool, the last `bars` bars kept
       n++;
       if (onProgress && n % 250 === 0) onProgress({ phase: 'decode', done: n, total: this.recentIdx.size });
       yield item;
@@ -449,6 +451,49 @@ export class RangeEngine {
       }
     }
     return null;
+  }
+
+  // Many keys in ONE transaction (1000 separate reads took seconds on a phone). Missing keys are simply absent from the result.
+  async _cacheGetMany(keys) {
+    const out = new Map();
+    if (!keys.length) return out;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const db = await this._openIdb();
+        if (!db) return out;
+        return await new Promise((resolve) => {
+          const tx = db.transaction('bars', 'readonly');
+          const st = tx.objectStore('bars');
+          for (const k of keys) { const r = st.get(k); r.onsuccess = () => { if (r.result) out.set(k, r.result); }; }
+          tx.oncomplete = () => resolve(out);
+          tx.onerror = () => resolve(out);
+          tx.onabort = () => resolve(out);
+        });
+      } catch (e) { this.idb = null; }
+    }
+    return out;
+  }
+
+  // Many records in a few transactions (a full storage or a closed connection just means "not cached")
+  async _cachePutMany(recs, chunk = 300) {
+    for (let i = 0; i < recs.length; i += chunk) {
+      const part = recs.slice(i, i + chunk);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const db = await this._openIdb();
+          if (!db) return;
+          await new Promise((resolve) => {
+            const tx = db.transaction('bars', 'readwrite');
+            const st = tx.objectStore('bars');
+            for (const r of part) st.put(r);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => resolve();
+            tx.onabort = () => resolve();
+          });
+          break;
+        } catch (e) { this.idb = null; }
+      }
+    }
   }
 
   async _cachePut(rec) {
