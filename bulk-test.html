@@ -1,115 +1,75 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bulk speed test</title>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bulk load + optimizer test</title>
 <style>
-  body { margin: 0; padding: 14px; background: #020617; color: #e2e8f0; font: 14px/1.45 system-ui, sans-serif; }
-  h1 { font-size: 17px; margin: 0 0 4px; }
-  p { color: #94a3b8; margin: 4px 0 12px; font-size: 12px; }
-  label { display: block; margin: 10px 0 4px; color: #94a3b8; font-size: 12px; }
-  input { width: 100px; padding: 8px; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; font-size: 15px; }
-  button { padding: 11px 14px; margin: 8px 8px 0 0; background: #0284c7; color: #fff; border: 0; border-radius: 6px; font-size: 14px; font-weight: 600; }
-  button.alt { background: #334155; }
-  button:disabled { opacity: .5; }
-  pre { background: #0f172a; border: 1px solid #1e293b; border-radius: 6px; padding: 10px; white-space: pre-wrap; word-break: break-word; font-size: 12.5px; margin-top: 14px; min-height: 120px; }
-</style>
-</head>
-<body>
-<h1>Bulk speed test</h1>
-<p>Measures how fast THIS phone loads many stocks. Take a screenshot of the result.</p>
-<label>How many stocks</label>
-<input id="n" type="number" value="1000" min="10" max="4000">
+ body{font:15px system-ui,sans-serif;margin:12px;background:#111;color:#eee}
+ button{font:inherit;padding:10px 12px;margin:4px 4px 4px 0;border-radius:8px;border:1px solid #555;background:#222;color:#eee}
+ input{font:inherit;width:5em;padding:6px;background:#222;color:#eee;border:1px solid #555;border-radius:6px}
+ pre{white-space:pre-wrap;background:#000;padding:10px;border-radius:8px;min-height:8em}
+ h1{font-size:18px;margin:0 0 8px}
+</style></head><body>
+<h1>Bulk load + optimizer test</h1>
+<div>Stocks: <input id="n" type="number" value="1000" min="10" max="3000"></div>
 <div>
-  <button id="go">Load stocks</button>
-  <button id="scan" class="alt">Scan all (last 300 bars)</button>
-  <button id="again" class="alt">Load again (cached)</button>
+ <button id="b1">1. Load stocks</button>
+ <button id="b2">2. Scan last 300 bars</button>
+ <button id="b3">3. Optimizer speed</button>
+ <button id="b4">Clear browser store</button>
 </div>
-<pre id="out">Ready.</pre>
-
+<pre id="out">Tap a button. Run 1 twice: the second run shows the speed from browser storage.</pre>
 <script type="module">
 import { RangeEngine } from './js/range-engine.js';
-import { DATABASES, ACTIVE_DB } from './js/config.js';
+import { ComputePool } from './js/compute-pool.js';
+import { DATABASES, ACTIVE_DB, APP_BUILD } from './js/config.js';
 
+const q = new URLSearchParams(location.search);
+const cfg = q.get('base') ? { id: 'test', name: 'test', baseUrl: q.get('base'), firstYear: 2000, currency: 'INR' } : DATABASES[ACTIVE_DB];
 const out = document.getElementById('out');
-const say = (t) => { out.textContent = t; };
-const btns = [...document.querySelectorAll('button')];
-const busy = (b) => btns.forEach(x => (x.disabled = b));
-const engine = new RangeEngine(DATABASES[ACTIVE_DB]);
+const log = (t) => { out.textContent += '\n' + t; };
 const mb = (b) => (b / 1048576).toFixed(1) + ' MB';
-const sec = (ms) => (ms / 1000).toFixed(1) + ' s';
-const device = `${navigator.hardwareConcurrency || '?'} cores${navigator.connection && navigator.connection.effectiveType ? ', network ' + navigator.connection.effectiveType : ''}`;
+let engine = new RangeEngine(cfg), pool = null, busy = false;
 
-// A small backtest-like workload: SMA(20) x SMA(50) crossover count over every loaded bar
-function crossovers(s) {
-  let c = 0, a = 0, b = 0, prev = 0;
-  for (let i = 0; i < s.n; i++) {
-    a += s.c[i]; if (i >= 20) a -= s.c[i - 20];
-    b += s.c[i]; if (i >= 50) b -= s.c[i - 50];
-    if (i >= 49) { const d = a / 20 - b / 50; if (prev <= 0 && d > 0) c++; prev = d; }
-  }
-  return c;
+async function pickSymbols() {
+  await engine.init();
+  if (engine.mode !== 'pack') throw new Error('The pack layout is not on R2 (mode: ' + engine.mode + ')');
+  const n = Math.max(10, Math.min(3000, Number(document.getElementById('n').value) || 1000));
+  return [...engine.packIdx.entries()].filter(([s]) => !s.startsWith('^')).sort((a, b) => b[1].n - a[1].n).slice(0, n).map(([s]) => s);
 }
-
-async function run(label, cachedRun) {
-  busy(true);
-  try {
-    const t0 = performance.now();
-    say(`${label}\nStarting the engine...`);
-    await engine.init();
-    const initMs = performance.now() - t0;
-    if (engine.mode !== 'pack') { say('The pack layout is not on R2 yet: run "Convert DB to Parquet & Upload R2" first.'); return; }
-    const n = Math.max(10, Math.min(4000, Number(document.getElementById('n').value) || 1000));
-    const all = await engine.getSymbols();
-    const symbols = all.slice(0, n);
-    let bars = 0, signals = 0, computeMs = 0, last = null;
-    const t1 = performance.now();
-    for await (const s of engine.iterMany(symbols, { onProgress: (p) => {
-      if (p.phase === 'download') say(`${label}\nDownloading... ${p.requests} requests, ${mb(p.bytes)}`);
-      else if (p.phase === 'decode') say(`${label}\nDecoding ${p.done} / ${p.total} stocks...`);
-    } })) {
-      bars += s.n;
-      const c0 = performance.now(); signals += crossovers(s); computeMs += performance.now() - c0;
-    }
-    const totalMs = performance.now() - t1;
-    last = engine.lastBulk || {};
-    say([
-      `${label}  -  done`,
-      ``,
-      `Stocks loaded:      ${last.stocks}`,
-      `Bars (all years):   ${bars.toLocaleString()}`,
-      `Download:           ${last.requests} requests, ${mb(last.bytes || 0)}${last.fromBrowserCache ? ` (+${last.fromBrowserCache} blocks already in the browser)` : ''}`,
-      `Load + decode:      ${sec(totalMs - computeMs)}`,
-      `Test calculation:   ${sec(computeMs)}  (${signals.toLocaleString()} SMA20/50 crossovers)`,
-      `TOTAL:              ${sec(totalMs)}`,
-      `Engine start:       ${sec(initMs)}`,
-      `Device:             ${device}`,
-    ].join('\n'));
-  } catch (e) { say(`Error: ${e.message || e}`); }
-  finally { busy(false); }
+async function guarded(fn) {
+  if (busy) return; busy = true;
+  try { await fn(); } catch (e) { log('ERROR: ' + (e && e.message || e)); } finally { busy = false; }
 }
+const conn = navigator.connection ? navigator.connection.effectiveType : '?';
+out.textContent = `build ${APP_BUILD} | ${navigator.hardwareConcurrency || '?'} cores | network ${conn} | Tap a button.\nRun 1 twice: the second run shows the speed from browser storage.`;
 
-async function scan() {
-  busy(true);
-  try {
-    await engine.init();
-    if (engine.mode !== 'pack') { say('The pack layout is not on R2 yet.'); return; }
-    const t0 = performance.now(); let stocks = 0, bars = 0, rising = 0, dl = null;
-    for await (const s of engine.iterRecent({ bars: 300, onProgress: (p) => { if (p.phase === 'downloaded') { dl = p; say(`Scan\nDownloaded ${mb(p.bytes)}${p.fromBrowserCache ? ' (from the browser)' : ''} in ${sec(p.seconds * 1000)}...`); } } })) {
-      stocks++; bars += s.n; if (s.n > 20 && s.c[s.n - 1] > s.c[s.n - 21]) rising++;
-    }
-    const ms = performance.now() - t0;
-    say([`Scan  -  done`, ``, `Stocks scanned:     ${stocks}`, `Bars:               ${bars.toLocaleString()}`,
-         `Download:           ${mb(dl ? dl.bytes : 0)}${dl && dl.fromBrowserCache ? ' (already in the browser)' : ''}`,
-         `TOTAL:              ${sec(ms)}`, `Stocks up over 20 days: ${rising}`, `Device:             ${device}`].join('\n'));
-  } catch (e) { say(`Error: ${e.message || e}`); }
-  finally { busy(false); }
-}
-
-document.getElementById('go').onclick = () => run('Load stocks (first run)');
-document.getElementById('again').onclick = () => run('Load stocks (again, from the browser)');
-document.getElementById('scan').onclick = scan;
-</script>
-</body>
-</html>
+document.getElementById('b1').onclick = () => guarded(async () => {
+  const syms = await pickSymbols();
+  log(`\n[1] loading ${syms.length} stocks ...`);
+  const t0 = performance.now(); let bars = 0, last = 0;
+  for await (const s of engine.iterMany(syms, { onProgress: (p) => { if (p.phase === 'download' && performance.now() - last > 700) { last = performance.now(); log(`   downloading: ${p.requests} requests, ${mb(p.bytes)}`); } } })) bars += s.n;
+  const L = engine.lastBulk;
+  log(`[1] done: ${L.stocks} stocks, ${bars} bars in ${((performance.now() - t0) / 1000).toFixed(1)} s\n    ${L.requests} requests, ${mb(L.bytes)} downloaded, ${L.fromBrowserCache} blocks from browser storage, decode: ${L.decode}`);
+});
+document.getElementById('b2').onclick = () => guarded(async () => {
+  await engine.init(); log('\n[2] scanning the last 300 bars of every stock ...');
+  let n = 0, bars = 0; for await (const s of engine.iterRecent({ bars: 300 })) { n++; bars += s.n; }
+  const L = engine.lastScan; log(`[2] done: ${n} stocks, ${bars} bars in ${L.seconds.toFixed(1)} s, ${mb(L.bytes)} downloaded${L.fromBrowserCache ? ' (recent pack came from browser storage)' : ''}`);
+});
+document.getElementById('b3').onclick = () => guarded(async () => {
+  const syms = await pickSymbols();
+  if (pool) pool.terminate();
+  pool = new ComputePool();
+  log(`\n[3] giving ${syms.length} stocks to the workers ...`);
+  const info = await pool.load(engine, syms);
+  log(`    ${info.stocks} stocks, ${info.bars} bars kept in memory by ${info.workers} workers (${info.mode}) in ${info.seconds.toFixed(1)} s`);
+  if (pool.pool.fallbackReason) log('    note: workers did not start (' + pool.pool.fallbackReason + '), so this ran inside the page');
+  log('    running 600 parameter combinations ...');
+  const r = await pool.benchmark({ combos: 600 });
+  log(`[3] ${Math.round(r.combosPerSec)} combinations per second over ${r.stocks} stocks (${(r.stockBarsPerSec / 1e6).toFixed(0)} million stock-bars per second)\n    so 100,000 combinations would take about ${Math.round(100000 / r.combosPerSec / 60 * 10) / 10} minutes with this simple test formula`);
+});
+document.getElementById('b4').onclick = () => guarded(async () => {
+  await new Promise((res) => { const r = indexedDB.deleteDatabase('amibroker_bars_' + cfg.id); r.onsuccess = r.onerror = r.onblocked = () => res(); });
+  engine = new RangeEngine(cfg); log('\nBrowser store cleared. The next run 1 downloads everything again.');
+});
+window.__ready = true;
+</script></body></html>
