@@ -18,3 +18,13 @@ export function nfDecode(v) {
   }
   return v;
 }
+
+// Big results are stored compressed: { gz: <base64 of gzip of the JSON>, raw: <bytes before compression> } (the runner: src/nf.mjs, gzPack).
+// Gives back the plain object; anything that is not compressed is returned as it is.
+export async function gzUnpack(x) {
+  if (!x || typeof x.gz !== 'string') return x;
+  const bin = atob(x.gz), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  return JSON.parse(text);
+}

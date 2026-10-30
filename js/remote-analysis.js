@@ -2,7 +2,7 @@
 // Everything goes through the GitHub REST API from the browser: jobs/<id>/job.json is written, then workflow analysis.yml is started.
 // The runner writes status.json, progress-<n>.json and finally result.json into the same folder.
 import { el, openModal, toast, BTN, BTN_PRIMARY, BTN_DANGER, INPUT } from './ui.js';
-import { nfDecode } from './json-nan.js';
+import { nfDecode, gzUnpack } from './json-nan.js';
 
 const CFG_KEY = 'aa_remote_cfg_v1', JOBS_KEY = 'aa_remote_jobs_v1';
 const ls = () => { try { return localStorage; } catch (e) { return null; } };
@@ -98,8 +98,13 @@ export async function pollJob(cfg, id, client = new GhClient(cfg)) {
 export async function fetchResult(cfg, id, client = new GhClient(cfg)) {
   const r = await client.get(`jobs/${id}/result.json`);
   if (!r) throw new Error('The result file is not there yet.');
+  r.result = await gzUnpack(r.result);             // a big result is stored compressed
+  // An older exploration result can hold far more rows than a phone can open (they were not limited then): keep the first rows
+  const t = r.mode === 'explore' && r.result && r.result.table;
+  if (t && t.rows && t.rows.length > VIEW_ROWS) { r.result.truncated = r.result.truncated || t.rows.length; t.rows.length = VIEW_ROWS; if (r.result.rows) r.result.rows.length = Math.min(r.result.rows.length, VIEW_ROWS); }
   return nfDecode(r);                              // NaN / Infinity were written in a form JSON keeps
 }
+const VIEW_ROWS = 20000;
 
 /** Rebuilds the job list from the runner repo (jobs/<id>/job.json), so every device sees every past result. Returns how many jobs were added. */
 export async function loadJobsFromRepo(cfg, client = new GhClient(cfg), max = 30) {
@@ -150,6 +155,8 @@ export function openRemotePanel(opts) {
       sub.appendChild(b);
     }
     // ---- job list
+    const msg = el('div', 'text-[11px] text-amber-300 min-h-[14px]'); body.appendChild(msg);       // what is happening, and why something did not open
+    const setMsg = (t) => { msg.textContent = t || ''; };
     const list = el('div', 'space-y-2'); body.appendChild(list);
     const draw = () => {
       list.innerHTML = ''; const jobs = loadJobs();
@@ -162,7 +169,12 @@ export function openRemotePanel(opts) {
         if (p.state && p.state !== 'done') { const bar = el('div', 'h-1.5 rounded bg-slate-800 overflow-hidden'); const f = el('div', 'h-full bg-emerald-500'); f.style.width = (p.pct || 0) + '%'; bar.appendChild(f); card.appendChild(bar); }
         if (p.message) card.appendChild(note(p.message, 'text-[11px] text-amber-300'));
         const r = el('div', 'flex flex-wrap gap-2');
-        if (p.state === 'done') { const v = el('button', BTN_PRIMARY + ' !py-1', 'View result'); v.type = 'button'; v.onclick = async () => { v.disabled = true; try { const c2 = cfg2(), cl = new GhClient(c2), res = await fetchResult(c2, j.id, cl), spec = await cl.get(`jobs/${j.id}/job.json`); await opts.onView(j, res, spec); close(); } catch (e) { toast(e.message); } v.disabled = false; }; r.appendChild(v); }
+        if (p.state === 'done') { const v = el('button', BTN_PRIMARY + ' !py-1', 'View result'); v.type = 'button'; v.onclick = async () => {
+          v.disabled = true; v.textContent = 'Loading…'; setMsg('Downloading the result from GitHub. A big result can take a minute or two on a slow connection.');
+          try { const c2 = cfg2(), cl = new GhClient(c2), res = await fetchResult(c2, j.id, cl), spec = await cl.get(`jobs/${j.id}/job.json`); setMsg('Opening…'); await opts.onView(j, res, spec); close(); }
+          catch (e) { setMsg(`Could not open this result: ${e.message}`); toast(e.message); }
+          v.disabled = false; v.textContent = 'View result';
+        }; r.appendChild(v); }
         const a = el('a', BTN + ' !py-1 inline-block', 'Open on GitHub'); a.href = `https://github.com/${j.repo}/actions`; a.target = '_blank'; a.rel = 'noopener'; r.appendChild(a);
         const x = el('button', BTN_DANGER + ' !py-1', 'Remove'); x.title = 'Takes this card off the list. The result stays in the repo.'; x.type = 'button'; x.onclick = () => { saveJobs(loadJobs().filter((k) => k.id !== j.id)); draw(); }; r.appendChild(x);
         card.appendChild(r); list.appendChild(card);

@@ -519,7 +519,7 @@ export function openAnalysis({ formulaId = null } = {}) {
       if (mode === 'scan') views = scanViews({ rows: r.rows || [], errors: r.errors || [] }, f, common.session, infoLines([note, `Signals found: ${(r.rows || []).length}`]));
       else if (mode === 'explore') {
         const t = r.table || { head: [], rows: [], summary: [] };
-        views = exploreViews({ rows: r.rows || [], table: t, xy: r.xy || {}, errors: r.errors || [] }, f, infoLines([note, `Rows: ${t.rows.length}`, ...(r.truncated ? [`Only the first ${t.rows.length.toLocaleString()} of ${r.truncated.toLocaleString()} rows were kept on GitHub (the limit protects the repo).`] : [])]));
+        views = exploreViews({ rows: r.rows || [], table: t, xy: r.xy || {}, errors: r.errors || [] }, f, infoLines([note, `Rows: ${t.rows.length}`, ...(r.truncated ? [`Showing the first ${t.rows.length.toLocaleString()} of ${r.truncated.toLocaleString()} rows, in the order your formula sorts them. Summary rows count all rows. (A phone cannot open more.)`] : [])]));
       } else if (mode === 'backtest') views = backtestViews(r, f, sy.symbols.length, (extra = []) => infoLines([note, ...extra]), base.btMode || 'portfolio');
       else views = mode === 'walk' ? walkViews(r, { resumeNote: note, infoLines, target: base.metric || S.walkForward.target }) : optViews(r, { f, sy, common, resumeNote: note, infoLines });
       show(views); tab = 'Results'; drawTabs();
