@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>analysis harness</title>
+<script type="module">
+// The real Analysis window on a page with a stand-in app around it: bars come from the fake R2 through the real RangeEngine.
+import { host } from '/js/host.js';
+import { RangeEngine } from '/js/range-engine.js';
+import { barsToArrays } from '/js/indicators.js';
+import { formulaStore } from '/js/formula-store.js';
+import { openAnalysis } from '/js/analysis.js';
+const eng = new RangeEngine({ id: 'h', name: 'h', baseUrl: '/r2/nse', firstYear: 2000, currency: 'INR' });
+await eng.init();
+host.loadBars = async (s) => { const rows = await eng.getBars(s); return rows && rows.length ? barsToArrays(rows) : null; };
+host.symbols = () => [...eng.packIdx.keys()].filter((s) => !s.startsWith('^')).sort();
+window.openAnalysis = openAnalysis; window.formulaStore = formulaStore; window.ready = true;
+</script>
