@@ -189,7 +189,11 @@ const colorAt = (c, k) => { const x = c === undefined ? undefined : (typeof c ==
  * Rows of the exploration, ready to show: table = { head:[names], cols:[{name,kind}], rows:[[{v,text,fg,bg}]], summary:[[...]] }
  * Also keeps the older fields: rows[].values, columns (names), xy.
  */
-export async function explore({ code, symbols, session, range, from, to, params, maxRows = 1000000, onProgress, cancel }) {
+export async function explore(args) { return exploreFinish(await exploreCollect(args)); }
+
+/** The first half of explore(): the raw rows of the symbols given (no sorting / ranking / summary yet). A GitHub machine runs this on its share
+ *  of the symbols; exploreFinish() then joins the shares. */
+export async function exploreCollect({ code, symbols, session, range, from, to, params, maxRows = 1000000, onProgress, cancel }) {
   const rows = [], errors = [], xy = {}, colNames = []; let meta = null, noDefault = false, sortCols = [], summary = null;
   await eachSymbol(symbols, onProgress, cancel, async (sym, i) => {
     const b = await session.get(sym); if (!b) return;
@@ -211,6 +215,11 @@ export async function explore({ code, symbols, session, range, from, to, params,
       rows.push(row);
     }
   });
+  return { rows, errors, xy, colNames, meta, noDefault, sortCols, summary };
+}
+
+/** The second half of explore(): sort, rank and summarise the collected rows into the result the Analysis window shows. */
+export function exploreFinish({ rows, errors, xy, colNames, meta, noDefault, sortCols, summary }) {
   const table = buildTable(rows, meta || [], { noDefault, sortCols, summary });
   return { rows: table.rowsSorted, columns: colNames, xy, errors, table };
 }

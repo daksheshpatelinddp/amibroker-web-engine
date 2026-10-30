@@ -1,7 +1,8 @@
-// "Run on GitHub": send an Optimize / Walk-Forward to a GitHub Actions runner repo (amibroker-analysis-runner), come back later for the result.
+// "Run on GitHub": send an Optimize / Walk-Forward / Scan / Explore / Backtest to a GitHub Actions runner repo (amibroker-analysis-runner), come back later for the result.
 // Everything goes through the GitHub REST API from the browser: jobs/<id>/job.json is written, then workflow analysis.yml is started.
 // The runner writes status.json, progress-<n>.json and finally result.json into the same folder.
 import { el, openModal, toast, BTN, BTN_PRIMARY, BTN_DANGER, INPUT } from './ui.js';
+import { nfDecode } from './json-nan.js';
 
 const CFG_KEY = 'aa_remote_cfg_v1', JOBS_KEY = 'aa_remote_jobs_v1';
 const ls = () => { try { return localStorage; } catch (e) { return null; } };
@@ -26,6 +27,12 @@ export class GhClient {
     if (r.status === 404) return null;
     if (!r.ok) throw new Error(await this.err(r));
     return JSON.parse(await r.text());
+  }
+  async list(path) {                                // names in a repo folder ([] when it does not exist)
+    const r = await this.f(`${this.api}/repos/${this.cfg.repo}/contents/${path}?ref=${encodeURIComponent(this.cfg.branch)}&_=${Date.now()}`, { headers: this.h(), cache: 'no-store' });
+    if (r.status === 404) return [];
+    if (!r.ok) throw new Error(await this.err(r));
+    const j = await r.json(); return Array.isArray(j) ? j : [];
   }
   async put(path, obj, msg) {
     for (let a = 0; a < 6; a++) {
@@ -55,11 +62,19 @@ export class GhClient {
   }
 }
 
+export const MODE_NAMES = { scan: 'Scan', explore: 'Explore', backtest: 'Backtest', optimize: 'Optimize', walk: 'Walk-Forward' };
+/** How many machines a job really uses (the runner applies the same rule): Backtest 1, Scan / Explore at most one per 100 symbols, Optimize / Walk-Forward as many as asked. */
+export function jobShards(mode, nSymbols, wanted) {
+  const w = Math.max(1, Math.min(20, Math.floor(wanted) || 6));
+  if (mode === 'backtest') return 1;
+  if (mode === 'scan' || mode === 'explore') return Math.max(1, Math.min(w, Math.ceil(nSymbols / 100)));
+  return w;
+}
 export const newJobId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 /** spec: everything the runner needs (code, symbols, range, settings ...). Returns the stored job entry. */
 export async function submitJob(cfg, spec, meta, client = new GhClient(cfg)) {
-  const id = newJobId(), job = { v: 1, id, ...spec, shards: Math.max(1, Math.min(20, Math.floor(cfg.shards) || 6)) };
+  const id = newJobId(), job = { v: 1, id, ...spec, shards: jobShards(spec.mode, spec.symbols.length, cfg.shards) };
   await client.put(`jobs/${id}/job.json`, job, `job ${id} (${job.mode})`);
   await client.dispatch(id);
   const entry = { id, mode: job.mode, formulaName: job.formulaName, symbols: job.symbols.length, shards: job.shards, createdAt: Date.now(), repo: cfg.repo, ...meta };
@@ -83,7 +98,20 @@ export async function pollJob(cfg, id, client = new GhClient(cfg)) {
 export async function fetchResult(cfg, id, client = new GhClient(cfg)) {
   const r = await client.get(`jobs/${id}/result.json`);
   if (!r) throw new Error('The result file is not there yet.');
-  return r;
+  return nfDecode(r);                              // NaN / Infinity were written in a form JSON keeps
+}
+
+/** Rebuilds the job list from the runner repo (jobs/<id>/job.json), so every device sees every past result. Returns how many jobs were added. */
+export async function loadJobsFromRepo(cfg, client = new GhClient(cfg), max = 30) {
+  const stamp = (id) => parseInt(String(id).split('-')[0], 36) || 0;           // the job id starts with the time it was sent
+  const known = new Set(loadJobs().map((j) => j.id));
+  const fresh = (await client.list('jobs')).filter((x) => x.type === 'dir' && !known.has(x.name)).map((x) => x.name).sort((a, b) => stamp(b) - stamp(a)).slice(0, max);
+  const added = [];
+  for (const id of fresh) {
+    try { const job = await client.get(`jobs/${id}/job.json`); if (job && job.mode) added.push({ id, mode: job.mode, formulaName: job.formulaName, symbols: (job.symbols || []).length, shards: job.shards, createdAt: stamp(id) || Date.now(), repo: cfg.repo }); } catch (e) { /* skip this one */ }
+  }
+  if (added.length) saveJobs([...loadJobs(), ...added].sort((a, b) => b.createdAt - a.createdAt).slice(0, 50));
+  return added.length;
 }
 
 const fmtDur = (ms) => { const m = Math.round(ms / 60000); return m < 1 ? 'under a minute' : m < 90 ? `${m} min` : `${(m / 60).toFixed(1)} h`; };
@@ -95,7 +123,7 @@ export function openRemotePanel(opts) {
   return openModal('Run on GitHub', (body, close) => {
     const cfg = loadCfg();
     const note = (t, c = 'text-[11px] text-slate-400') => el('div', c, t);
-    body.appendChild(note('Long Optimize / Walk-Forward runs on GitHub machines (free), even with your phone off. Come back later and open the result here. End-of-day data only.'));
+    body.appendChild(note('Optimize, Walk-Forward, Scan, Explore and Backtest can run on GitHub machines (free), even with your phone off. Come back later and open the result here. End-of-day data only. The normal buttons in the Analysis window still run on this phone.'));
     // ---- settings
     const box = el('div', 'space-y-1 p-2 rounded border border-slate-800'); body.appendChild(box);
     const inp = (ph, v, type = 'text') => { const i = el('input', INPUT + ' w-full'); i.type = type; i.placeholder = ph; i.value = v; i.autocomplete = 'off'; return i; };
@@ -108,14 +136,15 @@ export function openRemotePanel(opts) {
     box.appendChild(note('The token stays in this browser only and is sent only to api.github.com.', 'text-[10px] text-slate-500'));
     // ---- submit
     const sub = el('div', 'grid grid-cols-2 gap-2'); body.appendChild(sub);
-    for (const [m, label] of [['optimize', 'Send Optimize'], ['walk', 'Send Walk-Forward']]) {
+    for (const [m, label] of [['scan', 'Send Scan'], ['explore', 'Send Explore'], ['backtest', 'Send Backtest'], ['optimize', 'Send Optimize'], ['walk', 'Send Walk-Forward']]) {
       const b = el('button', BTN_PRIMARY, label); b.type = 'button';
       b.onclick = async () => {
         const c = cur(); saveCfg(c); if (!cfgOk(c)) { toast('Enter repo and token first'); return; }
         const spec = opts.buildSpec(m); if (!spec) return;
-        if (!confirm(`Send this ${m === 'walk' ? 'Walk-Forward' : 'Optimize'} to GitHub?\n\n${spec.symbols.length} symbols, ${c.shards} machines.\nIt keeps running when you close the app.`)) return;
+        const n = jobShards(m, spec.symbols.length, c.shards), mach = m === 'backtest' ? '1 machine (a portfolio backtest needs all symbols together)' : (m === 'scan' || m === 'explore') ? `${n} machine${n === 1 ? '' : 's'} (about 100 symbols each)` : `${n} machines`;
+        if (!confirm(`Send this ${MODE_NAMES[m]} to GitHub?\n\n${spec.symbols.length} symbols, ${mach}.\nIt keeps running when you close the app.`)) return;
         b.disabled = true;
-        try { await submitJob(c, spec, opts.meta ? opts.meta() : {}); toast('Sent. Check back in a few minutes.'); draw(); refreshAll(); } catch (e) { toast(e.message); }
+        try { await submitJob(c, spec, opts.meta ? opts.meta() : {}); toast('Sent. Check back in a few minutes.'); draw(); refreshAll(); } catch (e) { toast(`${e.message} You can still run it on this phone with the normal button.`); }
         b.disabled = false;
       };
       sub.appendChild(b);
@@ -127,7 +156,7 @@ export function openRemotePanel(opts) {
       if (!jobs.length) { list.appendChild(note('No jobs sent yet.')); return; }
       jobs.forEach((j) => {
         const p = st.poll[j.id] || {}, card = el('div', 'p-2 rounded border border-slate-800 space-y-1');
-        card.appendChild(el('div', 'text-xs text-white', `${j.mode === 'walk' ? 'Walk-Forward' : 'Optimize'}: ${j.formulaName} · ${j.symbols} symbols`));
+        card.appendChild(el('div', 'text-xs text-white', `${MODE_NAMES[j.mode] || j.mode}: ${j.formulaName} · ${j.symbols} symbols`));
         const when = new Date(j.createdAt).toLocaleString();
         card.appendChild(note(`${when} · ${STATE_TXT[p.state] || 'checking…'}${p.pct ? ` · ${p.pct}%` : ''}${p.etaMs ? ` · about ${fmtDur(p.etaMs)} left` : ''}${p.run > 1 ? ` · run ${p.run}` : ''}`));
         if (p.state && p.state !== 'done') { const bar = el('div', 'h-1.5 rounded bg-slate-800 overflow-hidden'); const f = el('div', 'h-full bg-emerald-500'); f.style.width = (p.pct || 0) + '%'; bar.appendChild(f); card.appendChild(bar); }
@@ -135,7 +164,7 @@ export function openRemotePanel(opts) {
         const r = el('div', 'flex flex-wrap gap-2');
         if (p.state === 'done') { const v = el('button', BTN_PRIMARY + ' !py-1', 'View result'); v.type = 'button'; v.onclick = async () => { v.disabled = true; try { const c2 = cfg2(), cl = new GhClient(c2), res = await fetchResult(c2, j.id, cl), spec = await cl.get(`jobs/${j.id}/job.json`); await opts.onView(j, res, spec); close(); } catch (e) { toast(e.message); } v.disabled = false; }; r.appendChild(v); }
         const a = el('a', BTN + ' !py-1 inline-block', 'Open on GitHub'); a.href = `https://github.com/${j.repo}/actions`; a.target = '_blank'; a.rel = 'noopener'; r.appendChild(a);
-        const x = el('button', BTN_DANGER + ' !py-1', 'Remove'); x.type = 'button'; x.onclick = () => { saveJobs(loadJobs().filter((k) => k.id !== j.id)); draw(); }; r.appendChild(x);
+        const x = el('button', BTN_DANGER + ' !py-1', 'Remove'); x.title = 'Takes this card off the list. The result stays in the repo.'; x.type = 'button'; x.onclick = () => { saveJobs(loadJobs().filter((k) => k.id !== j.id)); draw(); }; r.appendChild(x);
         card.appendChild(r); list.appendChild(card);
       });
     };
@@ -147,6 +176,15 @@ export function openRemotePanel(opts) {
       busy = false; draw();
     };
     const rf = el('button', BTN + ' w-full', 'Refresh'); rf.type = 'button'; rf.onclick = refreshAll; body.appendChild(rf);
-    draw(); refreshAll(); st.timer = setInterval(refreshAll, 45000);   // only while this panel is open
+    const ld = el('button', BTN + ' w-full', 'Load jobs from the repo'); ld.type = 'button'; ld.title = 'Lists the jobs saved in the runner repo (also those sent from another device)';
+    const fromRepo = async (quiet) => {
+      const c = cfg2(); if (!cfgOk(c)) { if (!quiet) toast('Enter repo and token first'); return; }
+      ld.disabled = true;
+      try { const n = await loadJobsFromRepo(c); draw(); refreshAll(); if (!quiet) toast(n ? `${n} job${n === 1 ? '' : 's'} added to the list` : 'Nothing new in the repo'); } catch (e) { if (!quiet) toast(e.message); }
+      ld.disabled = false;
+    };
+    ld.onclick = () => fromRepo(false); body.appendChild(ld);
+    body.appendChild(note('Results stay in the runner repo (jobs/<id>/result.json). "Remove" only takes a card off this list; "Load jobs from the repo" brings it back. Use the same repo name and token on another device to see all your results there too.', 'text-[10px] text-slate-500'));
+    draw(); refreshAll(); if (!loadJobs().length) fromRepo(true); st.timer = setInterval(refreshAll, 45000);   // only while this panel is open
   }, { big: true, stack: true, onClose: () => clearInterval(st.timer) });
 }

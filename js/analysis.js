@@ -413,6 +413,38 @@ export function openAnalysis({ formulaId = null } = {}) {
         } else { await deleteJob(); R = null; pane.innerHTML = ''; tabsBar.classList.add('hidden'); hasResults = false; chipText(); toast('Cancelled. Nothing was changed.'); }
       }
     };
+    // ---- Scan / Explore / Backtest result screens: used for a run on this phone AND for a result that comes back from GitHub
+    const scanViews = (r, f, session, info) => {
+      const res = r.rows.length ? (() => { const d = el('div', 'space-y-2'); d.appendChild(saveBtn(r.rows.map((x) => x.symbol), `${f.name} scan`)); d.appendChild(el('div', 'text-[11px] text-slate-400', 'Tap a row to see its signal on the chart')); d.appendChild(table(['Symbol', 'Date', 'Trade', 'Price'], r.rows.map((x) => [x.symbol, x.date, x.signal, x.price]), { onRow: async (row) => {
+            let ev = []; try { ev = await signalEvents({ code: f.code, symbol: row[0], session }); } catch (e) { /* fall back to the row itself */ }
+            const first = String(row[2]).split('+')[0].toLowerCase();
+            if (!ev.some((e) => e.date === row[1])) ev = [{ symbol: row[0], date: row[1], kind: first, price: row[3] }, ...ev];
+            showEvents(row[0], ev, (e) => e.date === row[1] && e.kind === first, d);
+          }, csvName: 'scan.csv' })); return d; })()
+            : el('div', 'text-xs text-slate-400', 'No signals. A scan needs Buy / Sell / Short / Cover rules (or use Explore with Filter and AddColumn).');
+      return { Results: res, Info: infoPane(info, r.errors) };
+    };
+    const exploreViews = (r, f, info) => {
+      const t = r.table;
+      const res = el('div', 'space-y-2');
+          if (!t.rows.length) res.appendChild(el('div', 'text-xs text-slate-400', 'Nothing passed the Filter. An exploration needs Filter = condition; and AddColumn(...).'));
+          else { res.appendChild(saveBtn(r.rows.map((x) => x.symbol), `${f.name} exploration`)); res.appendChild(table(t.head, t.rows, { extraRows: t.summary, onRow: (row) => { const k = t.head.indexOf('Ticker'), sym = row[k >= 0 ? k : 0], ev = r.rows.filter((x) => x.symbol === sym).map((x) => ({ symbol: sym, date: x.date, kind: 'hit' }));
+            showEvents(sym, ev, (e) => row.includes(e.date), res); }, csvName: 'exploration.csv' })); }
+          const views = { Results: res }; const xyNames = Object.keys(r.xy);
+          if (xyNames.length) views.Charts = () => { const d = el('div', 'space-y-2'); xyNames.forEach((n) => d.appendChild(html(svgScatter(r.xy[n].points, { title: n, xLabel: r.xy[n].xLabel, yLabel: r.xy[n].yLabel })))); return d; };
+      views.Info = infoPane(info, r.errors); return views;
+    };
+    const backtestViews = (r, f, nSyms, infoLines, btMode) => {
+          if (!r.stats) { return ({ Results: el('div', 'text-xs text-slate-400', 'The formula produced no trades. A backtest needs Buy and Sell (and optionally Short / Cover) rules, or PositionScore with SetBacktestMode(backtestRotational).'), Info: infoPane(infoLines(), r.errors) }); }
+          else {
+            pseudoStore.setEquity(r.equityCurve); chartEngine.lastBacktestFormula = f.code;
+            const mc = S.monteCarlo.enable && r.trades.length > 2 ? monteCarlo({ trades: r.trades, curve: r.equityCurve, initialEquity: r.stats.initialCapital, years: r.stats.years, runs: S.monteCarlo.runs, mode: S.monteCarlo.mode, posMethod: S.monteCarlo.posMethod, posValue: S.monteCarlo.posValue, posPct: S.monteCarlo.posPct, strawLines: S.monteCarlo.strawLines }) : null;
+            const res = tradeListViews(r, f, nSyms); res.appendChild(exportBtn(r, f, mc, nSyms));
+            return ({ Results: res, Report: () => reportView(r, mc), Charts: () => chartsView(r),
+              Info: infoPane(infoLines([`Mode: ${btMode}`, `Symbols with data: ${r.info.symbols}`, `Bars read: ${r.info.bars}`, `Trades: ${r.trades.length}`, 'Options used:', JSON.stringify({ ...r.options, commissionTable: undefined, stops: r.options.stops.length }, null, 0)]), r.errors) });
+          }
+    };
+
     const runOnce = async (mode) => {
       const f = forced ? { name: forced.formulaName, code: forced.code } : formulaStore.get(fsel.value); if (!f) { toast('Choose a formula'); return; }
       const sy = forced ? { symbols: forced.symbols } : symbols(); if (!sy.symbols.length) { toast('No symbols to analyse. Choose Apply to, or add symbols to the filter.'); return; }
@@ -423,33 +455,13 @@ export function openAnalysis({ formulaId = null } = {}) {
       try {
         if (mode === 'scan') {
           const r = await scan({ ...common, lastBars: 1 });
-          const res = r.rows.length ? (() => { const d = el('div', 'space-y-2'); d.appendChild(saveBtn(r.rows.map((x) => x.symbol), `${f.name} scan`)); d.appendChild(el('div', 'text-[11px] text-slate-400', 'Tap a row to see its signal on the chart')); d.appendChild(table(['Symbol', 'Date', 'Trade', 'Price'], r.rows.map((x) => [x.symbol, x.date, x.signal, x.price]), { onRow: async (row) => {
-            let ev = []; try { ev = await signalEvents({ code: f.code, symbol: row[0], session }); } catch (e) { /* fall back to the row itself */ }
-            const first = String(row[2]).split('+')[0].toLowerCase();
-            if (!ev.some((e) => e.date === row[1])) ev = [{ symbol: row[0], date: row[1], kind: first, price: row[3] }, ...ev];
-            showEvents(row[0], ev, (e) => e.date === row[1] && e.kind === first, d);
-          }, csvName: 'scan.csv' })); return d; })()
-            : el('div', 'text-xs text-slate-400', 'No signals. A scan needs Buy / Sell / Short / Cover rules (or use Explore with Filter and AddColumn).');
-          show({ Results: res, Info: infoPane(infoLines([`Signals found: ${r.rows.length}`]), r.errors) });
+          show(scanViews(r, f, session, infoLines([`Signals found: ${r.rows.length}`])));
         } else if (mode === 'explore') {
-          const r = await explore(common), t = r.table;
-          const res = el('div', 'space-y-2');
-          if (!t.rows.length) res.appendChild(el('div', 'text-xs text-slate-400', 'Nothing passed the Filter. An exploration needs Filter = condition; and AddColumn(...).'));
-          else { res.appendChild(saveBtn(r.rows.map((x) => x.symbol), `${f.name} exploration`)); res.appendChild(table(t.head, t.rows, { extraRows: t.summary, onRow: (row) => { const k = t.head.indexOf('Ticker'), sym = row[k >= 0 ? k : 0], ev = r.rows.filter((x) => x.symbol === sym).map((x) => ({ symbol: sym, date: x.date, kind: 'hit' }));
-            showEvents(sym, ev, (e) => row.includes(e.date), res); }, csvName: 'exploration.csv' })); }
-          const views = { Results: res }; const xyNames = Object.keys(r.xy);
-          if (xyNames.length) views.Charts = () => { const d = el('div', 'space-y-2'); xyNames.forEach((n) => d.appendChild(html(svgScatter(r.xy[n].points, { title: n, xLabel: r.xy[n].xLabel, yLabel: r.xy[n].yLabel })))); return d; };
-          views.Info = infoPane(infoLines([`Rows: ${t.rows.length}`]), r.errors); show(views);
+          const r = await explore(common);
+          show(exploreViews(r, f, infoLines([`Rows: ${r.table.rows.length}`])));
         } else if (mode === 'backtest') {
           const r = await backtest({ ...common, mode: btSel.value });
-          if (!r.stats) { show({ Results: el('div', 'text-xs text-slate-400', 'The formula produced no trades. A backtest needs Buy and Sell (and optionally Short / Cover) rules, or PositionScore with SetBacktestMode(backtestRotational).'), Info: infoPane(infoLines(), r.errors) }); }
-          else {
-            pseudoStore.setEquity(r.equityCurve); chartEngine.lastBacktestFormula = f.code;
-            const mc = S.monteCarlo.enable && r.trades.length > 2 ? monteCarlo({ trades: r.trades, curve: r.equityCurve, initialEquity: r.stats.initialCapital, years: r.stats.years, runs: S.monteCarlo.runs, mode: S.monteCarlo.mode, posMethod: S.monteCarlo.posMethod, posValue: S.monteCarlo.posValue, posPct: S.monteCarlo.posPct, strawLines: S.monteCarlo.strawLines }) : null;
-            const res = tradeListViews(r, f, sy.symbols.length); res.appendChild(exportBtn(r, f, mc, sy.symbols.length));
-            show({ Results: res, Report: () => reportView(r, mc), Charts: () => chartsView(r),
-              Info: infoPane(infoLines([`Mode: ${btSel.value}`, `Symbols with data: ${r.info.symbols}`, `Bars read: ${r.info.bars}`, `Trades: ${r.trades.length}`, 'Options used:', JSON.stringify({ ...r.options, commissionTable: undefined, stops: r.options.stops.length }, null, 0)]), r.errors) });
-          }
+          show(backtestViews(r, f, sy.symbols.length, infoLines, btSel.value));
         } else if (mode === 'optimize') {
           const jobBase = { v: 1, mode: 'optimize', formulaName: f.name, code: f.code, symbols: sy.symbols, ui: getState(), settings: S, startedAt: Date.now() };
           const resume = forced ? forced.state : null; if (!forced) await deleteJob();
@@ -492,16 +504,24 @@ export function openAnalysis({ formulaId = null } = {}) {
       const sy = symbols(); if (!sy.symbols.length) { toast('No symbols to analyse. Choose Apply to, or add symbols to the filter.'); return null; }
       if (isIntraday(tf.value)) { toast('GitHub runs use end-of-day data only. Set the time frame to Daily, Weekly or Monthly.'); return null; }
       save(); const D = DATABASES[ACTIVE_DB];
-      return { mode, formulaName: f.name, code: f.code, symbols: sy.symbols, interval: tf.value, range: rangeNow(), settings: S,   // the runner builds weekly / monthly bars exactly like a local run
-        metric: mode === 'walk' ? S.walkForward.target : S.optimize.target, engine: S.optimize.engine, maxEval: S.optimize.maxEval, runs: S.optimize.runs, keep: S.optimize.serverKeep || 5000, wf: S.walkForward,
+      const spec = { mode, formulaName: f.name, code: f.code, symbols: sy.symbols, interval: tf.value, range: rangeNow(), settings: S,   // the runner builds weekly / monthly bars exactly like a local run
         dataset: { id: D.id, baseUrl: D.baseUrl, firstYear: D.firstYear, currency: D.currency }, ui: getState() };
+      if (mode === 'backtest') spec.btMode = btSel.value;                                   // Backtest: portfolio / individual / ... as chosen here
+      if (mode === 'optimize' || mode === 'walk') Object.assign(spec, { metric: mode === 'walk' ? S.walkForward.target : S.optimize.target, engine: S.optimize.engine, maxEval: S.optimize.maxEval, runs: S.optimize.runs, keep: S.optimize.serverKeep || 5000, wf: S.walkForward });
+      return spec;
     };
     const viewRemote = async (entry, file, spec) => {
-      const base = spec || {}, r = file.result || {}, f = { name: entry.formulaName || base.formulaName, code: base.code || '' }, sy = { symbols: base.symbols || [] };
-      const note = `Result from GitHub (${entry.mode === 'walk' ? 'Walk-Forward' : 'Optimize'}), finished ${new Date(file.finishedAt).toLocaleString()}, took ${fmtDur(file.elapsedMs || 0)}.`;
+      const base = spec || {}, r = file.result || {}, mode = file.mode || entry.mode, f = { name: entry.formulaName || base.formulaName, code: base.code || '' }, sy = { symbols: base.symbols || [] };
+      const note = `Result from GitHub (${MODES[mode] || mode}), finished ${new Date(file.finishedAt).toLocaleString()}, took ${fmtDur(file.elapsedMs || 0)}.`;
       const common = { code: f.code, symbols: sy.symbols, session: makeSession((s, iv) => host.loadBars(s, iv), base.interval || 'D'), range: base.range || rangeNow(), onProgress: setProgress, cancel, settings: base.settings || S };
-      const infoLines = (extra = []) => [`Formula: ${f.name}`, `Ran on GitHub: ${entry.shards || base.shards || '?'} machines`, `Symbols: ${sy.symbols.length}`, ...extra];
-      const views = file.mode === 'walk' || entry.mode === 'walk' ? walkViews(r, { resumeNote: note, infoLines, target: base.metric || S.walkForward.target }) : optViews(r, { f, sy, common, resumeNote: note, infoLines });
+      const infoLines = (extra = []) => [`Formula: ${f.name}`, `Ran on GitHub: ${entry.shards || base.shards || '?'} machine${(entry.shards || base.shards) === 1 ? '' : 's'}`, `Symbols: ${sy.symbols.length}`, ...extra];
+      let views;
+      if (mode === 'scan') views = scanViews({ rows: r.rows || [], errors: r.errors || [] }, f, common.session, infoLines([note, `Signals found: ${(r.rows || []).length}`]));
+      else if (mode === 'explore') {
+        const t = r.table || { head: [], rows: [], summary: [] };
+        views = exploreViews({ rows: r.rows || [], table: t, xy: r.xy || {}, errors: r.errors || [] }, f, infoLines([note, `Rows: ${t.rows.length}`, ...(r.truncated ? [`Only the first ${t.rows.length.toLocaleString()} of ${r.truncated.toLocaleString()} rows were kept on GitHub (the limit protects the repo).`] : [])]));
+      } else if (mode === 'backtest') views = backtestViews(r, f, sy.symbols.length, (extra = []) => infoLines([note, ...extra]), base.btMode || 'portfolio');
+      else views = mode === 'walk' ? walkViews(r, { resumeNote: note, infoLines, target: base.metric || S.walkForward.target }) : optViews(r, { f, sy, common, resumeNote: note, infoLines });
       show(views); tab = 'Results'; drawTabs();
     };
     ghBtn.onclick = async () => {
