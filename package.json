@@ -2,7 +2,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "node tests/afl-test.mjs && node tests/timeframe-test.mjs && node tests/analysis-test.mjs && node tests/chart-mock-test.mjs && node tests/category-test.mjs && node tests/analysis2-test.mjs && node tests/trade-view-test.mjs && node tests/drawing-test.mjs && node tests/optimize-test.mjs && node tests/job-store-test.mjs && node tests/nse-categories-test.mjs && node tests/category-perf-test.mjs && node tests/nse-index-test.mjs && node tests/pack-v2-test.mjs",
-    "test:browser": "node tests/browser/bulk-load.mjs && node tests/browser/fflate-load.mjs && node tests/browser/compute-pool.mjs && node tests/browser/bulk-page.mjs && node --import $RUNNER_DIR/src/register.mjs tests/browser/github-modes.mjs"
+    "test": "node tests/afl-test.mjs && node tests/timeframe-test.mjs && node tests/analysis-test.mjs && node tests/chart-mock-test.mjs && node tests/category-test.mjs && node tests/analysis2-test.mjs && node tests/trade-view-test.mjs && node tests/drawing-test.mjs && node tests/optimize-test.mjs && node tests/job-store-test.mjs && node tests/nse-categories-test.mjs && node tests/category-perf-test.mjs && node tests/nse-index-test.mjs && node tests/pack-v2-test.mjs && node tests/sync-data-test.mjs",
+    "test:browser": "node tests/browser/bulk-load.mjs && node tests/browser/fflate-load.mjs && node tests/browser/compute-pool.mjs && node tests/browser/bulk-page.mjs && node --import $RUNNER_DIR/src/register.mjs tests/browser/github-modes.mjs && node tests/browser/sync-devices.mjs && node tests/browser/shared-library.mjs"
   }
 }
