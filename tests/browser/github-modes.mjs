@@ -30,6 +30,7 @@ await ctx.route('https://api.github.com/**', async (route) => {
   if (cm) {
     const p = decodeURIComponent(cm[1]);
     if (m === 'GET' && p === 'jobs') { const ids = [...new Set([...files.keys()].filter((k) => k.startsWith('jobs/')).map((k) => k.split('/')[1]))]; return route.fulfill({ status: 200, headers: CORS, json: ids.map((n) => ({ name: n, type: 'dir', path: 'jobs/' + n })) }); }
+    if (m === 'GET' && !files.has(p) && [...files.keys()].some((k) => k.startsWith(p + '/'))) { const kids = [...files.entries()].filter(([k]) => k.startsWith(p + '/') && !k.slice(p.length + 1).includes('/')); return route.fulfill({ status: 200, headers: CORS, json: kids.map(([k, f]) => ({ name: k.split('/').pop(), type: 'file', size: f.text.length, path: k })) }); }
     if (m === 'GET') {
       if (!files.has(p)) return route.fulfill({ status: 404, headers: CORS, body: '{}' });
       const f = files.get(p); if (/raw/.test(req.headers().accept || '')) return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: f.text });
@@ -42,7 +43,7 @@ await ctx.route('https://api.github.com/**', async (route) => {
   return route.fulfill({ status: 404, headers: CORS, body: '{}' });
 });
 await pg.route('https://cdn.jsdelivr.net/npm/hyparquet**', (r) => r.fulfill({ contentType: 'text/javascript', body: 'export const parquetMetadataAsync = async () => {}; export const parquetRead = async () => {};' }));
-pg.on('dialog', (d) => d.accept());
+const dialogs = []; pg.on('dialog', (d) => { dialogs.push(d.message()); d.accept(); });
 await pg.goto(`http://localhost:${port}/tests/browser/analysis-harness.html`); await pg.waitForFunction(() => window.ready);
 
 const FORMULAS = {
@@ -123,19 +124,22 @@ for (const mode of ['scan', 'explore', 'backtest']) {
   ok(/T Scan|Buy|Date|Symbol/.test(again) && await rowsOf() === 130, `the saved scan opens again with its ${await rowsOf()} rows, no new analysis (${dispatched.length - hitsBefore} new jobs started)`);
   ok(dispatched.length === hitsBefore, 'opening a saved result starts nothing on GitHub');
 }
-// An OLD big exploration result (stored plain, 30,000 rows, before the limit existed) opens with its first 20,000 rows and says so
+// An OLD big exploration result (stored plain, 70,000 rows, before the limit existed): the phone is warned about its size, it opens with its first 60,000 rows and says so
 {
   const key = `jobs/${ids.explore}/result.json`, doc = JSON.parse(files.get(key).text);
   const plain = doc.result.gz ? JSON.parse(zlib.gunzipSync(Buffer.from(doc.result.gz, 'base64')).toString('utf8')) : doc.result;
-  const base = plain.table.rows; let big = []; while (big.length < 30000) big = big.concat(base); big.length = 30000;
+  const base = plain.table.rows; let big = []; while (big.length < 70000) big = big.concat(base); big.length = 70000;
   plain.table.rows = big; plain.rows = big.map((r) => ({ symbol: r[0].v, date: r[1].v })); plain.truncated = 0;
   files.set(key, { text: JSON.stringify({ ...doc, result: plain }), sha: 'old' });
   await pg.click('#aa-github'); panelOpen = true;
+  const before = dialogs.length;
   await pg.getByRole('button', { name: 'View result' }).nth(2).click(); panelOpen = false;       // the explore job
   await waitRemote(); const info = await tabText('Info');
-  ok(/Showing the first 20,000 of 30,000 rows/.test(info), 'an old 30,000-row exploration result opens, limited to 20,000 rows, with a note');
+  ok(dialogs.length === before + 1 && /result file is \d+ MB/.test(dialogs[dialogs.length - 1]), 'a big old result: the phone is told its size before downloading: ' + (dialogs[dialogs.length - 1] || '').slice(0, 60));
+  ok(/Showing the first 60,000 of 70,000 rows/.test(info), 'an old 70,000-row exploration result opens, limited to 60,000 rows, with a note');
   await results(); ok(await rowsOf() > 100, 'and its table is shown');
 }
+ok(dialogs.filter((m) => /result file is/.test(m)).length === 1, 'the size warning came only for the one big old result, not for normal results');
 ok(errs.length === 0, 'no page errors: ' + errs.join(' | '));
 await b.close(); server.close();
 console.log(fail ? `${fail} FAILED` : `github-modes: all ${pass} checks passed`); process.exit(fail ? 1 : 0);
