@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>sync harness</title>
+<script type="module">
+import { openSync, newDeviceHint } from '/js/sync-ui.js';
+import { formulaStore } from '/js/formula-store.js';
+import { autoLoadShared } from '/js/shared-data.js';
+window.runAuto = () => autoLoadShared({ reload: () => { window.__reloaded++; } });
+window.formulaStore = formulaStore; window.newDeviceHint = newDeviceHint;
+window.__reloaded = 0;
+window.openSyncTest = () => openSync({ reload: () => { window.__reloaded++; } });   // the real window; only the page reload is replaced so the test can look at the result
+window.ready = true;
+</script>
