@@ -38,6 +38,11 @@ export class GhClient {
     }
     return JSON.parse(await r.text());
   }
+  async repoInfo() {                                // { private: true/false, ... } so the app can warn about a public repo
+    const r = await this.f(`${this.api}/repos/${this.cfg.repo}`, { headers: this.h(), cache: 'no-store' });
+    if (!r.ok) throw new Error(await this.err(r));
+    return r.json();
+  }
   async list(path) {                                // names in a repo folder ([] when it does not exist)
     const r = await this.f(`${this.api}/repos/${this.cfg.repo}/contents/${path}?ref=${encodeURIComponent(this.cfg.branch)}&_=${Date.now()}`, { headers: this.h(), cache: 'no-store' });
     if (r.status === 404) return [];
@@ -185,7 +190,7 @@ export function openRemotePanel(opts) {
           try {
             const c2 = cfg2(), cl = new GhClient(c2);
             const size = ((await cl.list(`jobs/${j.id}`).catch(() => [])).find((f) => f.name === 'result.json') || {}).size || 0;     // how big is the file, before downloading it
-            if (size > 10e6 && !confirm(`This result file is ${(size / 1e6).toFixed(0)} MB (it was made by an older runner). Downloading it on a phone can take a long time.\n\nTip: send the job again - the current runner saves it about 20 times smaller.\n\nOpen it anyway?`)) return;
+            if (size > 10e6 && !confirm(`This result file is ${(size / 1e6).toFixed(0)} MB (it was made by an older runner). Downloading it on a phone can take a long time.\n\nTip: send the job again - the current runner saves it several times smaller.\n\nOpen it anyway?`)) return;
             setMsg(`Downloading the result from GitHub${size ? ` (${(size / 1e6).toFixed(1)} MB)` : ''}. A big result can take a minute or two on a slow connection.`);
             let last = 0;
             const res = await fetchResult(c2, j.id, cl, (got, total) => { const now = Date.now(); if (now - last < 400) return; last = now; st.loading[j.id] = `Loading… ${(got / 1e6).toFixed(1)}${total || size ? ' / ' + ((total || size) / 1e6).toFixed(1) : ''} MB`; draw(); });

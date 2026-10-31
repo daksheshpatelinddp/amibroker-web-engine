@@ -5,8 +5,12 @@
 //   <R2_PUBLIC_URL>/nse/2023.parquet   <R2_PUBLIC_URL>/bse/2023.parquet   ...
 export const R2_PUBLIC_URL = 'https://pub-3a1a560916e2405a9787fd3d3d60d16e.r2.dev';
 
+// The PUBLIC library: formulas, categories, watchlists ... that every device loads automatically when the app opens (File > Sync data > Publish).
+// It is a file in a PUBLIC GitHub repo; reading it needs no login. Change the repo here if you named it differently.
+export const SHARED_DATA = { repo: 'daksheshpatelinddp/amibroker-shared-data', branch: 'main', file: 'app-data.json' };
+
 // shown in Symbols · Categories so you can see that the new files are the ones running (Render deploys, browser cache)
-export const APP_BUILD = '2026-10-29a';
+export const APP_BUILD = '2026-10-31b';
 
 export const DATABASES = {
   nse: {

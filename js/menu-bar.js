@@ -62,6 +62,7 @@ export function buildMenus(api) {
     { label: 'File', items: () => [
       { label: 'New sheet', run: () => app.sheetManager.add() },
       { label: 'Formula library…', run: () => import('./formula-library.js').then((m) => m.openLibrary({ mode: 'manage' })) },
+      { label: 'Sync data between devices…', run: () => import('./sync-ui.js').then((m) => m.openSync()) },
       { label: 'Open database', sub: dbItems() },
       { label: 'Database settings (intraday server)…', run: lazy('./intraday-ui.js', 'openIntradaySettings') },
       '-',
@@ -149,6 +150,7 @@ export function buildMenus(api) {
 export function initMenuBar(rootId, api) {
   const root = document.getElementById(rootId); if (!root) return;
   const menus = buildMenus(api); let panel = null, openBtn = null;
+  import('./sync-ui.js').then((m) => m.newDeviceHint()).catch(() => { /* a hint only */ });
   const close = () => { if (panel) panel.remove(); panel = null; if (openBtn) openBtn.classList.remove('bg-slate-700'); openBtn = null; };
   const rowOf = (it, depth, done) => {
     const dis = typeof it.disabled === 'function' ? it.disabled() : !!it.disabled;

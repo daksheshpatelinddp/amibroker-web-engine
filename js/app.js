@@ -43,6 +43,7 @@ class Application {
     async init() {
         if (this.initialized) return;
         this.setStatus('Initializing Engine...', 'warning');
+        import('./shared-data.js').then((m) => m.autoLoadShared({ notify: (t) => this.setCacheText(t) })).catch(() => { /* the public library is optional */ });
         dataEngine.baseUrl = DATABASES[ACTIVE_DB].baseUrl; // last-resort engine uses the same folder
         dataEngine.onProgress = (m) => this.setCacheText(m);
         // On a phone there is no console: surface any error in the footer
