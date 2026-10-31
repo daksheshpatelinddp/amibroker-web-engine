@@ -22,10 +22,20 @@ export class GhClient {
   constructor(cfg, fetchFn) { this.cfg = cfg; this.f = fetchFn || ((...a) => fetch(...a)); this.api = 'https://api.github.com'; }
   h(extra) { return { Authorization: `Bearer ${this.cfg.token.trim()}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...extra }; }
   url(path) { return `${this.api}/repos/${this.cfg.repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}`; }
-  async get(path) {                                   // parsed JSON, or null when the file does not exist yet
+  async get(path, onProgress) {                       // parsed JSON, or null when the file does not exist yet. onProgress(bytesSoFar, totalBytes) for big files
     const r = await this.f(`${this.url(path)}?ref=${encodeURIComponent(this.cfg.branch)}&_=${Date.now()}`, { headers: this.h({ Accept: 'application/vnd.github.raw+json' }), cache: 'no-store' });
     if (r.status === 404) return null;
     if (!r.ok) throw new Error(await this.err(r));
+    if (onProgress && r.body && r.body.getReader) {
+      const total = Number(r.headers.get('content-length')) || 0, reader = r.body.getReader(), chunks = []; let got = 0;
+      for (;;) {
+        let timer; const stall = new Promise((_, no) => { timer = setTimeout(() => no(new Error('The download stalled (no data for 90 seconds). Check the connection and try again.')), 90000); });
+        const { done, value } = await Promise.race([reader.read(), stall]).finally(() => clearTimeout(timer));
+        if (done) break; chunks.push(value); got += value.length; onProgress(got, total);
+      }
+      const buf = new Uint8Array(got); let o = 0; for (const c of chunks) { buf.set(c, o); o += c.length; }
+      return JSON.parse(new TextDecoder().decode(buf));
+    }
     return JSON.parse(await r.text());
   }
   async list(path) {                                // names in a repo folder ([] when it does not exist)
@@ -95,8 +105,8 @@ export async function pollJob(cfg, id, client = new GhClient(cfg)) {
   return { state: status.state, done, total, pct, etaMs, run: status.run, message: status.message || '', shards: shards.map((p) => p && { done: p.done, total: p.total, state: p.state, label: p.label }), updatedAt: status.updatedAt };
 }
 
-export async function fetchResult(cfg, id, client = new GhClient(cfg)) {
-  const r = await client.get(`jobs/${id}/result.json`);
+export async function fetchResult(cfg, id, client = new GhClient(cfg), onProgress) {
+  const r = await client.get(`jobs/${id}/result.json`, onProgress);
   if (!r) throw new Error('The result file is not there yet.');
   r.result = await gzUnpack(r.result);             // a big result is stored compressed
   // An older exploration result can hold far more rows than a phone can open (they were not limited then): keep the first rows
@@ -104,7 +114,7 @@ export async function fetchResult(cfg, id, client = new GhClient(cfg)) {
   if (t && t.rows && t.rows.length > VIEW_ROWS) { r.result.truncated = r.result.truncated || t.rows.length; t.rows.length = VIEW_ROWS; if (r.result.rows) r.result.rows.length = Math.min(r.result.rows.length, VIEW_ROWS); }
   return nfDecode(r);                              // NaN / Infinity were written in a form JSON keeps
 }
-const VIEW_ROWS = 20000;
+const VIEW_ROWS = 60000;
 
 /** Rebuilds the job list from the runner repo (jobs/<id>/job.json), so every device sees every past result. Returns how many jobs were added. */
 export async function loadJobsFromRepo(cfg, client = new GhClient(cfg), max = 30) {
@@ -124,7 +134,7 @@ const STATE_TXT = { waiting: 'starting', running: 'running', continuing: 'contin
 
 /** The panel. opts: { mode, canSubmit(mode)→spec|null (built by the Analysis window), onView(entry, resultFile), onForm } */
 export function openRemotePanel(opts) {
-  const st = { poll: {}, timer: null };
+  const st = { poll: {}, timer: null, loading: {} };
   return openModal('Run on GitHub', (body, close) => {
     const cfg = loadCfg();
     const note = (t, c = 'text-[11px] text-slate-400') => el('div', c, t);
@@ -169,11 +179,21 @@ export function openRemotePanel(opts) {
         if (p.state && p.state !== 'done') { const bar = el('div', 'h-1.5 rounded bg-slate-800 overflow-hidden'); const f = el('div', 'h-full bg-emerald-500'); f.style.width = (p.pct || 0) + '%'; bar.appendChild(f); card.appendChild(bar); }
         if (p.message) card.appendChild(note(p.message, 'text-[11px] text-amber-300'));
         const r = el('div', 'flex flex-wrap gap-2');
-        if (p.state === 'done') { const v = el('button', BTN_PRIMARY + ' !py-1', 'View result'); v.type = 'button'; v.onclick = async () => {
-          v.disabled = true; v.textContent = 'Loading…'; setMsg('Downloading the result from GitHub. A big result can take a minute or two on a slow connection.');
-          try { const c2 = cfg2(), cl = new GhClient(c2), res = await fetchResult(c2, j.id, cl), spec = await cl.get(`jobs/${j.id}/job.json`); setMsg('Opening…'); await opts.onView(j, res, spec); close(); }
-          catch (e) { setMsg(`Could not open this result: ${e.message}`); toast(e.message); }
-          v.disabled = false; v.textContent = 'View result';
+        if (p.state === 'done') { const ldg = st.loading[j.id], v = el('button', BTN_PRIMARY + ' !py-1', ldg || 'View result'); v.type = 'button'; v.disabled = !!ldg; v.onclick = async () => {
+          if (st.loading[j.id]) return;
+          st.loading[j.id] = 'Loading…'; draw();
+          try {
+            const c2 = cfg2(), cl = new GhClient(c2);
+            const size = ((await cl.list(`jobs/${j.id}`).catch(() => [])).find((f) => f.name === 'result.json') || {}).size || 0;     // how big is the file, before downloading it
+            if (size > 10e6 && !confirm(`This result file is ${(size / 1e6).toFixed(0)} MB (it was made by an older runner). Downloading it on a phone can take a long time.\n\nTip: send the job again - the current runner saves it about 20 times smaller.\n\nOpen it anyway?`)) return;
+            setMsg(`Downloading the result from GitHub${size ? ` (${(size / 1e6).toFixed(1)} MB)` : ''}. A big result can take a minute or two on a slow connection.`);
+            let last = 0;
+            const res = await fetchResult(c2, j.id, cl, (got, total) => { const now = Date.now(); if (now - last < 400) return; last = now; st.loading[j.id] = `Loading… ${(got / 1e6).toFixed(1)}${total || size ? ' / ' + ((total || size) / 1e6).toFixed(1) : ''} MB`; draw(); });
+            const spec = await cl.get(`jobs/${j.id}/job.json`); setMsg('Opening…'); st.loading[j.id] = 'Opening…'; draw();
+            await new Promise((r2) => setTimeout(r2, 30));                  // let "Opening…" show before the screen is built
+            await opts.onView(j, res, spec); close();
+          } catch (e) { setMsg(`Could not open this result: ${e.message}`); toast(e.message); }
+          finally { delete st.loading[j.id]; draw(); }
         }; r.appendChild(v); }
         const a = el('a', BTN + ' !py-1 inline-block', 'Open on GitHub'); a.href = `https://github.com/${j.repo}/actions`; a.target = '_blank'; a.rel = 'noopener'; r.appendChild(a);
         const x = el('button', BTN_DANGER + ' !py-1', 'Remove'); x.title = 'Takes this card off the list. The result stays in the repo.'; x.type = 'button'; x.onclick = () => { saveJobs(loadJobs().filter((k) => k.id !== j.id)); draw(); }; r.appendChild(x);
