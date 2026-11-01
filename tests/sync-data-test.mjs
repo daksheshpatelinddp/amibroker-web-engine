@@ -50,7 +50,7 @@ ok(Object.keys(itemsOf(A)).length === keys.length + 1, 'itemsOf lists what this 
 // ---- the PUBLIC library: what is published, and how a device follows it
 const P = collectPublic(A, { device: 'phone', now: 10 });
 ok(P.public === true && Object.keys(P.items).sort().join() === ['aa_projects_v1', 'aa_settings_v1', 'amibroker_categories_v2', 'amibroker_categories_v2__bse', 'amibroker_formulas_v1', 'amibroker_workspace_v1'].join(), 'public items: ' + Object.keys(P.items));
-ok(!JSON.stringify(P).includes('SECRET') && !('amibroker_pseudo_v1' in P.items) && !isPublicKey('intraday_cfg_v1') && !isPublicKey('user_databases_v1') && !isPublicKey('aa_remote_cfg_v1'), 'no tokens, keys, server settings or breadth data in the public file');
+ok(!JSON.stringify(P).includes('SECRET') && !('amibroker_pseudo_v1' in P.items) && !isPublicKey('intraday_cfg_v1') && !isPublicKey('aa_remote_cfg_v1'), 'no tokens, keys, server settings or breadth data in the public file');
 ok(hash32('abc') === hash32('abc') && hash32('abc') !== hash32('abd'), 'hash');
 // a brand-new device takes everything
 const N = mem(); const f1 = planFollow(N, P, null); ok(f1.newDevice && Object.keys(f1.writes).length === Object.keys(P.items).length, 'new device: takes everything');
@@ -72,4 +72,16 @@ const fx2 = planFollow(X, P, null); ok(!fx2.newDevice, 'a device with its own fo
 ok(JSON.parse(X.getItem('amibroker_categories_v2')).favorites[0] === 'OWN' && JSON.parse(X.getItem('amibroker_formulas_v1')).formulas.length === 3 && X.getItem('aa_projects_v1'), 'existing device: own categories kept, formulas joined, missing items filled');
 // force replaces everything
 const fz = planFollow(X, P2, null, { force: true }); apply(X, fz); ok(JSON.parse(X.getItem('amibroker_categories_v2')).favorites[0] === 'NEW', 'force: replaces with the public copy');
+// ---- databases added with File > New database are joined by id (never replaced, never removed)
+const DBS = JSON.stringify([{ id: 'bse', name: 'BSE', folder: 'bse', currency: 'INR', firstYear: 2000 }, { id: 'nyse', name: 'NYSE', folder: 'nyse', currency: 'USD', firstYear: 2000 }]);
+const PD = { ...P, savedAt: 40, items: { ...P.items, user_databases_v1: DBS } };
+ok(isPublicKey('user_databases_v1') && !isPublicKey('active_db_v1'), 'the database list is public, which database is on screen is not');
+const nd = mem(); const fd = planFollow(nd, PD, null); apply(nd, fd);
+ok(JSON.parse(nd.getItem('user_databases_v1')).map((x) => x.id).join() === 'bse,nyse', 'a new device gets both databases');
+const od = mem({ amibroker_formulas_v1: fx([{ id: 'u:own', name: 'Own', code: 'Buy=0;', updated: 5 }]), user_databases_v1: JSON.stringify([{ id: 'nasdaq', name: 'NASDAQ', folder: 'nasdaq', currency: 'USD' }, { id: 'bse', name: 'My BSE name', folder: 'bse' }]) });
+apply(od, planFollow(od, PD, null)); const odl = JSON.parse(od.getItem('user_databases_v1'));
+ok(odl.map((x) => x.id).join() === 'nasdaq,bse,nyse' && odl[1].name === 'My BSE name', 'a device that has its own databases keeps them (and its own spelling) and gains the others');
+apply(od, planFollow(od, { ...PD, savedAt: 41, items: { ...PD.items, user_databases_v1: '[]' } }, null, { force: true })); ok(JSON.parse(od.getItem('user_databases_v1')).length === 3, 'even "replace everything" never removes a database');
+ok(!('user_databases_v1' in nextState(od, PD, null, { user_databases_v1: DBS }).hashes), 'the database list is not tracked by hash (it is joined, not replaced)');
+const cp = collectPublic(mem({ user_databases_v1: DBS, active_db_v1: 'bse' }), {}); ok('user_databases_v1' in cp.items && !('active_db_v1' in cp.items), 'published: the list, not the active database');
 console.log(fail ? `${fail} FAILED` : `sync-data: all ${pass} checks passed`); process.exit(fail ? 1 : 0);
