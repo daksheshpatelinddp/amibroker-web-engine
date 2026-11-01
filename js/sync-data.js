@@ -72,7 +72,8 @@ export function restore(storage, undo) { for (const [k, v] of Object.entries(und
 
 // ---- The PUBLIC library (everyone who opens the app gets it) ---------------------------------------------------------------------
 // Only things that are fine to show to anybody: no tokens, no AI key, no server settings, no per-device state.
-export const PUBLIC_EXACT = ['amibroker_formulas_v1', 'amibroker_workspace_v1', 'amibroker_categories_v2', 'aa_settings_v1', 'aa_projects_v1'];
+export const PUBLIC_EXACT = ['amibroker_formulas_v1', 'amibroker_workspace_v1', 'amibroker_categories_v2', 'aa_settings_v1', 'aa_projects_v1', 'user_databases_v1'];
+export const DATABASES_KEY = 'user_databases_v1';           // markets added with File > New database: joined by id, so every device ends up with all of them
 export const PUBLIC_PREFIX = ['amibroker_categories_v2__'];
 export const APPLIED_KEY = 'shared_applied_v1';                    // { version, hashes } of the last public copy this device took
 export const isPublicKey = (k) => !NEVER.includes(k) && (PUBLIC_EXACT.includes(k) || PUBLIC_PREFIX.some((p) => String(k).startsWith(p)));
@@ -99,7 +100,11 @@ export function planFollow(storage, bundle, state, { force = false } = {}) {
   for (const [k, v] of Object.entries(bundle.items)) {
     if (!isPublicKey(k) || typeof v !== 'string') continue;
     const local = storage.getItem(k);
-    if (k === FORMULAS && !force && !newDevice) {
+    if (k === DATABASES_KEY) {                                                        // join by id; a device keeps its own and gains the others
+      const l = parse(local), r = parse(v), have = new Set((Array.isArray(l) ? l : []).map((x) => x && x.id));
+      const add = (Array.isArray(r) ? r : []).filter((x) => x && x.id && !have.has(x.id));
+      if (add.length) { writes[k] = JSON.stringify([...(Array.isArray(l) ? l : []), ...add]); notes.push(`${add.length} database${add.length === 1 ? '' : 's'}: ${add.map((x) => x.name || x.id).join(', ')}`); }
+    } else if (k === FORMULAS && !force && !newDevice) {
       const l = (parse(local) || {}).formulas || [], r = (parse(v) || {}).formulas || [], byId = new Map(l.filter((x) => x && x.id).map((x) => [x.id, x]));
       let added = 0, newer = 0;
       for (const x of r) { if (!x || !x.id) continue; const have = byId.get(x.id); if (!have) { byId.set(x.id, x); added++; } else if ((x.updated || 0) > (have.updated || 0)) { byId.set(x.id, x); newer++; } }
@@ -114,6 +119,6 @@ export function planFollow(storage, bundle, state, { force = false } = {}) {
 /** The record kept after a load: for every public item, the hash of the value that matches the public copy (so "unchanged by you" can be told later). */
 export function nextState(storage, bundle, prev, writes) {
   const hashes = { ...((prev && prev.hashes) || {}) };
-  for (const [k, v] of Object.entries(bundle.items)) { if (!isPublicKey(k)) continue; if (k in writes) { if (k !== FORMULAS) hashes[k] = hash32(writes[k]); } else if (storage.getItem(k) === v) hashes[k] = hash32(v); }
+  for (const [k, v] of Object.entries(bundle.items)) { if (!isPublicKey(k)) continue; if (k in writes) { if (k !== FORMULAS && k !== DATABASES_KEY) hashes[k] = hash32(writes[k]); } else if (storage.getItem(k) === v) hashes[k] = hash32(v); }
   return { version: String(bundle.savedAt), hashes };
 }

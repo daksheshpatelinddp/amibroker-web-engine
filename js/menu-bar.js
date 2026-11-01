@@ -60,6 +60,8 @@ export function buildMenus(api) {
 
   return [
     { label: 'File', items: () => [
+      { label: 'New database…', run: () => import('./categories-ui.js').then((m) => m.openAddDatabase(() => location.reload())) },
+      '-',
       { label: 'New sheet', run: () => app.sheetManager.add() },
       { label: 'Formula library…', run: () => import('./formula-library.js').then((m) => m.openLibrary({ mode: 'manage' })) },
       { label: 'Sync data between devices…', run: () => import('./sync-ui.js').then((m) => m.openSync()) },

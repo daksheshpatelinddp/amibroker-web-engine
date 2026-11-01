@@ -94,7 +94,7 @@ function openBulkAdd(title, already, onAdd) {
 }
 
 /** Add a database (market) whose files are in its own folder on R2. */
-function openAddDatabase(onDone) {
+export function openAddDatabase(onDone) {
   openModal('Add database', (b, close) => {
     b.appendChild(el('div', 'text-[11px] text-slate-400', 'A database is one market with its own symbols, categories, watchlists, favorites and indexes. Upload its files to the R2 bucket in a folder of its own (like nse/), then enter the folder name here.'));
     const nm = el('input', INPUT + ' w-full'); nm.placeholder = 'Name, e.g. BSE';
@@ -102,10 +102,17 @@ function openAddDatabase(onDone) {
     const cu = el('input', INPUT + ' w-full'); cu.value = 'INR';
     [['Name', nm], ['Folder on R2', fo], ['Currency', cu]].forEach(([l, c]) => { const w = el('label', 'block'); w.appendChild(el('div', 'text-[11px] text-slate-400 mb-1', l)); w.appendChild(c); b.appendChild(w); });
     const go = el('button', BTN_PRIMARY + ' w-full', 'Add'); go.type = 'button';
-    go.onclick = () => {
+    go.onclick = async () => {
       const id = addUserDatabase({ name: nm.value, folder: fo.value || nm.value, currency: cu.value.trim() || 'INR' });
       if (!id) { toast('Enter a name and a folder that is not already used.'); return; }
-      close.force(); toast(`${nm.value.trim()} added. Reloading...`); setTimeout(() => { onDone(id); }, 600);
+      close.force(); go.disabled = true;
+      // every device should have it: the database list is put into the public library (needs the GitHub token saved on this device)
+      let note = '';
+      try {
+        const { shareUserDatabases } = await import('./shared-data.js'); const r = await shareUserDatabases();
+        note = r.status === 'shared' ? ' Shared with all devices.' : r.status === 'no-token' ? ' This device only: use File → Sync data between devices → Publish to share it with the others.' : ` Could not share it (${r.error}).`;
+      } catch (e) { note = ' This device only.'; }
+      toast(`${nm.value.trim()} added.${note} Reloading...`); setTimeout(() => { onDone(id); }, note.length > 40 ? 2500 : 1200);
     };
     b.appendChild(go);
   }, { stack: true });

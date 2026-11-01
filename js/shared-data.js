@@ -1,8 +1,8 @@
 // The public library: every device loads it by itself when the app opens, and the owner publishes to it from File > Sync data.
 // It is one file (app-data.json) in a PUBLIC GitHub repo, read without any login. Rules for what is taken: see planFollow in sync-data.js.
 import { SHARED_DATA } from './config.js';
-import { GhClient } from './remote-analysis.js';
-import { checkBundle, collectPublic, planFollow, nextState, apply, hash32, APPLIED_KEY, UNDO_KEY, isPublicKey } from './sync-data.js';
+import { GhClient, loadCfg, cfgOk } from './remote-analysis.js';
+import { checkBundle, collectPublic, planFollow, nextState, apply, hash32, APPLIED_KEY, UNDO_KEY, DATABASES_KEY, isPublicKey } from './sync-data.js';
 
 const CFG_KEY = 'shared_cfg_v1';
 const parse = (s) => { try { return JSON.parse(s); } catch (e) { return null; } };
@@ -55,7 +55,30 @@ export async function publishShared({ cfg, token, storage = ls(), device = 'devi
   const bundle = collectPublic(storage, { device });
   if (!Object.keys(bundle.items).length) throw new Error('This device has nothing to publish yet (no formulas or categories).');
   await cl.put(SHARED_DATA.file, bundle, `Publish: shared library from ${device}`);
-  const hashes = {}; for (const [k, v] of Object.entries(bundle.items)) if (isPublicKey(k) && k !== 'amibroker_formulas_v1') hashes[k] = hash32(v);
+  const hashes = {}; for (const [k, v] of Object.entries(bundle.items)) if (isPublicKey(k) && k !== 'amibroker_formulas_v1' && k !== DATABASES_KEY) hashes[k] = hash32(v);
   try { storage.setItem(APPLIED_KEY, JSON.stringify({ version: String(bundle.savedAt), hashes })); } catch (e) { /* ignore */ }
   return bundle;
+}
+
+/**
+ * After File > New database: puts this device's database list into the PUBLIC copy so every device gets it. Only the database list is changed;
+ * the formulas and categories already published stay as they are. Needs the GitHub token saved on this device (Run on GitHub / Sync window).
+ * Returns { status: 'shared' | 'no-token' | 'failed', error? }.
+ */
+export async function shareUserDatabases({ storage = ls(), client, device = 'device', cfgOverride } = {}) {
+  const c = cfgOverride || loadCfg();
+  if (!client && !(c && c.token)) return { status: 'no-token' };
+  try {
+    const cfg = sharedCfg(storage), cl = client || new GhClient({ repo: cfg.repo, token: c.token, branch: cfg.branch });
+    const mine = parse(storage.getItem(DATABASES_KEY)); if (!Array.isArray(mine) || !mine.length) return { status: 'shared' };
+    const cur = await cl.get(SHARED_DATA.file);
+    if (cur && (typeof cur !== 'object' || !cur.items)) throw new Error('The public file has an unexpected format, so it was left alone.');   // never overwrite what we cannot read
+    const bundle = cur || { v: 1, app: 'amibroker-web', public: true, items: {} };
+    const theirs = parse(bundle.items[DATABASES_KEY]), have = new Set((Array.isArray(theirs) ? theirs : []).map((x) => x && x.id));
+    const merged = [...(Array.isArray(theirs) ? theirs : []), ...mine.filter((x) => x && x.id && !have.has(x.id))];
+    bundle.items = { ...bundle.items, [DATABASES_KEY]: JSON.stringify(merged) }; bundle.savedAt = Date.now(); bundle.device = device;
+    await cl.put(SHARED_DATA.file, bundle, `Publish: database list from ${device}`);
+    const st = parse(storage.getItem(APPLIED_KEY)) || { hashes: {} }; try { storage.setItem(APPLIED_KEY, JSON.stringify({ ...st, version: String(bundle.savedAt) })); } catch (e) { /* ignore */ }
+    return { status: 'shared' };
+  } catch (e) { return { status: 'failed', error: e.message }; }
 }
