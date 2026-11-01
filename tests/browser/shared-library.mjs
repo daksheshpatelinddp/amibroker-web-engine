@@ -13,7 +13,7 @@ async function device(name) {
     if (/^\/repos\/[^/]+\/[^/]+$/.test(u.pathname)) return route.fulfill({ status: 200, headers: CORS, json: { private: isPrivate } });
     const cm = u.pathname.match(/^\/repos\/[^/]+\/[^/]+\/contents\/(.+)$/);
     if (cm) { const p = decodeURIComponent(cm[1]);
-      if (m === 'GET') { if (!files.has(p)) return route.fulfill({ status: 404, headers: CORS, body: '{}' }); return route.fulfill({ status: 200, headers: CORS, json: { sha: files.get(p).sha } }); }
+      if (m === 'GET') { if (!files.has(p)) return route.fulfill({ status: 404, headers: CORS, body: '{}' }); const f = files.get(p); return /raw/.test(req.headers().accept || '') ? route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: f.text }) : route.fulfill({ status: 200, headers: CORS, json: { sha: f.sha } }); }
       if (m === 'PUT') { const body = JSON.parse(req.postData()); files.set(p, { text: Buffer.from(body.content, 'base64').toString('utf8'), sha: 's' + shaN++ }); return route.fulfill({ status: 201, headers: CORS, json: { content: { sha: 's' } } }); } }
     return route.fulfill({ status: 404, headers: CORS, body: '{}' });
   });
@@ -38,12 +38,12 @@ await A.pg.evaluate(() => {
   localStorage.setItem('amibroker_categories_v2', JSON.stringify({ v: 2, names: {}, favorites: ['TCS'] }));
   localStorage.setItem('amibroker_workspace_v1', JSON.stringify({ v: 1, activeId: 's1', sheets: [{ id: 's1', name: 'Sheet 1' }] }));
   localStorage.setItem('aa_remote_cfg_v1', JSON.stringify({ repo: 'me/private-runner', token: 'OWNER-TOKEN', branch: 'main', shards: 8 }));
-  localStorage.setItem('amibroker_ai_cfg_v1', JSON.stringify({ key: 'AI-SECRET' })); localStorage.setItem('intraday_cfg_v1', '{"server":"http://my-private-server"}'); localStorage.setItem('user_databases_v1', '[{"id":"x","name":"X","folder":"x"}]');
+  localStorage.setItem('amibroker_ai_cfg_v1', JSON.stringify({ key: 'AI-SECRET' })); localStorage.setItem('intraday_cfg_v1', '{"server":"http://my-private-server"}');
 });
 isPrivate = true; let t = await publish(A); ok(/PRIVATE/.test(t) && !files.has('app-data.json'), 'publishing to a PRIVATE repo is refused with a plain reason (nobody could read it)');
 isPrivate = false; t = await publish(A); ok(/Published: 2 formulas/.test(t) && files.has('app-data.json'), 'the owner publishes: ' + (t.match(/Published:[^\n]*/) || [''])[0]);
 const pub = JSON.parse(files.get('app-data.json').text);
-ok(pub.public === true && Object.keys(pub.items).every((k) => !/aa_remote|ai_cfg|intraday|user_databases|pseudo/.test(k)) && !files.get('app-data.json').text.match(/SECRET|OWNER-TOKEN|my-private-server/), 'the public file holds no token, AI key or server setting');
+ok(pub.public === true && Object.keys(pub.items).every((k) => !/aa_remote|ai_cfg|intraday|pseudo|active_db/.test(k)) && !files.get('app-data.json').text.match(/SECRET|OWNER-TOKEN|my-private-server/), 'the public file holds no token, AI key or server setting');
 
 // ---- a brand-new device (son's laptop): opens the app, nothing else
 const B = await device('laptop');
@@ -86,5 +86,27 @@ await D.pg.evaluate(() => window.openSyncTest()); await D.pg.getByRole('button',
 ok(!(await names(D)).includes('D own') && (await names(D)).includes('Fourth formula'), 'Load public library now replaces this device with the public copy');
 await D.pg.evaluate(() => window.openSyncTest()); await D.pg.getByRole('button', { name: /Undo last load/ }).click(); await D.pg.waitForFunction(() => /Undone/.test(document.body.innerText));
 ok((await names(D)).includes('D own'), 'and Undo brings the device back');
+// ---- File > New database: the owner adds BSE -> the public copy gets the list (formulas stay) -> a brand-new device has BSE
+const before = JSON.parse(files.get('app-data.json').text);
+const O = await device('owner-phone');
+await O.pg.evaluate(() => localStorage.setItem('aa_remote_cfg_v1', JSON.stringify({ repo: 'me/private-runner', token: 'OWNER-TOKEN', branch: 'main', shards: 8 })));
+const addDb = async (d, name, folder) => { await d.pg.evaluate(() => { window.__added = null; window.openAddDatabaseTest(); }); await d.pg.fill('input[placeholder="Name, e.g. BSE"]', name); await d.pg.fill('input[placeholder="R2 folder, e.g. bse"]', folder); await d.pg.getByRole('button', { name: 'Add', exact: true }).click(); await d.pg.waitForFunction(() => /added\./.test(document.body.innerText)); return d.pg.evaluate(() => document.body.innerText); };
+let tt = await addDb(O, 'BSE', 'bse'); ok(/BSE added\. Shared with all devices/.test(tt), 'the owner adds BSE and is told it is shared: ' + (tt.match(/BSE added[^\n]*/) || [''])[0]);
+await O.pg.waitForFunction(() => window.__added === 'bse', null, { timeout: 6000 });
+const after = JSON.parse(files.get('app-data.json').text);
+ok(JSON.parse(after.items.user_databases_v1).map((x) => x.id).join() === 'bse' && after.items.amibroker_formulas_v1 === before.items.amibroker_formulas_v1 && after.items.amibroker_categories_v2 === before.items.amibroker_categories_v2 && after.savedAt > before.savedAt, 'the public copy now lists BSE; the formulas and categories in it are untouched: ' + JSON.stringify({ ids: after.items.user_databases_v1, f: after.items.amibroker_formulas_v1 === before.items.amibroker_formulas_v1, c: after.items.amibroker_categories_v2 === before.items.amibroker_categories_v2, t: [before.savedAt, after.savedAt] }));
+const Pdev = await device('son-laptop-2');
+r = await Pdev.pg.evaluate(() => window.runAuto()); ok(r.status === 'loaded', 'a new device loads the public library including the database list');
+await Pdev.pg.reload(); await Pdev.pg.waitForFunction(() => window.ready);
+const dbs = await Pdev.pg.evaluate(async () => { const m = await import('/js/config.js'); return Object.values(m.DATABASES).map((d) => `${d.id}:${d.name}:${d.baseUrl.split('/').pop()}:${d.currency}`); });
+ok(dbs.includes('nse:NSE:nse:INR') && dbs.includes('bse:BSE:bse:INR'), 'after the reload the app on the new device offers BSE next to NSE: ' + dbs);
+// a device without the GitHub token keeps it on this device and says how to share it
+const nowText = files.get('app-data.json').text; const Q = await device('no-token');
+tt = await addDb(Q, 'NYSE', 'nyse'); ok(/NYSE added\. This device only/.test(tt) && files.get('app-data.json').text === nowText, 'without the token: kept on this device, nothing published, and the message says how to share it');
+// two owners add different markets: both end up in the list (joined, not replaced)
+await Pdev.pg.evaluate(() => localStorage.setItem('aa_remote_cfg_v1', JSON.stringify({ repo: 'me/private-runner', token: 'T2', branch: 'main', shards: 8 })));
+tt = await addDb(Pdev, 'NYSE', 'nyse'); await Pdev.pg.waitForFunction(() => window.__added === 'nyse', null, { timeout: 6000 });
+ok(JSON.parse(JSON.parse(files.get('app-data.json').text).items.user_databases_v1).map((x) => x.id).sort().join() === 'bse,nyse', 'a second market added from another device is joined into the public list');
+for (const d of [O, Pdev, Q]) ok(d.errs.length === 0, `${d.name}: no page errors ${d.errs.join('|')}`);
 for (const d of [A, B, C, D]) ok(d.errs.length === 0, `${d.name}: no page errors ${d.errs.join('|')}`);
 await b.close(); server.close(); console.log(fail ? `${fail} FAILED` : `shared-library: all ${pass} checks passed`); process.exit(fail ? 1 : 0);
