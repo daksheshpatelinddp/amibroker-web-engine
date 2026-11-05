@@ -38,4 +38,9 @@ ok(r.trades.map((t) => t.symbol).sort().join() === 'P,Y', 'option off: P is boug
 const b6 = mk(6, (i) => (i < 4 ? 100 : 110)), u6 = { symbol: 'Z', bars: b6, trades: rawTrades(b6, { buy: arr(6, [1]), sell: arr(6, [4]) }, base), score: [] };
 r = portfolio([u6], { ...base, initialEquity: 100000, positionSize: { size: 50, type: 2 }, commissionMode: 1, commissionAmount: 1 });
 const t0 = r.trades[0]; ok(Math.abs(t0.pctProfit - t0.profit / (t0.shares * t0.entryPrice) * 100) < 1e-9 && t0.pctProfit < 10, 'net % profit ' + t0.pctProfit);
+// 7. open positions are valued net of the commission their exit will cost (AmiBroker equity); option off = plain market value
+{ const b7 = mk(4, () => 100), u7 = { symbol: 'E', bars: b7, trades: rawTrades(b7, { buy: arr(4, [0]), sell: arr(4, []) }, base), score: [] };
+  const o7 = { ...base, initialEquity: 100000, positionSize: { size: 50, type: 2 }, commissionMode: 1, commissionAmount: 1 };
+  let q = portfolio([u7], o7).equityCurve[0]; ok(Math.abs(q.equity - (100000 - 500 - 500)) < 1e-6, 'net of exit commission: ' + q.equity);
+  q = portfolio([u7], { ...o7, equityNetOfExitCost: 0 }).equityCurve[0]; ok(Math.abs(q.equity - 99500) < 1e-6, 'option off: ' + q.equity); }
 console.log(`${pass} passed, ${fail} failed`); if (fail) process.exit(1);
