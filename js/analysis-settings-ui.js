@@ -87,6 +87,7 @@ export function openAnalysisSettings({ onSave } = {}) {
           chk(p, 'noVolLimitIfZero', 'Skip that limit when the bar volume is zero'),
           chk(p, 'usePrevBarEquity', 'Use previous bar equity for position sizing', 'Size by yesterday\'s closing equity instead of today\'s'),
           chk(p, 'stopEntriesOnFailure', 'Stop entries on a bar after one cannot be filled', 'On = AmiBroker: when the best-ranked signal has too little cash or buys under 1 share, lower-ranked signals of that bar are skipped'),
+          chk(p, 'equityNetOfExitCost', 'Value open positions net of exit commission', 'On = AmiBroker: equity and the size taken from it count the commission that closing each open position would cost'),
           head('Holding and early-exit fee'),
           row(num(p, 'holdMinBars', 'Hold at least (bars)', 'Exits and stops are ignored for this long', 1), num(p, 'holdMinDays', 'Hold at least (calendar days)', '', 1)),
           row(num(p, 'earlyExitBars', 'Early exit if within (bars)', '', 1), num(p, 'earlyExitDays', 'Early exit if within (days)', '', 1)),

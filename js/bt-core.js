@@ -13,7 +13,7 @@ const dayNum = (d) => Date.parse(d) / 86400000;
 export const DEFAULT_OPTIONS = {
   initialEquity: 100000, positions: 'both', futuresMode: 0, minShares: 1, minPosValue: 0, accountMargin: 100, roundLotSize: 0, tickSize: 0,
   commissionMode: 0, commissionAmount: 0, commissionTable: null, interestRate: 0,
-  allowPositionShrinking: 0, activateStopsImmediately: 0, reverseEntrySignalForce: 1, allowSameBarExit: 1, reenterSameBar: 0, stopEntriesOnFailure: 1, priceBounds: 1,
+  allowPositionShrinking: 0, activateStopsImmediately: 0, reverseEntrySignalForce: 1, allowSameBarExit: 1, reenterSameBar: 0, stopEntriesOnFailure: 1, equityNetOfExitCost: 1, priceBounds: 1,
   tradePrices: { buy: 'close', sell: 'close', short: 'close', cover: 'close' }, tradeDelays: [0, 0, 0, 0], stops: [],
   maxOpenPositions: 10, maxOpenLong: 0, maxOpenShort: 0, separateLongShortRank: 0, worstRankHeld: 0, positionSize: { size: 100, type: 2 },
   limitVolPct: 0, noVolLimitIfZero: 1, usePrevBarEquity: 0, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0,
@@ -23,7 +23,7 @@ export const DEFAULT_OPTIONS = {
 const FORMULA_KEYS = {
   initialequity: 'initialEquity', maxopenpositions: 'maxOpenPositions', maxopenlong: 'maxOpenLong', maxopenshort: 'maxOpenShort',
   separatelongshortrank: 'separateLongShortRank', commissionmode: 'commissionMode', commissionamount: 'commissionAmount',
-  allowsamebarexit: 'allowSameBarExit', reentersamebar: 'reenterSameBar', stopentriesonfailure: 'stopEntriesOnFailure', allowpositionshrinking: 'allowPositionShrinking', activatestopsimmediately: 'activateStopsImmediately',
+  allowsamebarexit: 'allowSameBarExit', reentersamebar: 'reenterSameBar', stopentriesonfailure: 'stopEntriesOnFailure', equitynetofexitcost: 'equityNetOfExitCost', allowpositionshrinking: 'allowPositionShrinking', activatestopsimmediately: 'activateStopsImmediately',
   pricebounds: 'priceBounds', priceboundchecking: 'priceBounds', minshares: 'minShares', minposvalue: 'minPosValue', roundlotsize: 'roundLotSize', ticksize: 'tickSize',
   worstrankheld: 'worstRankHeld', reverseentrysignalforce: 'reverseEntrySignalForce', reversesignalforcesexit: 'reverseEntrySignalForce',
   holdminbars: 'holdMinBars', holdmindays: 'holdMinDays', earlyexitbars: 'earlyExitBars', earlyexitdays: 'earlyExitDays', earlyexitfee: 'earlyExitFee',
@@ -214,6 +214,8 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
   const lastPx = (p, d) => { const i = idxMap[p.ui].get(d); if (i !== undefined) p.last = universe[p.ui].bars.c[i]; return p.last; };
   const valueOf = (p, price) => (fut ? p.margin * p.sh + p.dir * p.sh * p.pv * (price - p.ep) : p.dir * p.sh * price);
   const notional = (p, price) => (fut ? p.margin * p.sh : p.sh * price);
+  // AmiBroker values an open position net of the commission its exit will cost, so equity (and the position size taken from it) is lower than cash + market price value.
+  const mark = (p, price) => valueOf(p, price) - (opt.equityNetOfExitCost && !fut ? commissionFor(opt, notional(p, price), p.sh) : 0);
 
   for (const d of dates) {
     const events = [];
@@ -245,8 +247,8 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const u = universe[cd.ui], tr = cd.tr;
       if (tr.dir > 0 && opt.maxOpenLong > 0 && open.filter((p) => p.dir > 0).length >= opt.maxOpenLong) continue;
       if (tr.dir < 0 && opt.maxOpenShort > 0 && open.filter((p) => p.dir < 0).length >= opt.maxOpenShort) continue;
-      let eq = cash; for (const p of open) eq += valueOf(p, lastPx(p, d) ?? p.ep);
-      const sizeEq = opt.usePrevBarEquity ? prevEq : eq;
+      let eq = cash, eqNet = cash; for (const p of open) { const px = lastPx(p, d) ?? p.ep; eq += valueOf(p, px); eqNet += mark(p, px); }
+      const sizeEq = opt.usePrevBarEquity ? prevEq : eqNet;
       const pv = u.pointValue > 0 ? u.pointValue : 1;
       let margin = 0; if (fut) { const md = u.marginDeposit || 0; margin = md > 0 ? md : md < 0 ? -md / 100 * tr.ep * pv : tr.ep * pv; }
       let value, shares = 0;
@@ -281,7 +283,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       }
     }
     let eqv = cash, invested = 0;
-    for (const p of open) { const l = lastPx(p, d) || p.ep; eqv += valueOf(p, l); invested += notional(p, l); }
+    for (const p of open) { const l = lastPx(p, d) || p.ep; eqv += mark(p, l); invested += notional(p, l); }
     curve.push({ t: d, equity: eqv, cash, exposure: eqv > 0 ? 100 * invested / eqv : 0, open: open.length, events });
     prevEq = eqv;
   }
