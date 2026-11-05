@@ -273,7 +273,7 @@ export function psar(h, l, acc, mx) {
 // ---- logic / series helpers ----
 export function cross(a, b) {
   const L = a.length, out = newArr(L, 0);
-  for (let i = 1; i < L; i++) out[i] = (a[i] > b[i] && a[i - 1] <= b[i - 1]) ? 1 : 0;
+  for (let i = 1; i < L; i++) out[i] = (Math.fround(a[i]) > Math.fround(b[i]) && Math.fround(a[i - 1]) <= Math.fround(b[i - 1])) ? 1 : 0;   // 32-bit compare, as AmiBroker
   return out;
 }
 export function flip(a, b) {

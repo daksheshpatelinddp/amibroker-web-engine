@@ -281,12 +281,15 @@ const DOWN_SHAPES = new Set([2, 4, 6, 8, 10, 12]);
 
 // ======================================================================= helpers
 const truthy = (x) => x !== 0 && !Number.isNaN(x);
+const f32 = Math.fround;
 const NUM = {
   '+': (a, b) => a + b, '-': (a, b) => a - b, '*': (a, b) => a * b,
   '/': (a, b) => { const r = a / b; return Number.isFinite(r) ? r : NaN; },
   '%': (a, b) => a % b, '^': (a, b) => Math.pow(a, b),
-  '<': (a, b) => (a < b ? 1 : 0), '>': (a, b) => (a > b ? 1 : 0), '<=': (a, b) => (a <= b ? 1 : 0), '>=': (a, b) => (a >= b ? 1 : 0),
-  '==': (a, b) => (a === b ? 1 : 0), '!=': (a, b) => (a !== b && !(Number.isNaN(a) && Number.isNaN(b)) ? 1 : 0),
+  // AmiBroker keeps arrays as 32-bit floats, so two values that differ only in the 8th digit ARE equal there (a 50-bar average of a flat series equals the series).
+  // Comparisons therefore look at the 32-bit value of both sides; this also keeps  NC > MA(NC,50)  false when both are the same number.
+  '<': (a, b) => (f32(a) < f32(b) ? 1 : 0), '>': (a, b) => (f32(a) > f32(b) ? 1 : 0), '<=': (a, b) => (f32(a) <= f32(b) ? 1 : 0), '>=': (a, b) => (f32(a) >= f32(b) ? 1 : 0),
+  '==': (a, b) => (f32(a) === f32(b) ? 1 : 0), '!=': (a, b) => (f32(a) !== f32(b) && !(Number.isNaN(a) && Number.isNaN(b)) ? 1 : 0),
   // & and | are bitwise (styleLine | styleThick), AND / OR / && / || are logical
   '&': (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? 0 : (Math.trunc(a) & Math.trunc(b))),
   '|': (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? 0 : (Math.trunc(a) | Math.trunc(b))),
