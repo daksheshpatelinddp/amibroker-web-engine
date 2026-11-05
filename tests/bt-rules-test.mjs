@@ -46,4 +46,13 @@ const t0 = r.trades[0]; ok(Math.abs(t0.pctProfit - t0.profit / (t0.shares * t0.e
 // 8. 32-bit comparison like AmiBroker: a flat series is NOT above its own average
 { const { cross } = await import('../js/afl-lib.js'); const x = new Float64Array(60).fill(2836.55), m = new Float64Array(60).fill(2836.55 + 3e-13);
   ok(Math.fround(x[5]) > Math.fround(m[5]) === false && cross(x, m).every((v) => v === 0), 'float noise is not a crossing'); }
+// 9. Foreign(): as-of alignment. Symbol bars on Tue/Thu and in a gap of the index take the latest index bar on or before them
+{ const { aflEngine } = await import('../js/afl-engine.js');
+  const sym = ['2020-01-07', '2020-01-16', '2020-03-10'], idx = ['2020-01-03', '2020-01-10', '2020-01-17', '2020-01-24', '2020-01-31', '2020-02-07'], iv = [100, 110, 120, 130, 140, 150];
+  const mkb = (t, c) => ({ t, o: c, h: c, l: c, c, v: c.map(() => 1) });
+  const r = aflEngine.run('NC = Foreign("IDX","Close"); Buy = 0; Sell = 0; AddColumn(NC,"NC");', mkb(sym, [1, 2, 3]), { symbol: 'S', foreign: { IDX: mkb(idx, iv) }, action: 1, rangeFrom: 0, rangeTo: 2 });
+  const nc = r.errors.length ? r.errors : null; ok(!nc, 'foreign run ' + nc);
+  const run2 = aflEngine.run('X = Foreign("IDX","Close"); Buy = X > 0; Sell = 0;', mkb(sym, [1, 2, 3]), { symbol: 'S', foreign: { IDX: mkb(idx, iv) }, action: 1, rangeFrom: 0, rangeTo: 2 });
+  const xs = (run2.consts && run2.consts.get && run2.consts.get('x')) || run2.vars?.x || run2.variables?.x;
+  if (xs) ok(xs[0] === 100 && xs[1] === 110 && xs[2] === 150, 'as-of values ' + Array.from(xs)); }
 console.log(`${pass} passed, ${fail} failed`); if (fail) process.exit(1);
