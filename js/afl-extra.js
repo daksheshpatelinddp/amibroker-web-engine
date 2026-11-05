@@ -152,12 +152,16 @@ export function addExtras(F, E, H) {
     let f = (E.opts.foreign || {})[sym] || (E.opts.foreign || {})[String(sym).toUpperCase()];
     if (!f) { needs.add(String(sym)); return null; }
     if (E.tfForeign) f = E.tfForeign(f);                       // inside TimeFrameSet(): the other symbol's bars of that time frame
-    const map = new Map(f.t.map((d, i) => [d, i])), out = { o: newArr(N0()), h: newArr(N0()), l: newArr(N0()), c: newArr(N0()), v: newArr(N0()) };
-    let last = -1;
+    const out = { o: newArr(N0()), h: newArr(N0()), l: newArr(N0()), c: newArr(N0()), v: newArr(N0()) };
+    // AmiBroker: each bar of this symbol gets the foreign bar of the same date, or - when that date is missing in the other symbol - the LAST foreign bar dated before it
+    // (so a stock with a gap of years between two bars still sees the index of the right day, not the index of its previous bar).
+    const ft = f.t, fn = ft.length; let j = -1;
     for (let i = 0; i < n(); i++) {
-      const j = map.get(E.bars.t[i]);
-      if (j !== undefined) last = j;
-      if (last >= 0 && (j !== undefined || E.opts.padForeign !== false)) { out.o[i] = f.o[last]; out.h[i] = f.h[last]; out.l[i] = f.l[last]; out.c[i] = f.c[last]; out.v[i] = j !== undefined ? f.v[last] : 0; }
+      const d = E.bars.t[i];
+      while (j + 1 < fn && ft[j + 1] <= d) j++;
+      if (j < 0) continue;
+      const exact = ft[j] === d;
+      if (exact || E.opts.padForeign !== false) { out.o[i] = f.o[j]; out.h[i] = f.h[j]; out.l[i] = f.l[j]; out.c[i] = f.c[j]; out.v[i] = exact ? f.v[j] : 0; }
     }
     return out;
   };
