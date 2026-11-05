@@ -35,6 +35,7 @@ export function openAnalysisSettings({ onSave } = {}) {
           chk(g, 'activateStopsImmediately', 'Activate stops immediately', 'Stops may trigger on the entry bar (for entries at the open)'),
           chk(g, 'reverseSignalForcesExit', 'Reverse entry signal forces exit', 'A Short signal while long closes the long (and the opposite)'),
           chk(g, 'allowSameBarExit', 'Allow same bar exit (single bar trade)', 'Use only when you enter at the open'),
+          chk(g, 'reenterSameBar', 'Re-enter on the bar a position was closed by its Sell signal', 'Off = AmiBroker: a Buy on the same bar as that Sell is ignored'),
           chk(g, 'priceBounds', 'Check trade prices against the bar\'s High-Low', 'BuyPrice etc. outside the bar are pulled back into it'),
           head('Analysis window'), num(g, 'maxSymbols', 'Largest number of symbols per run (0 = no limit)', 'Optional safety limit for "All symbols" (each symbol is loaded one by one)'),
         ];
@@ -85,6 +86,7 @@ export function openAnalysisSettings({ onSave } = {}) {
           row(num(p, 'limitVolPct', 'Limit trade size to % of entry bar volume', '0 = off'), el('div')),
           chk(p, 'noVolLimitIfZero', 'Skip that limit when the bar volume is zero'),
           chk(p, 'usePrevBarEquity', 'Use previous bar equity for position sizing', 'Size by yesterday\'s closing equity instead of today\'s'),
+          chk(p, 'stopEntriesOnFailure', 'Stop entries on a bar after one cannot be filled', 'On = AmiBroker: when the best-ranked signal has too little cash or buys under 1 share, lower-ranked signals of that bar are skipped'),
           head('Holding and early-exit fee'),
           row(num(p, 'holdMinBars', 'Hold at least (bars)', 'Exits and stops are ignored for this long', 1), num(p, 'holdMinDays', 'Hold at least (calendar days)', '', 1)),
           row(num(p, 'earlyExitBars', 'Early exit if within (bars)', '', 1), num(p, 'earlyExitDays', 'Early exit if within (days)', '', 1)),

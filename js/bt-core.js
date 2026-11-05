@@ -13,7 +13,7 @@ const dayNum = (d) => Date.parse(d) / 86400000;
 export const DEFAULT_OPTIONS = {
   initialEquity: 100000, positions: 'both', futuresMode: 0, minShares: 1, minPosValue: 0, accountMargin: 100, roundLotSize: 0, tickSize: 0,
   commissionMode: 0, commissionAmount: 0, commissionTable: null, interestRate: 0,
-  allowPositionShrinking: 0, activateStopsImmediately: 0, reverseEntrySignalForce: 1, allowSameBarExit: 1, priceBounds: 1,
+  allowPositionShrinking: 0, activateStopsImmediately: 0, reverseEntrySignalForce: 1, allowSameBarExit: 1, reenterSameBar: 0, stopEntriesOnFailure: 1, priceBounds: 1,
   tradePrices: { buy: 'close', sell: 'close', short: 'close', cover: 'close' }, tradeDelays: [0, 0, 0, 0], stops: [],
   maxOpenPositions: 10, maxOpenLong: 0, maxOpenShort: 0, separateLongShortRank: 0, worstRankHeld: 0, positionSize: { size: 100, type: 2 },
   limitVolPct: 0, noVolLimitIfZero: 1, usePrevBarEquity: 0, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0,
@@ -23,7 +23,7 @@ export const DEFAULT_OPTIONS = {
 const FORMULA_KEYS = {
   initialequity: 'initialEquity', maxopenpositions: 'maxOpenPositions', maxopenlong: 'maxOpenLong', maxopenshort: 'maxOpenShort',
   separatelongshortrank: 'separateLongShortRank', commissionmode: 'commissionMode', commissionamount: 'commissionAmount',
-  allowsamebarexit: 'allowSameBarExit', allowpositionshrinking: 'allowPositionShrinking', activatestopsimmediately: 'activateStopsImmediately',
+  allowsamebarexit: 'allowSameBarExit', reentersamebar: 'reenterSameBar', stopentriesonfailure: 'stopEntriesOnFailure', allowpositionshrinking: 'allowPositionShrinking', activatestopsimmediately: 'activateStopsImmediately',
   pricebounds: 'priceBounds', priceboundchecking: 'priceBounds', minshares: 'minShares', minposvalue: 'minPosValue', roundlotsize: 'roundLotSize', ticksize: 'tickSize',
   worstrankheld: 'worstRankHeld', reverseentrysignalforce: 'reverseEntrySignalForce', reversesignalforcesexit: 'reverseEntrySignalForce',
   holdminbars: 'holdMinBars', holdmindays: 'holdMinDays', earlyexitbars: 'earlyExitBars', earlyexitdays: 'earlyExitDays', earlyexitfee: 'earlyExitFee',
@@ -75,7 +75,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   const tick = opt.tickSize > 0 ? opt.tickSize : 0, snap = (x) => (tick ? Math.round(x / tick) * tick : x);
   const longOK = opt.positions !== 'short', shortOK = opt.positions !== 'long';
   const holdBars = opt.holdMinBars || 0, holdDays = opt.holdMinDays || 0;
-  let pos = null, blockUntil = -1;
+  let pos = null, blockUntil = -1, sigExitBar = -1, sigExitDir = 0;   // sigExit*: a position closed by its own exit signal on this bar
 
   const close = (i, p, why) => { trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
   const open = (dir, i, p) => { const sb = i - (dir > 0 ? dB : dSh); pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: Math.max(0, sb) }; };
@@ -135,12 +135,15 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
     if (pos && !blocked) {
       const exitSig = pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC);
       const revSig = opt.reverseEntrySignalForce && (pos.dir > 0 ? (shortOK && sg(sig.short, i - dSh)) : (longOK && sg(sig.buy, i - dB)));
-      if (exitSig) close(i, exitPx(pos.dir, i), 'signal');
+      if (exitSig) { sigExitBar = i; sigExitDir = pos.dir; close(i, exitPx(pos.dir, i), 'signal'); }
       else if (revSig) close(i, exitPx(pos.dir, i), 'reverse');
     }
     // ---- entries
     if (!pos && i >= blockUntil) {
-      const lg = longOK && sg(sig.buy, i - dB), sh = shortOK && sg(sig.short, i - dSh);
+      // AmiBroker: while a position is open, a same-direction entry signal is redundant. So when the position was closed by its exit signal
+      // on this very bar, the entry signal on this bar is dropped (no instant re-entry) unless the user switched ReenterSameBar on.
+      const noLong = !opt.reenterSameBar && sigExitBar === i && sigExitDir > 0, noShort = !opt.reenterSameBar && sigExitBar === i && sigExitDir < 0;
+      const lg = longOK && !noLong && sg(sig.buy, i - dB), sh = shortOK && !noShort && sg(sig.short, i - dSh);
       const d = lg ? 1 : sh ? -1 : 0;
       if (d) {
         const p = d > 0 ? buyPx(i) : shortPx(i); open(d, i, p);
@@ -256,18 +259,20 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       }
       const lot = lotOf(u, opt);
       if (!shares) shares = roundShares(value / (fut ? margin : tr.ep), lot);
+      const minSh = Math.max(lot > 0 ? lot : 1, opt.minShares || 1), failStop = opt.stopEntriesOnFailure;   // AmiBroker: the first entry that cannot be filled ends the entries of this bar
+      if (shares < minSh && failStop) { events.push(`Not entered ${u.symbol}: position value ${Number.isFinite(value) ? value.toFixed(2) : value} buys fewer than ${minSh} share(s) at ${tr.ep.toFixed(2)}`); break; }
       if (opt.limitVolPct > 0) { const vol = u.bars.v ? u.bars.v[tr.ei] : 0; if (vol > 0 || !opt.noVolLimitIfZero) shares = Math.min(shares, roundShares(vol * opt.limitVolPct / 100, lot)); }
       if (shares < Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) continue;
       const cost = (n) => (fut ? margin * n : n * tr.ep);
       const bp = eq * 100 / (opt.accountMargin || 100) - open.reduce((s, p) => s + notional(p, p.last ?? p.ep), 0);
       if (cost(shares) + commissionFor(opt, cost(shares), shares) > bp + 1e-9) {
-        if (!opt.allowPositionShrinking) continue;
+        if (!opt.allowPositionShrinking) { if (failStop) { events.push(`Not entered ${u.symbol}: insufficient funds`); break; } continue; }
         let n2 = shares; while (n2 > 0 && cost(n2) + commissionFor(opt, cost(n2), n2) > bp) n2 = roundShares(n2 * 0.999 - (lot > 0 ? lot : 1), lot);
         shares = n2; if (shares < Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) continue;
       }
       if (opt.minPosValue > 0 && shares * tr.ep < opt.minPosValue) continue;
       const c = commissionFor(opt, cost(shares), shares);
-      const p = { ui: cd.ui, tr, dir: tr.dir, sh: shares, ep: tr.ep, ed: d, entryCommission: c, last: tr.ep, pv, margin };
+      const p = { ui: cd.ui, tr, dir: tr.dir, sh: shares, ep: tr.ep, ed: d, entryCommission: c, last: tr.ep, pv, margin, fut };
       cash -= (fut ? margin * shares : tr.dir * shares * tr.ep) + c;
       open.push(p); events.push(`${tr.dir > 0 ? 'Buy' : 'Short'} ${u.symbol} @ ${tr.ep.toFixed(2)} x ${shares}`);
       if (tr.xi === tr.ei) {                                            // exited on the same bar
@@ -294,6 +299,12 @@ function earlyFee(p, tr, t, opt, value) {
   return early ? value * opt.earlyExitFee / 100 : 0;
 }
 
+/** % Profit as AmiBroker shows it: net profit (after commission) over the entry position value. Falls back to the price change. */
+function pctNet(p, net, dir, xp) {
+  const base = p.margin > 0 && p.pv > 0 && p.sh > 0 && p.fut ? p.margin * p.sh : p.sh * p.ep;
+  return base > 0 ? net / base * 100 : dir * (xp / p.ep - 1) * 100;
+}
+
 function finish(p, universe, xp, xi, exitCommission, still = false) {
   const u = universe[p.ui], dir = p.dir, tr = p.tr, pv = p.pv || 1;
   const gross = dir * p.sh * pv * (xp - p.ep), cost = (p.entryCommission || 0) + (exitCommission || 0);
@@ -301,7 +312,7 @@ function finish(p, universe, xp, xi, exitCommission, still = false) {
   const mfe = dir > 0 ? (tr.hi - p.ep) / p.ep * 100 : (p.ep - tr.lo) / p.ep * 100;
   return {
     symbol: u.symbol, trade: dir > 0 ? 'Long' : 'Short', entryDate: u.bars.t[tr.ei], entryPrice: p.ep, exitDate: u.bars.t[Math.min(xi, u.bars.t.length - 1)],
-    exitPrice: xp, shares: p.sh, profit: gross - cost, pctProfit: dir * (xp / p.ep - 1) * 100, bars: Math.max(0, xi - tr.ei), reason: tr.reason,
+    exitPrice: xp, shares: p.sh, profit: gross - cost, pctProfit: pctNet(p, gross - cost, dir, xp), bars: Math.max(0, xi - tr.ei), reason: tr.reason,
     mae, mfe, commission: cost, open: !!still,
   };
 }

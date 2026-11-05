@@ -5,13 +5,13 @@ const tier = () => ({ basis: 'value', min: 0, max: 0, type: 'pct', amount: 0, mi
 
 export const DEFAULT_SETTINGS = {
   general: { initialEquity: 100000, positions: 'both', futuresMode: false, minShares: 1, minPosValue: 0, accountMargin: 100, interestRate: 0,
-    allowPositionShrinking: false, activateStopsImmediately: false, roundLotSize: 0, tickSize: 0, reverseSignalForcesExit: true, allowSameBarExit: true,
+    allowPositionShrinking: false, activateStopsImmediately: false, roundLotSize: 0, tickSize: 0, reverseSignalForcesExit: true, allowSameBarExit: true, reenterSameBar: false,
     priceBounds: true, maxSymbols: 0 },
   trades: { buyPrice: 'close', sellPrice: 'close', shortPrice: 'close', coverPrice: 'close', buyDelay: 0, sellDelay: 0, shortDelay: 0, coverDelay: 0 },
   stops: { maxLoss: { on: false, amount: 10, mode: 1 }, profit: { on: false, amount: 20, mode: 1 }, trail: { on: false, amount: 10, mode: 1 }, nbar: { on: false, amount: 10 }, exitAtStop: 1, reentryDelay: 0 },
   commission: { mode: 0, amount: 0, table: { default: { type: 'pct', amount: 0, minComm: 0, maxComm: 0 }, tiers: [tier(), tier(), tier(), tier(), tier()] } },
   portfolio: { maxOpenPositions: 10, positionSizeType: 'pct', positionSize: 100, maxOpenLong: 0, maxOpenShort: 0, separateLongShortRank: false, worstRankHeld: 0,
-    limitVolPct: 0, noVolLimitIfZero: true, usePrevBarEquity: false, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0 },
+    limitVolPct: 0, noVolLimitIfZero: true, usePrevBarEquity: false, stopEntriesOnFailure: true, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0 },
   report: { resultList: 'trades', riskFree: 5, distSpacing: 1, includeTradeList: true },
   walkForward: { isLength: 3, isUnit: 'years', oosLength: 1, oosUnit: 'years', anchored: false, start: '', last: '', target: 'carMdd' },
   optimize: { target: 'carMdd', engine: 'exhaustive', maxEval: 1000, runs: 3, keep: 100000, serverKeep: 5000 },
@@ -42,7 +42,7 @@ export function settingsToOptions(S = DEFAULT_SETTINGS) {
   const o = {
     initialEquity: g.initialEquity, positions: g.positions, futuresMode: b(g.futuresMode), minShares: g.minShares, minPosValue: g.minPosValue, accountMargin: g.accountMargin || 100,
     interestRate: g.interestRate, allowPositionShrinking: b(g.allowPositionShrinking), activateStopsImmediately: b(g.activateStopsImmediately), roundLotSize: g.roundLotSize, tickSize: g.tickSize,
-    reverseEntrySignalForce: b(g.reverseSignalForcesExit), allowSameBarExit: b(g.allowSameBarExit), priceBounds: b(g.priceBounds),
+    reverseEntrySignalForce: b(g.reverseSignalForcesExit), allowSameBarExit: b(g.allowSameBarExit), reenterSameBar: b(g.reenterSameBar), stopEntriesOnFailure: b(p.stopEntriesOnFailure), priceBounds: b(g.priceBounds),
     tradePrices: { buy: t.buyPrice, sell: t.sellPrice, short: t.shortPrice, cover: t.coverPrice }, tradeDelays: [t.buyDelay, t.sellDelay, t.shortDelay, t.coverDelay].map(Number),
     stops, commissionMode: c.mode, commissionAmount: c.amount, commissionTable: c.table,
     maxOpenPositions: p.maxOpenPositions, maxOpenLong: p.maxOpenLong, maxOpenShort: p.maxOpenShort, separateLongShortRank: b(p.separateLongShortRank), worstRankHeld: p.worstRankHeld,
