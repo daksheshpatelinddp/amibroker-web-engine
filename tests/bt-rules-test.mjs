@@ -43,4 +43,7 @@ const t0 = r.trades[0]; ok(Math.abs(t0.pctProfit - t0.profit / (t0.shares * t0.e
   const o7 = { ...base, initialEquity: 100000, positionSize: { size: 50, type: 2 }, commissionMode: 1, commissionAmount: 1 };
   let q = portfolio([u7], o7).equityCurve[0]; ok(Math.abs(q.equity - (100000 - 500 - 500)) < 1e-6, 'net of exit commission: ' + q.equity);
   q = portfolio([u7], { ...o7, equityNetOfExitCost: 0 }).equityCurve[0]; ok(Math.abs(q.equity - 99500) < 1e-6, 'option off: ' + q.equity); }
+// 8. 32-bit comparison like AmiBroker: a flat series is NOT above its own average
+{ const { cross } = await import('../js/afl-lib.js'); const x = new Float64Array(60).fill(2836.55), m = new Float64Array(60).fill(2836.55 + 3e-13);
+  ok(Math.fround(x[5]) > Math.fround(m[5]) === false && cross(x, m).every((v) => v === 0), 'float noise is not a crossing'); }
 console.log(`${pass} passed, ${fail} failed`); if (fail) process.exit(1);
