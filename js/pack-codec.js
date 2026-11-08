@@ -16,6 +16,8 @@ export function parseBlock(raw) {
   if (raw[0] !== 0x41 || raw[1] !== 0x42) throw new Error('Not a pack block');
   const version = raw[2];
   if (version === 2) return parseV2(raw);
+  // Float64Array needs an 8-byte aligned start: when the inflated bytes are a view into a bigger buffer (byteOffset % 8 != 0), copy them once
+  if (raw.byteOffset % 8) raw = raw.slice();
   const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
   const mode = raw[3];
   const n = dv.getUint32(4, true);
@@ -35,7 +37,7 @@ export function parseBlock(raw) {
       c[i] = s / scale; o[i] = (s + oc[i]) / scale; h[i] = (s + hc[i]) / scale; l[i] = (s + lc[i]) / scale;
     }
   } else {                                   // float64 prices (never expected for NSE data)
-    const f64 = () => { const a = new Float64Array(raw.buffer, raw.byteOffset + off, n); off += 8 * n; return a; };
+    const f64 = () => { const a = new Float64Array(raw.slice(off, off + 8 * n).buffer); off += 8 * n; return a; };   // copy: the float prices are not 8-byte aligned when n is even
     c.set(f64()); o.set(f64()); h.set(f64()); l.set(f64());
   }
   off += (8 - (off % 8)) % 8;
