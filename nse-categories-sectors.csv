@@ -192,8 +192,6 @@ DMART,Consumer Services,Consumer Services
 DOMS,Fast Moving Consumer Goods,Fast Moving Consumer Goods
 DRREDDY,Healthcare,Pharma
 DUMMYHEG,Capital Goods,Capital Goods
-DUMMYINGL1,Healthcare,Healthcare
-DUMMYINGL2,Fast Moving Consumer Goods,Fast Moving Consumer Goods
 DUMMYINXGN,Construction,Construction
 DYNAMATECH,Capital Goods,Capital Goods
 E2E,Information Technology,Information Technology
@@ -216,6 +214,7 @@ EMIL,Consumer Services,Consumer Services
 EMMVEE,Capital Goods,Capital Goods
 ENDURANCE,Automobile and Auto Components,Automobile and Auto Components
 ENGINERSIN,Construction,Construction
+ENNATURE,Healthcare,Healthcare
 ENRIN,Capital Goods,Capital Goods
 ENTERO,Consumer Services,Consumer Services
 EPL,Capital Goods,Capital Goods
@@ -316,6 +315,7 @@ IFBIND,Consumer Durables,Consumer Durables
 IFCI,Financial Services,Financial Services
 IGIL,Services,Services
 IGL,Oil Gas & Consumable Fuels,Oil & Gas
+IGLSPIRITS,Fast Moving Consumer Goods,Fast Moving Consumer Goods
 IIFL,Financial Services,Financial Services
 IIFLCAPS,Financial Services,Financial Services
 IKS,Information Technology,Information Technology
