@@ -40,18 +40,20 @@ export function cum(a) {
   return out;
 }
 
-// Exponential average. AmiBroker style: starts from the first real value (no SMA seed).
-function expAvg(a, k) {
-  const out = newArr(a.length); let prev = NaN;
+// Exponential average. AmiBroker style: seeds from the first real value (no SMA seed), but the
+// output stays undefined for the first `warm` bars after that value. Measured against AmiBroker 6.93
+// on the MACD system (signals only appear from bar 36 = 26 + 9 + 1), so EMA(n) is valid from first+n.
+function expAvg(a, k, warm = 0) {
+  const out = newArr(a.length); let prev = NaN, seen = 0;
   for (let i = 0; i < a.length; i++) {
     const v = a[i];
-    if (Number.isNaN(v)) { prev = NaN; continue; }
+    if (Number.isNaN(v)) { prev = NaN; seen = 0; continue; }
     prev = Number.isNaN(prev) ? v : prev + k * (v - prev);
-    out[i] = prev;
+    if (seen++ >= warm) out[i] = prev;
   }
   return out;
 }
-export function ema(a, n) { n = per(n); return Number.isNaN(n) ? newArr(a.length) : expAvg(a, 2 / (n + 1)); }
+export function ema(a, n) { n = per(n); return Number.isNaN(n) ? newArr(a.length) : expAvg(a, 2 / (n + 1), n); }
 export function wilders(a, n) { n = per(n); return Number.isNaN(n) ? newArr(a.length) : expAvg(a, 1 / n); }
 export function wma(a, n) {
   n = per(n); const L = a.length, out = newArr(L);
