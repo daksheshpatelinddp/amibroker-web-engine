@@ -288,7 +288,9 @@ const NUM = {
   '%': (a, b) => a % b, '^': (a, b) => Math.pow(a, b),
   // AmiBroker keeps arrays as 32-bit floats, so two values that differ only in the 8th digit ARE equal there (a 50-bar average of a flat series equals the series).
   // Comparisons therefore look at the 32-bit value of both sides; this also keeps  NC > MA(NC,50)  false when both are the same number.
-  '<': (a, b) => (f32(a) < f32(b) ? 1 : 0), '>': (a, b) => (f32(a) > f32(b) ? 1 : 0), '<=': (a, b) => (f32(a) <= f32(b) ? 1 : 0), '>=': (a, b) => (f32(a) >= f32(b) ? 1 : 0),
+  // a comparison with a Null (undefined) value is Null in AmiBroker, not False
+  '<': (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? NaN : f32(a) < f32(b) ? 1 : 0), '>': (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? NaN : f32(a) > f32(b) ? 1 : 0),
+  '<=': (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? NaN : f32(a) <= f32(b) ? 1 : 0), '>=': (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? NaN : f32(a) >= f32(b) ? 1 : 0),
   '==': (a, b) => (f32(a) === f32(b) ? 1 : 0), '!=': (a, b) => (f32(a) !== f32(b) && !(Number.isNaN(a) && Number.isNaN(b)) ? 1 : 0),
   // & and | are bitwise (styleLine | styleThick), AND / OR / && / || are logical
   '&': (a, b) => (Number.isNaN(a) || Number.isNaN(b) ? 0 : (Math.trunc(a) & Math.trunc(b))),
@@ -596,8 +598,8 @@ function buildFunctions(E) {
 
   // --- indicators on price
   F.rsi = (a) => L.rsiA(E.C, S(a[0], 14));
-  F.macd = (a) => { const c = E.C, f = S(a[0], 12), s = S(a[1], 26); const x = L.ema(c, f), y = L.ema(c, s); return x.map((v, i) => v - y[i]); };
-  F.signal = (a) => { const f = S(a[0], 12), s = S(a[1], 26), g = S(a[2], 9); const x = L.ema(E.C, f), y = L.ema(E.C, s); return L.ema(x.map((v, i) => v - y[i]), g); };
+  F.macd = (a) => L.macdLine(E.C, S(a[0], 12), S(a[1], 26));
+  F.signal = (a) => L.signalLine(E.C, S(a[0], 12), S(a[1], 26), S(a[2], 9));
   F.atr = (a) => L.atr(E.H, E.Lw, E.C, S(a[0], 14));
   F.adx = (a) => L.adx(E.H, E.Lw, E.C, S(a[0], 14));
   F.pdi = (a) => L.pdi(E.H, E.Lw, E.C, S(a[0], 14));
@@ -631,7 +633,7 @@ function buildFunctions(E) {
     const c = a[0], x = a[1], y = a[2];
     if (!isArr(c)) return truthy(c) ? x : y;
     const out = new Float64Array(c.length), xa = isArr(x), ya = isArr(y);
-    for (let i = 0; i < out.length; i++) out[i] = truthy(c[i]) ? (xa ? x[i] : x) : (ya ? y[i] : y);
+    for (let i = 0; i < out.length; i++) out[i] = Number.isNaN(c[i]) ? NaN : truthy(c[i]) ? (xa ? x[i] : x) : (ya ? y[i] : y);
     return out;
   };
   const map1 = (f) => (a) => (isArr(a[0]) ? a[0].map(f) : f(a[0]));
@@ -642,8 +644,8 @@ function buildFunctions(E) {
     nz: map1((x) => (Number.isNaN(x) ? 0 : x)), isnull: map1((x) => (Number.isNaN(x) ? 1 : 0)),
   });
   F.round = (a) => { const d = Math.pow(10, S(a[1], 0)); return map1((x) => Math.round(x * d) / d)([a[0]]); };
-  F.max = (a) => E.binary2(a[0], a[1], (x, y) => (Number.isNaN(x) ? y : Number.isNaN(y) ? x : Math.max(x, y)));
-  F.min = (a) => E.binary2(a[0], a[1], (x, y) => (Number.isNaN(x) ? y : Number.isNaN(y) ? x : Math.min(x, y)));
+  F.max = (a) => E.binary2(a[0], a[1], (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? NaN : Math.max(x, y)));
+  F.min = (a) => E.binary2(a[0], a[1], (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? NaN : Math.min(x, y)));
   F.mod = (a) => E.binary2(a[0], a[1], (x, y) => x % y);
   F.lastvalue = (a) => S(a[0]);
   F.selectedvalue = F.lastvalue;

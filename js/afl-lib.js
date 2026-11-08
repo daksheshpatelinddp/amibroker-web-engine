@@ -40,21 +40,47 @@ export function cum(a) {
   return out;
 }
 
-// Exponential average. AmiBroker style: seeds from the first real value (no SMA seed), but the
-// output stays undefined for the first `warm` bars after that value. Measured against AmiBroker 6.93
-// on the MACD system (signals only appear from bar 36 = 26 + 9 + 1), so EMA(n) is valid from first+n.
-function expAvg(a, k, warm = 0) {
-  const out = newArr(a.length); let prev = NaN, seen = 0;
+// Exponential average as AmiBroker computes EMA() and Wilders(): the first value is the simple average of the first n real
+// values (placed on bar f+n-1 and not shown), then the recursion runs, so the first visible value is on bar f+n
+// (f = first real input bar). Verified bar by bar against AmiBroker 6.93 exports.
+function expAvg(a, k, n) {
+  const L = a.length, out = newArr(L); let prev = NaN, seen = 0, acc = 0;
+  for (let i = 0; i < L; i++) {
+    const v = a[i];
+    if (Number.isNaN(v)) { prev = NaN; seen = 0; acc = 0; continue; }
+    if (seen < n) { acc += v; seen++; if (seen === n) prev = acc / n; continue; }
+    prev = prev + k * (v - prev); seen++;
+    out[i] = prev;
+  }
+  return out;
+}
+// plain recursion from the first value with no warm-up: what DEMA() and TEMA() do inside AmiBroker
+function expRaw(a, k) {
+  const out = newArr(a.length); let prev = NaN;
   for (let i = 0; i < a.length; i++) {
     const v = a[i];
-    if (Number.isNaN(v)) { prev = NaN; seen = 0; continue; }
+    if (Number.isNaN(v)) { prev = NaN; continue; }
     prev = Number.isNaN(prev) ? v : prev + k * (v - prev);
-    if (seen++ >= warm) out[i] = prev;
+    out[i] = prev;
   }
   return out;
 }
 export function ema(a, n) { n = per(n); return Number.isNaN(n) ? newArr(a.length) : expAvg(a, 2 / (n + 1), n); }
-export function wilders(a, n) { n = per(n); return Number.isNaN(n) ? newArr(a.length) : expAvg(a, 1 / n); }
+export function wilders(a, n) { n = per(n); return Number.isNaN(n) ? newArr(a.length) : expAvg(a, 1 / n, n); }
+export const wildersRaw = (a, n) => { n = per(n); return Number.isNaN(n) ? newArr(a.length) : expRaw(a, 1 / n); };
+export function macdLine(c, f, s) {
+  // MACD(): both averages run from the first bar without warm-up (like DEMA/TEMA); the line is shown from bar `slow`
+  const x = emaRaw(c, f), y = emaRaw(c, s), sl = per(s), out = newArr(c.length);
+  for (let i = sl; i < c.length; i++) out[i] = x[i] - y[i];
+  return out;
+}
+export function signalLine(c, f, s, g) {
+  // Signal(): EMA of the whole MACD series from bar 0 (no warm-up inside), shown from bar slow+signal
+  const x = emaRaw(c, f), y = emaRaw(c, s), m = x.map((v, i) => v - y[i]), sg = emaRaw(m, g), out = newArr(c.length);
+  for (let i = per(s) + per(g); i < c.length; i++) out[i] = sg[i];
+  return out;
+}
+export const emaRaw = (a, n) => { n = per(n); return Number.isNaN(n) ? newArr(a.length) : expRaw(a, 2 / (n + 1)); };
 export function wma(a, n) {
   n = per(n); const L = a.length, out = newArr(L);
   if (Number.isNaN(n)) return out;
@@ -66,9 +92,9 @@ export function wma(a, n) {
   }
   return out;
 }
-export function dema(a, n) { const e1 = ema(a, n), e2 = ema(e1, n); return e1.map((v, i) => 2 * v - e2[i]); }
+export function dema(a, n) { const e1 = emaRaw(a, n), e2 = emaRaw(e1, n); return e1.map((v, i) => 2 * v - e2[i]); }
 export function tema(a, n) {
-  const e1 = ema(a, n), e2 = ema(e1, n), e3 = ema(e2, n);
+  const e1 = emaRaw(a, n), e2 = emaRaw(e1, n), e3 = emaRaw(e2, n);
   return e1.map((v, i) => 3 * v - 3 * e2[i] + e3[i]);
 }
 
@@ -89,7 +115,7 @@ function extreme(a, n, isMax, wantBars) {
     for (let j = Math.max(0, i - n + 1); j <= i; j++) {
       const v = a[j];
       if (Number.isNaN(v)) continue;
-      if (Number.isNaN(best) || (isMax ? v >= best : v <= best)) { best = v; at = j; }
+      if (Number.isNaN(best) || (isMax ? Math.fround(v) > Math.fround(best) : Math.fround(v) < Math.fround(best))) { best = v; at = j; }
     }
     out[i] = wantBars ? (at < 0 ? NaN : i - at) : best;
   }
@@ -150,7 +176,7 @@ export const tsf = (a, n) => linreg(a, n, 'tsf');
 export function correlation(a, b, n) {
   n = per(n); const L = a.length, out = newArr(L);
   if (Number.isNaN(n)) return out;
-  for (let i = n - 1; i < L; i++) {
+  for (let i = n; i < L; i++) {
     let sa = 0, sb = 0, ok = true;
     for (let j = i - n + 1; j <= i; j++) { if (Number.isNaN(a[j]) || Number.isNaN(b[j])) { ok = false; break; } sa += a[j]; sb += b[j]; }
     if (!ok) continue;
@@ -198,7 +224,7 @@ export function cci(h, l, c, n) {
   n = per(n); const L = c.length, out = newArr(L);
   if (Number.isNaN(n)) return out;
   const tp = c.map((v, i) => (h[i] + l[i] + v) / 3), m = ma(tp, n);
-  for (let i = n - 1; i < L; i++) {
+  for (let i = n; i < L; i++) {
     if (Number.isNaN(m[i])) continue;
     let d = 0;
     for (let j = i - n + 1; j <= i; j++) d += Math.abs(tp[j] - m[i]);
@@ -210,7 +236,7 @@ export function cci(h, l, c, n) {
 
 export function stochK(h, l, c, n, k) {
   const hh = hhv(h, n), ll = llv(l, n);
-  const raw = c.map((v, i) => (hh[i] > ll[i] ? 100 * (v - ll[i]) / (hh[i] - ll[i]) : NaN));
+  const nn = per(n), raw = c.map((v, i) => (i >= nn - 1 && hh[i] > ll[i] ? 100 * (v - ll[i]) / (hh[i] - ll[i]) : NaN));
   return per(k) > 1 ? ma(raw, k) : raw;
 }
 
@@ -221,16 +247,18 @@ export function mfi(h, l, c, v, n) {
   const pos = newArr(L, 0), neg = newArr(L, 0);
   for (let i = 1; i < L; i++) {
     const mf = tp[i] * v[i];
-    if (tp[i] > tp[i - 1]) pos[i] = mf; else if (tp[i] < tp[i - 1]) neg[i] = mf;
+    const a1 = Math.fround(tp[i]), a0 = Math.fround(tp[i - 1]);
+    if (a1 > a0) pos[i] = mf; else if (a1 < a0) neg[i] = mf;
   }
   const sp = sum(pos, n), sn = sum(neg, n);
-  for (let i = 0; i < L; i++) if (!Number.isNaN(sp[i]) && !Number.isNaN(sn[i])) out[i] = sn[i] === 0 ? 100 : 100 - 100 / (1 + sp[i] / sn[i]);
+  for (let i = n; i < L; i++) if (!Number.isNaN(sp[i]) && !Number.isNaN(sn[i])) out[i] = sn[i] === 0 ? 100 : 100 - 100 / (1 + sp[i] / sn[i]);
   return out;
 }
 
 export function obv(c, v) {
   const out = newArr(c.length); let s = 0;
   for (let i = 0; i < c.length; i++) {
+    if (i === 0) s = v[0];
     if (i > 0) { if (c[i] > c[i - 1]) s += v[i]; else if (c[i] < c[i - 1]) s -= v[i]; }
     out[i] = s;
   }
@@ -246,7 +274,7 @@ export function rsiA(a, n) {
     if (Number.isNaN(d)) { up[i] = NaN; dn[i] = NaN; continue; }
     if (d > 0) up[i] = d; else dn[i] = -d;
   }
-  const au = wilders(up, n), ad = wilders(dn, n);
+  const au = wildersRaw(up, n), ad = wildersRaw(dn, n);
   for (let i = n; i < L; i++) out[i] = ad[i] === 0 ? 100 : 100 - 100 / (1 + au[i] / ad[i]);
   return out;
 }
@@ -275,12 +303,13 @@ export function psar(h, l, acc, mx) {
 // ---- logic / series helpers ----
 export function cross(a, b) {
   const L = a.length, out = newArr(L, 0);
-  for (let i = 1; i < L; i++) out[i] = (Math.fround(a[i]) > Math.fround(b[i]) && Math.fround(a[i - 1]) <= Math.fround(b[i - 1])) ? 1 : 0;   // 32-bit compare, as AmiBroker
+  out[0] = (Number.isNaN(a[0]) || Number.isNaN(b[0])) ? NaN : 0;
+  for (let i = 1; i < L; i++) out[i] = (Number.isNaN(a[i]) || Number.isNaN(b[i]) || Number.isNaN(a[i - 1]) || Number.isNaN(b[i - 1])) ? NaN : (Math.fround(a[i]) > Math.fround(b[i]) && Math.fround(a[i - 1]) <= Math.fround(b[i - 1])) ? 1 : 0;   // 32-bit compare, as AmiBroker
   return out;
 }
 export function flip(a, b) {
   const out = newArr(a.length, 0); let s = 0;
-  for (let i = 0; i < a.length; i++) { if (truthy(a[i])) s = 1; else if (truthy(b[i])) s = 0; out[i] = s; }
+  for (let i = 0; i < a.length; i++) { if (Number.isNaN(a[i]) || Number.isNaN(b[i])) { out[i] = NaN; continue; } if (truthy(a[i])) s = 1; else if (truthy(b[i])) s = 0; out[i] = s; }
   return out;
 }
 export function barsSince(c) {
@@ -323,16 +352,24 @@ export function swings(a, pct) {
   pivots.push({ idx: start, val: a[start] });
   for (let i = start + 1; i < L; i++) {
     const v = a[i]; if (Number.isNaN(v)) continue;
+    if (dir === 0) {   // first leg: the direction is set by the first move of `pct` percent away from the FIRST value (as AmiBroker)
+      if (v >= a[start] * (1 + pct / 100)) { dir = 1; hi = v; hiI = i; lo = v; loI = i; }
+      else if (v <= a[start] * (1 - pct / 100)) { dir = -1; lo = v; loI = i; hi = v; hiI = i; }
+      continue;
+    }
     if (v > hi) { hi = v; hiI = i; }
     if (v < lo) { lo = v; loI = i; }
-    if (dir >= 0 && v <= hi * (1 - pct / 100) && hiI >= loI) {          // fell far enough from the high: peak confirmed
+    if (dir >= 0 && v <= hi * (1 - pct / 100)) {          // fell far enough from the high: peak confirmed
       peaks.push({ idx: hiI, val: hi, at: i }); pivots.push({ idx: hiI, val: hi });
       dir = -1; lo = v; loI = i; hi = v; hiI = i;
-    } else if (dir <= 0 && v >= lo * (1 + pct / 100) && loI >= hiI) {   // rose far enough from the low: trough confirmed
+    } else if (dir <= 0 && v >= lo * (1 + pct / 100)) {   // rose far enough from the low: trough confirmed
       troughs.push({ idx: loI, val: lo, at: i }); pivots.push({ idx: loI, val: lo });
       dir = 1; hi = v; hiI = i; lo = v; loI = i;
     }
   }
+  // the leg still running at the end of the data counts as the latest peak / trough (AmiBroker shows it too)
+  if (dir === 1) peaks.push({ idx: hiI, val: hi, at: L, open: true });
+  else if (dir === -1) troughs.push({ idx: loI, val: lo, at: L, open: true });
   return { peaks, troughs, pivots };
 }
 
@@ -356,7 +393,7 @@ export function swingSeries(a, pct, n, isPeak, wantBars) {
   const L = a.length, out = newArr(L), s = swings(a, pct), list = isPeak ? s.peaks : s.troughs;
   let k = 0;                                     // how many swings are known so far
   for (let i = 0; i < L; i++) {
-    while (k < list.length && list[k].at <= i) k++;
+    while (k < list.length && list[k].idx <= i) k++;   // AmiBroker reports a swing from its own bar on, using the pivots of the whole series
     if (k >= n) { const sw = list[k - n]; out[i] = wantBars ? i - sw.idx : sw.val; }
   }
   return out;

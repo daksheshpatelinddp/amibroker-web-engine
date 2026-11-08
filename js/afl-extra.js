@@ -47,7 +47,7 @@ export function addExtras(F, E, H) {
   F.asin = (a) => (isArr(a[0]) ? a[0].map(Math.asin) : Math.asin(a[0])); F.acos = (a) => (isArr(a[0]) ? a[0].map(Math.acos) : Math.acos(a[0]));
   F.sinh = (a) => (isArr(a[0]) ? a[0].map(Math.sinh) : Math.sinh(a[0])); F.cosh = (a) => (isArr(a[0]) ? a[0].map(Math.cosh) : Math.cosh(a[0]));
   F.tanh = (a) => (isArr(a[0]) ? a[0].map(Math.tanh) : Math.tanh(a[0]));
-  F.exrem = (a) => { const x = A(a[0]), y = A(a[1]), out = newArr(n(), 0); let on = false; for (let i = 0; i < n(); i++) { if (on) { if (truthy(y[i])) on = false; } else if (truthy(x[i])) { on = true; out[i] = 1; } if (truthy(y[i]) && !truthy(out[i])) { /* keep */ } } return out; };
+  F.exrem = (a) => { const x = A(a[0]), y = A(a[1]), out = newArr(n(), 0); let on = false; for (let i = 0; i < n(); i++) { if (Number.isNaN(x[i]) && Number.isNaN(y[i])) { out[i] = NaN; continue; } if (on) { if (truthy(y[i])) on = false; } else if (truthy(x[i])) { on = true; out[i] = 1; } if (truthy(y[i]) && !truthy(out[i])) { /* keep */ } } return out; };
   F.exremspan = (a) => { const x = A(a[0]), span = S(a[1]), out = newArr(n(), 0); let last = -1e9; for (let i = 0; i < n(); i++) if (truthy(x[i]) && i - last > span) { out[i] = 1; last = i; } return out; };
   F.hold = (a) => { const x = A(a[0]), p = S(a[1]), out = newArr(n(), 0); let c = 0; for (let i = 0; i < n(); i++) { if (truthy(x[i])) c = p; else if (c > 0) c--; out[i] = c > 0 || truthy(x[i]) ? 1 : 0; } return out; };
   F.sumsince = (a) => { const c = A(a[0]), x = A(a[1]), out = newArr(n()); let s = NaN; for (let i = 0; i < n(); i++) { if (truthy(c[i])) s = 0; if (!Number.isNaN(s)) { s += x[i]; out[i] = s; } } return out; };
