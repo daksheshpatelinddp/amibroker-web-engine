@@ -55,4 +55,12 @@ const t0 = r.trades[0]; ok(Math.abs(t0.pctProfit - t0.profit / (t0.shares * t0.e
   const run2 = aflEngine.run('X = Foreign("IDX","Close"); Buy = X > 0; Sell = 0;', mkb(sym, [1, 2, 3]), { symbol: 'S', foreign: { IDX: mkb(idx, iv) }, action: 1, rangeFrom: 0, rangeTo: 2 });
   const xs = (run2.consts && run2.consts.get && run2.consts.get('x')) || run2.vars?.x || run2.variables?.x;
   if (xs) ok(xs[0] === 100 && xs[1] === 110 && xs[2] === 150, 'as-of values ' + Array.from(xs)); }
-console.log(`${pass} passed, ${fail} failed`); if (fail) process.exit(1);
+ if (fail) process.exit(1);
+// 9. positions still open on the LAST bar keep their cash (AmiBroker: later entries of that bar fail for insufficient funds), and an open trade is charged its exit commission
+{ const n = 6, last = n - 1; const mkL = (sym, score) => { const b = mk(n, () => 10); return { symbol: sym, bars: b, trades: rawTrades(b, { buy: arr(n, [last]), sell: arr(n, []) }, base), score: Array(n).fill(score) }; };
+  const UL = [mkL('A', 90), mkL('B', 80), mkL('C', 70), mkL('D', 60), mkL('E', 50)];
+  const rl = portfolio(UL, { ...base, initialEquity: 100000, positionSize: { size: 30, type: 2 } });
+  ok(rl.trades.length === 3, 'last bar: only 3 x 30% fit in the cash, got ' + rl.trades.length);
+  const rc = portfolio([mkL('A', 90)], { ...base, initialEquity: 100000, positionSize: { size: 50, type: 2 }, commissionMode: 1, commissionAmount: 1 });
+  ok(Math.abs(rc.trades[0].profit - (-500 - 500)) < 1e-6, 'open trade net of both commissions: ' + rc.trades[0].profit); }
+console.log(`${pass} passed, ${fail} failed`);
