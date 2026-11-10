@@ -268,7 +268,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const cost = (n) => (fut ? margin * n : n * tr.ep);
       const bp = eq * 100 / (opt.accountMargin || 100) - open.reduce((s, p) => s + notional(p, p.last ?? p.ep), 0);
       if (cost(shares) + commissionFor(opt, cost(shares), shares) > bp + 1e-9) {
-        if (!opt.allowPositionShrinking) { if (failStop) { events.push(`Not entered ${u.symbol}: insufficient funds`); break; } continue; }
+        if (!opt.allowPositionShrinking && !(cost(shares) <= bp + 1e-9 && opt.shrinkForCommission !== 0)) { if (failStop) { events.push(`Not entered ${u.symbol}: insufficient funds`); break; } continue; }
         let n2 = shares; n2 = roundShares(n2 * bp / (cost(n2) + commissionFor(opt, cost(n2), n2)), lot); while (n2 > 0 && cost(n2) + commissionFor(opt, cost(n2), n2) > bp) n2 = roundShares(n2 - (lot > 0 ? lot : 1), lot);   // largest size that fits the cash, commission included
         shares = n2; if (shares < Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) continue;
       }
