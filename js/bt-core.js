@@ -269,7 +269,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const bp = eq * 100 / (opt.accountMargin || 100) - open.reduce((s, p) => s + notional(p, p.last ?? p.ep), 0);
       if (cost(shares) + commissionFor(opt, cost(shares), shares) > bp + 1e-9) {
         if (!opt.allowPositionShrinking && !(Number.isFinite(value) && value <= bp + 1e-9 && opt.shrinkForCommission !== 0)   /* AmiBroker: a request whose VALUE fits the cash is trimmed to leave room for commission; a request bigger than the cash is skipped */) { if (failStop) { events.push(`Not entered ${u.symbol}: insufficient funds`); break; } continue; }
-        let n2 = shares; n2 = roundShares(n2 * bp / (cost(n2) + commissionFor(opt, cost(n2), n2)), lot); while (n2 > 0 && cost(n2) + commissionFor(opt, cost(n2), n2) > bp) n2 = roundShares(n2 - (lot > 0 ? lot : 1), lot);   // largest size that fits the cash, commission included
+        let f = Number.isFinite(value) && !fut ? value / tr.ep : shares, n2 = shares; while (n2 > 0 && cost(n2) + commissionFor(opt, cost(n2), n2) > bp) { f *= 0.9995; const nx = roundShares(f, lot); n2 = nx < n2 ? nx : roundShares(n2 - (lot > 0 ? lot : 1), lot); f = Math.min(f, n2); }   // AmiBroker trims the size in 0.05% steps until value + commission fit the cash (measured: 74,734.49 -> 74,697 shares)
         shares = n2; if (shares < Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) continue;
       }
       if (opt.minPosValue > 0 && shares * tr.ep < opt.minPosValue) continue;
