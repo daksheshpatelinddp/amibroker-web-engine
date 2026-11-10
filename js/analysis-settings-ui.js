@@ -59,7 +59,6 @@ export function openAnalysisSettings({ onSave } = {}) {
           box.appendChild(row(...r)); return box;
         };
         return [stop('maxLoss', 'Maximum loss stop', true), stop('profit', 'Profit target stop', true), stop('trail', 'Trailing stop', true), stop('nbar', 'N-bar stop', false),
-          sel(s, 'exitAtStop', 'Exit at stop', { 0: '0: compare the trade price only, exit at the trade price', 1: '1: check High/Low, exit at the stop level on the same bar', 2: '2: check High/Low, exit on the next bar at the trade price' }, 'Same as the 4th argument of ApplyStop()', true),
           num(s, 'reentryDelay', 'Re-entry delay (bars)', 'Bars to wait after a stop before the symbol can be entered again', 1)];
       },
       Commissions() {
