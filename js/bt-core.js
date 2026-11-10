@@ -77,7 +77,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   const holdBars = opt.holdMinBars || 0, holdDays = opt.holdMinDays || 0;
   let pos = null, blockUntil = -1, sigExitBar = -1, sigExitDir = 0;   // sigExit*: a position closed by its own exit signal on this bar
 
-  const close = (i, p, why) => { trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
+  const close = (i, p, why) => { sigExitBar = i; sigExitDir = pos.dir; trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
   const open = (dir, i, p) => { const sb = i - (dir > 0 ? dB : dSh); pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: Math.max(0, sb) }; };
 
   for (let i = 0; i < n; i++) {
@@ -135,7 +135,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
     if (pos && !blocked) {
       const exitSig = pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC);
       const revSig = opt.reverseEntrySignalForce && (pos.dir > 0 ? (shortOK && sg(sig.short, i - dSh)) : (longOK && sg(sig.buy, i - dB)));
-      if (exitSig) { sigExitBar = i; sigExitDir = pos.dir; close(i, exitPx(pos.dir, i), 'signal'); }
+      if (exitSig) { close(i, exitPx(pos.dir, i), 'signal'); }
       else if (revSig) close(i, exitPx(pos.dir, i), 'reverse');
     }
     // ---- entries
