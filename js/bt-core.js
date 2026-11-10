@@ -113,10 +113,10 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
           const eas = s.exitAtStop === undefined ? 0 : s.exitAtStop;
           const why = ['loss', 'profit', 'trail'][type];
           if (eas === 0) {                                  // only the trade price is compared with the stop
-            const p = exitPx(dir, i), hit = type === 1 ? (dir > 0 ? p >= level : p <= level) : (dir > 0 ? p <= level : p >= level);
+            const p = exitPx(dir, i), F = Math.fround, hit = type === 1 ? (dir > 0 ? F(p) >= F(level) : F(p) <= F(level)) : (dir > 0 ? F(p) <= F(level) : F(p) >= F(level));
             if (hit) { close(i, p, why); blockUntil = i + (s.reentry || 0); }
           } else {
-            const hit = type === 1 ? (dir > 0 ? bars.h[i] >= level : bars.l[i] <= level) : (dir > 0 ? bars.l[i] <= level : bars.h[i] >= level);
+            const F = Math.fround, hit = type === 1 ? (dir > 0 ? F(bars.h[i]) >= F(level) : F(bars.l[i]) <= F(level)) : (dir > 0 ? F(bars.l[i]) <= F(level) : F(bars.h[i]) >= F(level));   // AmiBroker compares 32-bit floats: 18.8 +20% = 22.56 must hit a 22.56 high
             if (!hit) continue;
             if (eas === 2) { pos.pending = why; pos.pendingReentry = s.reentry || 0; }
             else {
