@@ -56,7 +56,9 @@ export function openAnalysisSettings({ onSave } = {}) {
           const o = s[key], box = el('div', 'rounded border border-slate-800 p-2 space-y-1');
           box.appendChild(chk(o, 'on', title)); const r = [num(o, 'amount', hasMode ? 'Amount' : 'Bars', '', 'any')];
           if (hasMode) r.push(sel(o, 'mode', 'In', key === 'trail' ? { 1: 'Percent', 2: 'Points', 3: 'Percent of profit' } : { 1: 'Percent', 2: 'Points' }, '', true));
-          box.appendChild(row(...r)); return box;
+          box.appendChild(row(...r));
+          if (hasMode) { if (o.exitAt === undefined) o.exitAt = 0; box.appendChild(row(sel(o, 'exitAt', 'Exit at', { 0: 'Exit at trade price only (0)', 1: 'Exit intraday at stop (1)', 2: 'Exit next bar at trade price (2)' }, 'AmiBroker has this choice on the max loss, profit target and trailing stops, not on the N-bar stop (which always exits on the next bar at the trade price)', true))); }
+          return box;
         };
         return [stop('maxLoss', 'Maximum loss stop', true), stop('profit', 'Profit target stop', true), stop('trail', 'Trailing stop', true), stop('nbar', 'N-bar stop', false),
           num(s, 'reentryDelay', 'Re-entry delay (bars)', 'Bars to wait after a stop before the symbol can be entered again', 1)];

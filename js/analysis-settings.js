@@ -8,7 +8,7 @@ export const DEFAULT_SETTINGS = {
     allowPositionShrinking: false, activateStopsImmediately: false, roundLotSize: 0, tickSize: 0, reverseSignalForcesExit: true, allowSameBarExit: true, reenterSameBar: false,
     priceBounds: true, maxSymbols: 0 },
   trades: { buyPrice: 'close', sellPrice: 'close', shortPrice: 'close', coverPrice: 'close', buyDelay: 0, sellDelay: 0, shortDelay: 0, coverDelay: 0 },
-  stops: { maxLoss: { on: false, amount: 10, mode: 1 }, profit: { on: false, amount: 20, mode: 1 }, trail: { on: false, amount: 10, mode: 1 }, nbar: { on: false, amount: 10 }, exitAtStop: 2, reentryDelay: 0 },
+  stops: { maxLoss: { on: false, amount: 10, mode: 1, exitAt: 0 }, profit: { on: false, amount: 20, mode: 1, exitAt: 0 }, trail: { on: false, amount: 10, mode: 1, exitAt: 0 }, nbar: { on: false, amount: 10 }, reentryDelay: 0 },
   commission: { mode: 0, amount: 0, table: { default: { type: 'pct', amount: 0, minComm: 0, maxComm: 0 }, tiers: [tier(), tier(), tier(), tier(), tier()] } },
   portfolio: { maxOpenPositions: 10, positionSizeType: 'pct', positionSize: 100, maxOpenLong: 0, maxOpenShort: 0, separateLongShortRank: false, worstRankHeld: 0,
     limitVolPct: 0, noVolLimitIfZero: true, usePrevBarEquity: false, stopEntriesOnFailure: true, equityNetOfExitCost: true, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0 },
@@ -35,8 +35,8 @@ const SIZE_TYPE = { value: 1, pct: 2, shares: 4 };
 /** Settings -> option object for bt-core (the base that the formula's SetOption() calls are applied over). */
 export function settingsToOptions(S = DEFAULT_SETTINGS) {
   const g = S.general, t = S.trades, st = S.stops, p = S.portfolio, c = S.commission, b = (x) => (x ? 1 : 0);
-  const stops = [];   // exitAtStop is fixed to 2 (check High/Low, exit on the next bar at the trade price): that is how AmiBroker's Analysis Settings stops behave, and the setting is no longer offered
-  const add = (type, o, extra = {}) => { if (o && o.on && o.amount > 0) stops.push({ type, mode: o.mode === undefined ? 1 : o.mode, amount: Number(o.amount), exitAtStop: 2, reentry: st.reentryDelay || 0, ...extra }); };
+  const stops = [];   // each price stop has its own 'Exit at' (0/1/2) like AmiBroker's Stops tab; the N-bar stop has none and always exits on the next bar at the trade price (2)
+  const add = (type, o, extra = {}) => { if (o && o.on && o.amount > 0) stops.push({ type, mode: o.mode === undefined ? 1 : o.mode, amount: Number(o.amount), exitAtStop: o.exitAt === undefined ? 0 : Number(o.exitAt), reentry: st.reentryDelay || 0, ...extra }); };
   add(0, st.maxLoss); add(1, st.profit); add(2, st.trail);
   if (st.nbar && st.nbar.on && st.nbar.amount > 0) stops.push({ type: 3, mode: 1, amount: Number(st.nbar.amount), exitAtStop: 2, reentry: st.reentryDelay || 0 });
   const o = {
