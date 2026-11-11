@@ -77,7 +77,9 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   const holdBars = opt.holdMinBars || 0, holdDays = opt.holdMinDays || 0;
   let pos = null, blockUntil = -1, sigExitBar = -1, sigExitDir = 0;   // sigExit*: a position closed by its own exit signal on this bar
 
-  const close = (i, p, why) => { sigExitBar = i; sigExitDir = pos.dir; trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
+  const sigNow = (i) => (pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC));
+  // AmiBroker: a position whose own exit signal is also true on the bar it leaves is closed as a regular signal exit (processed before the entries), whichever stop fired
+  const close = (i, p, why) => { if (why !== 'signal' && why !== 'reverse' && why !== 'open' && sigNow(i)) why = 'signal'; sigExitBar = i; sigExitDir = pos.dir; trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
   const open = (dir, i, p) => { const sb = i - (dir > 0 ? dB : dSh); pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: Math.max(0, sb) }; };
   const runStops = (i) => {
     const dir = pos.dir;
