@@ -225,18 +225,23 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
     // interest on uninvested cash (annual rate, per calendar day)
     if (opt.interestRate && prevDate && cash > 0) cash += cash * opt.interestRate / 100 * Math.max(0, dayNum(d) - dayNum(prevDate)) / 365;
     prevDate = d;
-    // exits that happen on this date
-    for (let k = open.length - 1; k >= 0; k--) {
-      const p = open[k], xd = universe[p.ui].bars.t[p.tr.xi];
-      if (xd === d && !p.tr.open) {
-        const val = notional(p, p.tr.xp);
-        let c = commissionFor(opt, val, p.sh);
-        c += earlyFee(p, p.tr, universe[p.ui].bars.t, opt, val);
-        cash += valueOf(p, p.tr.xp) - c;
-        done.push(finish(p, universe, p.tr.xp, p.tr.xi, c)); events.push(`${p.dir > 0 ? 'Sell' : 'Cover'} ${universe[p.ui].symbol} @ ${p.tr.xp.toFixed(2)} x ${p.sh}`);
-        open.splice(k, 1);
+    // exits that happen on this date. With ActivateStopsImmediately AmiBroker triggers the stops AFTER the regular signals, so a position closed by a
+    // stop frees its cash only after this bar's entries were taken (AmiBroker log: "Enter Long ..." lines come before the stop "Exit Long" lines).
+    const isStopExit = (p) => opt.activateStopsImmediately && ['loss', 'profit', 'trail', 'nbar'].includes(p.tr.reason);
+    const doExits = (late) => {
+      for (let k = open.length - 1; k >= 0; k--) {
+        const p = open[k], xd = universe[p.ui].bars.t[p.tr.xi];
+        if (xd === d && !p.tr.open && isStopExit(p) === late) {
+          const val = notional(p, p.tr.xp);
+          let c = commissionFor(opt, val, p.sh);
+          c += earlyFee(p, p.tr, universe[p.ui].bars.t, opt, val);
+          cash += valueOf(p, p.tr.xp) - c;
+          done.push(finish(p, universe, p.tr.xp, p.tr.xi, c)); events.push(`${p.dir > 0 ? 'Sell' : 'Cover'} ${universe[p.ui].symbol} @ ${p.tr.xp.toFixed(2)} x ${p.sh}`);
+          open.splice(k, 1);
+        }
       }
-    }
+    };
+    doExits(false);
     // entries on this date, best score first
     let cands = (entriesByDate.get(d) || []);
     const byScore = (a, b) => Math.abs(b.score) - Math.abs(a.score);
@@ -286,6 +291,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
         cash += valueOf(p, tr.xp) - c2; done.push(finish(p, universe, tr.xp, tr.xi, c2)); events.push(`${tr.dir > 0 ? 'Sell' : 'Cover'} ${u.symbol} @ ${tr.xp.toFixed(2)} x ${shares}`);
       }
     }
+    doExits(true);
     let eqv = cash, invested = 0;
     for (const p of open) { const l = lastPx(p, d) || p.ep; eqv += mark(p, l); invested += notional(p, l); }
     curve.push({ t: d, equity: eqv, cash, exposure: eqv > 0 ? 100 * invested / eqv : 0, open: open.length, events });
