@@ -132,17 +132,17 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
     const held = pos ? i - pos.ei : 0;
     const blocked = pos && (held < holdBars || (holdDays > 0 && dayNum(bars.t[i]) - dayNum(bars.t[pos.ei]) < holdDays));
     // ---- a stop that fired last bar with ExitAtStop = 2 exits now at the normal price
-    // ---- built-in stops (active from the bar after entry unless ActivateStopsImmediately)
-    if (pos && !blocked && (i > pos.ei || opt.activateStopsImmediately)) runStops(i);
-    // ---- a stop that fired on an earlier bar with Exit-at = 2 leaves now at the normal price, unless another (intraday) stop already closed the position on this bar (AmiBroker: profit target at 20% in mode 1 won over a pending trailing exit)
-    if (pos && !blocked && pos.pending && pos.pendingBar < i) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(pos.dir, i), why); blockUntil = i + re; }
-    // ---- exits by signal, and exits forced by a reverse entry signal
+    // ---- exits by signal, and exits forced by a reverse entry signal (AmiBroker handles the regular signals first and the built-in stops after them: when both apply on one bar the signal price wins)
     if (pos && !blocked) {
       const exitSig = pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC);
       const revSig = opt.reverseEntrySignalForce && (pos.dir > 0 ? (shortOK && sg(sig.short, i - dSh)) : (longOK && sg(sig.buy, i - dB)));
       if (exitSig) { close(i, exitPx(pos.dir, i), 'signal'); }
       else if (revSig) close(i, exitPx(pos.dir, i), 'reverse');
     }
+    // ---- built-in stops (active from the bar after entry unless ActivateStopsImmediately)
+    if (pos && !blocked && (i > pos.ei || opt.activateStopsImmediately)) runStops(i);
+    // ---- a stop that fired on an earlier bar with Exit-at = 2 leaves now at the normal price, unless another (intraday) stop already closed the position on this bar (AmiBroker: profit target at 20% in mode 1 won over a pending trailing exit)
+    if (pos && !blocked && pos.pending && pos.pendingBar < i) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(pos.dir, i), why); blockUntil = i + re; }
     // ---- entries
     if (!pos && i >= blockUntil) {
       // AmiBroker: while a position is open, a same-direction entry signal is redundant. So when the position was closed by its exit signal
