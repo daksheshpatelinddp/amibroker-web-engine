@@ -79,17 +79,8 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
 
   const close = (i, p, why) => { sigExitBar = i; sigExitDir = pos.dir; trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
   const open = (dir, i, p) => { const sb = i - (dir > 0 ? dB : dSh); pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: Math.max(0, sb) }; };
-
-  for (let i = 0; i < n; i++) {
-    if (!(bars.c[i] > 0)) continue;
-    const dir = pos ? pos.dir : 0;
-    if (pos) { pos.hi = Math.max(pos.hi, bars.h[i]); pos.lo = Math.min(pos.lo, bars.l[i]); }
-    const held = pos ? i - pos.ei : 0;
-    const blocked = pos && (held < holdBars || (holdDays > 0 && dayNum(bars.t[i]) - dayNum(bars.t[pos.ei]) < holdDays));
-    // ---- a stop that fired last bar with ExitAtStop = 2 exits now at the normal price
-    if (pos && !blocked && pos.pending) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(dir, i), why); blockUntil = i + re; }
-    // ---- built-in stops (active from the bar after entry unless ActivateStopsImmediately)
-    if (pos && !blocked && (i > pos.ei || opt.activateStopsImmediately)) {
+  const runStops = (i) => {
+    const dir = pos.dir;
       const order = [0, 1, 2, 3];
       for (const type of order) {
         for (const s of stops.filter((x) => x.type === type)) {
@@ -130,7 +121,18 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
         }
         if (!pos) break;
       }
-    }
+      };
+
+  for (let i = 0; i < n; i++) {
+    if (!(bars.c[i] > 0)) continue;
+    const dir = pos ? pos.dir : 0;
+    if (pos) { pos.hi = Math.max(pos.hi, bars.h[i]); pos.lo = Math.min(pos.lo, bars.l[i]); }
+    const held = pos ? i - pos.ei : 0;
+    const blocked = pos && (held < holdBars || (holdDays > 0 && dayNum(bars.t[i]) - dayNum(bars.t[pos.ei]) < holdDays));
+    // ---- a stop that fired last bar with ExitAtStop = 2 exits now at the normal price
+    if (pos && !blocked && pos.pending) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(dir, i), why); blockUntil = i + re; }
+    // ---- built-in stops (active from the bar after entry unless ActivateStopsImmediately)
+    if (pos && !blocked && (i > pos.ei || opt.activateStopsImmediately)) runStops(i);
     // ---- exits by signal, and exits forced by a reverse entry signal
     if (pos && !blocked) {
       const exitSig = pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC);
@@ -148,6 +150,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
       if (d) {
         const p = d > 0 ? buyPx(i) : shortPx(i); open(d, i, p);
         if (opt.allowSameBarExit && (d > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC))) close(i, exitPx(d, i), 'signal');
+        if (pos && opt.activateStopsImmediately && holdBars <= 0) runStops(i);
       }
     }
   }
