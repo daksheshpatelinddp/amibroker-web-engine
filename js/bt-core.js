@@ -289,7 +289,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const p = { ui: cd.ui, tr, dir: tr.dir, sh: shares, ep: tr.ep, ed: d, entryCommission: c, last: tr.ep, pv, margin, fut };
       cash -= (fut ? margin * shares : tr.dir * shares * tr.ep) + c;
       open.push(p); events.push(`${tr.dir > 0 ? 'Buy' : 'Short'} ${u.symbol} @ ${tr.ep.toFixed(2)} x ${shares}`);
-      if (tr.xi === tr.ei && !tr.open) {                                // exited on the same bar (a position merely still open on the last bar is NOT an exit: it keeps its cash)
+      if (tr.xi === tr.ei && !tr.open && !isStopExit(p)) {   /* a stop that fired on the entry bar (ActivateStopsImmediately) is carried out after the entries: the cash stays tied up until then */                                // exited on the same bar (a position merely still open on the last bar is NOT an exit: it keeps its cash)
         open.pop(); const val = notional(p, tr.xp); let c2 = commissionFor(opt, val, p.sh); c2 += earlyFee(p, tr, u.bars.t, opt, val);
         cash += valueOf(p, tr.xp) - c2; done.push(finish(p, universe, tr.xp, tr.xi, c2)); events.push(`${tr.dir > 0 ? 'Sell' : 'Cover'} ${u.symbol} @ ${tr.xp.toFixed(2)} x ${shares}`);
       }
