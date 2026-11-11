@@ -111,7 +111,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
           } else {
             const F = Math.fround, hit = type === 1 ? (dir > 0 ? F(bars.h[i]) >= level : F(bars.l[i]) <= level) : (dir > 0 ? F(bars.l[i]) <= level : F(bars.h[i]) >= level);   // AmiBroker: prices are 32-bit floats, the stop level is computed from them in double and NOT rounded back (18.8 +20% hits a 22.56 high; 20.5 -10% = 18.45 does not hit a 18.45 low)
             if (!hit) continue;
-            if (eas === 2) { pos.pending = why; pos.pendingReentry = s.reentry || 0; }
+            if (eas === 2) { if (!pos.pending) { pos.pending = why; pos.pendingBar = i; pos.pendingReentry = s.reentry || 0; } }
             else {
               let p = level;
               if (type !== 1) p = dir > 0 ? Math.min(level, bars.o[i]) : Math.max(level, bars.o[i]);     // gap beyond the stop: filled at the open
@@ -132,9 +132,10 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
     const held = pos ? i - pos.ei : 0;
     const blocked = pos && (held < holdBars || (holdDays > 0 && dayNum(bars.t[i]) - dayNum(bars.t[pos.ei]) < holdDays));
     // ---- a stop that fired last bar with ExitAtStop = 2 exits now at the normal price
-    if (pos && !blocked && pos.pending) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(dir, i), why); blockUntil = i + re; }
     // ---- built-in stops (active from the bar after entry unless ActivateStopsImmediately)
     if (pos && !blocked && (i > pos.ei || opt.activateStopsImmediately)) runStops(i);
+    // ---- a stop that fired on an earlier bar with Exit-at = 2 leaves now at the normal price, unless another (intraday) stop already closed the position on this bar (AmiBroker: profit target at 20% in mode 1 won over a pending trailing exit)
+    if (pos && !blocked && pos.pending && pos.pendingBar < i) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(pos.dir, i), why); blockUntil = i + re; }
     // ---- exits by signal, and exits forced by a reverse entry signal
     if (pos && !blocked) {
       const exitSig = pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC);
