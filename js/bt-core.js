@@ -114,7 +114,10 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
             if (eas === 2) { if (!pos.pending) { pos.pending = why; pos.pendingBar = i; pos.pendingReentry = s.reentry || 0; } }
             else {
               let p = level;
-              if (type !== 1) p = dir > 0 ? Math.min(level, bars.o[i]) : Math.max(level, bars.o[i]);     // gap beyond the stop: filled at the open
+              // gap beyond the stop: filled at the open. AmiBroker (observed with ActivateStopsImmediately on): a trailing stop, whose level already follows this bar's own high, is filled at its level
+              // even when the bar opened below it, so no open clamp is applied to a trailing stop in that case.
+              if (type === 2 && opt.activateStopsImmediately) p = level;
+              else if (type !== 1) p = dir > 0 ? Math.min(level, bars.o[i]) : Math.max(level, bars.o[i]);
               else p = dir > 0 ? Math.max(level, bars.o[i]) : Math.min(level, bars.o[i]);
               p = Math.min(bars.h[i], Math.max(bars.l[i], p));
               close(i, p, why); blockUntil = i + (s.reentry || 0);
