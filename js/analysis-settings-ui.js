@@ -61,6 +61,7 @@ export function openAnalysisSettings({ onSave } = {}) {
           return box;
         };
         return [stop('maxLoss', 'Maximum loss stop', true), stop('profit', 'Profit target stop', true), stop('trail', 'Trailing stop', true), stop('nbar', 'N-bar stop', false),
+          chk(s.nbar, 'priority', 'N-bar stop has priority', 'Evaluate the N-bar stop before the other stops when several trigger on the same bar (AmiBroker: "Has priority")'),
           num(s, 'reentryDelay', 'Re-entry delay (bars)', 'Bars to wait after a stop before the symbol can be entered again', 1)];
       },
       Commissions() {

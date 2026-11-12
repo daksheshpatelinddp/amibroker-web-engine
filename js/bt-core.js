@@ -16,7 +16,7 @@ export const DEFAULT_OPTIONS = {
   allowPositionShrinking: 0, activateStopsImmediately: 0, reverseEntrySignalForce: 1, allowSameBarExit: 1, reenterSameBar: 0, stopEntriesOnFailure: 1, equityNetOfExitCost: 1, priceBounds: 1,
   tradePrices: { buy: 'close', sell: 'close', short: 'close', cover: 'close' }, tradeDelays: [0, 0, 0, 0], stops: [],
   maxOpenPositions: 10, maxOpenLong: 0, maxOpenShort: 0, separateLongShortRank: 0, worstRankHeld: 0, positionSize: { size: 100, type: 2 },
-  limitVolPct: 0, noVolLimitIfZero: 1, usePrevBarEquity: 0, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0,
+  limitVolPct: 0, noVolLimitIfZero: 1, usePrevBarEquity: 1, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0,
   riskFree: 5, mode: 0, reportMode: 0,
 };
 
@@ -83,7 +83,8 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   const open = (dir, i, p) => { const sb = i - (dir > 0 ? dB : dSh); pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: Math.max(0, sb) }; };
   const runStops = (i) => {
     const dir = pos.dir;
-      const order = [0, 1, 2, 3];
+      // AmiBroker: N-bar stop has the lowest priority, unless ExitAtStop = 1 (formula) or "Has priority" (settings) puts it first
+      const order = stops.some((x) => x.type === 3 && (x.priority || x.exitAtStop === 1)) ? [3, 0, 1, 2] : [0, 1, 2, 3];
       for (const type of order) {
         for (const s of stops.filter((x) => x.type === type)) {
           if (!pos) break;

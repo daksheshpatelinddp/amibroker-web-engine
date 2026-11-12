@@ -11,7 +11,7 @@ export const DEFAULT_SETTINGS = {
   stops: { maxLoss: { on: false, amount: 10, mode: 1, exitAt: 0 }, profit: { on: false, amount: 20, mode: 1, exitAt: 0 }, trail: { on: false, amount: 10, mode: 1, exitAt: 0 }, nbar: { on: false, amount: 10 }, reentryDelay: 0 },
   commission: { mode: 0, amount: 0, table: { default: { type: 'pct', amount: 0, minComm: 0, maxComm: 0 }, tiers: [tier(), tier(), tier(), tier(), tier()] } },
   portfolio: { maxOpenPositions: 10, positionSizeType: 'pct', positionSize: 100, maxOpenLong: 0, maxOpenShort: 0, separateLongShortRank: false, worstRankHeld: 0,
-    limitVolPct: 0, noVolLimitIfZero: true, usePrevBarEquity: false, stopEntriesOnFailure: true, equityNetOfExitCost: true, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0 },
+    limitVolPct: 0, noVolLimitIfZero: true, usePrevBarEquity: true, stopEntriesOnFailure: true, equityNetOfExitCost: true, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0 },
   report: { resultList: 'trades', riskFree: 5, distSpacing: 1, includeTradeList: true },
   walkForward: { isLength: 3, isUnit: 'years', oosLength: 1, oosUnit: 'years', anchored: false, start: '', last: '', target: 'carMdd' },
   optimize: { target: 'carMdd', engine: 'exhaustive', maxEval: 1000, runs: 3, keep: 100000, serverKeep: 5000 },
@@ -38,7 +38,7 @@ export function settingsToOptions(S = DEFAULT_SETTINGS) {
   const stops = [];   // each price stop has its own 'Exit at' (0/1/2) like AmiBroker's Stops tab; the N-bar stop has none and always exits on the next bar at the trade price (2)
   const add = (type, o, extra = {}) => { if (o && o.on && o.amount > 0) stops.push({ type, mode: o.mode === undefined ? 1 : o.mode, amount: Number(o.amount), exitAtStop: o.exitAt === undefined ? 0 : Number(o.exitAt), reentry: st.reentryDelay || 0, ...extra }); };
   add(0, st.maxLoss); add(1, st.profit); add(2, st.trail);
-  if (st.nbar && st.nbar.on && st.nbar.amount > 0) stops.push({ type: 3, mode: 1, amount: Number(st.nbar.amount), exitAtStop: 2, reentry: st.reentryDelay || 0 });
+  if (st.nbar && st.nbar.on && st.nbar.amount > 0) stops.push({ type: 3, mode: 1, amount: Number(st.nbar.amount), exitAtStop: 2, priority: !!st.nbar.priority, reentry: st.reentryDelay || 0 });
   const o = {
     initialEquity: g.initialEquity, positions: g.positions, futuresMode: b(g.futuresMode), minShares: g.minShares, minPosValue: g.minPosValue, accountMargin: g.accountMargin || 100,
     interestRate: g.interestRate, allowPositionShrinking: b(g.allowPositionShrinking), activateStopsImmediately: b(g.activateStopsImmediately), roundLotSize: g.roundLotSize, tickSize: g.tickSize,
