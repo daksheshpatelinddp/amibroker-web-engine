@@ -206,19 +206,39 @@ function dirMove(h, l) {
   }
   return { pdm, mdm };
 }
-export function pdi(h, l, c, n) {
-  const { pdm } = dirMove(h, l), a = atr(h, l, c, n), s = wilders(pdm, n);
-  return s.map((v, i) => (a[i] > 0 ? 100 * v / a[i] : NaN));
+// +DI / -DI / ADX as AmiBroker computes them (reverse-engineered from an AmiBroker export, max difference 3e-5 = its 6 printed decimals):
+//   TR smoothed with Wilder, seeded with the plain average of TR[0..n-1] (TR[0] = H-L);  +DM/-DM smoothed the same way, seeded with the average of DM[1..n];
+//   +DI = 100 * smoothed(+DM) / smoothed(TR); DX = 100*|+DI - -DI| / (+DI + -DI); ADX = Wilder average of DX seeded with the average of DX[n+2 .. 2n+1].
+//   Every series is blank on its seed bar and starts on the next bar (ATR from bar n, +DI/-DI from bar n+1, ADX from bar 2n+2, 0-based).
+function dmiParts(h, l, c, n) {
+  n = per(n); const L = h.length, dm = { pdi: newArr(L), mdi: newArr(L), dx: newArr(L), adx: newArr(L) };
+  if (Number.isNaN(n) || n < 1 || L < n + 2) return dm;
+  const { pdm, mdm } = dirMove(h, l), tr = trueRange(h, l, c);
+  let a = 0, p = 0, m = 0;
+  for (let i = 0; i < n; i++) a += tr[i];
+  for (let i = 1; i <= n; i++) { p += pdm[i]; m += mdm[i]; }
+  a /= n; p /= n; m /= n;                                  // seeds on bar n-1 (TR) and bar n (DM)
+  const dxv = newArr(L);
+  for (let i = n; i < L; i++) {
+    if (i > n) { p = (p * (n - 1) + pdm[i]) / n; m = (m * (n - 1) + mdm[i]) / n; }
+    a = (a * (n - 1) + tr[i]) / n;
+    if (i <= n) continue;                                   // bar n is the seed bar of the DM average: blank
+    const dp = a > 0 ? 100 * p / a : NaN, dn = a > 0 ? 100 * m / a : NaN;
+    dm.pdi[i] = dp; dm.mdi[i] = dn;
+    dxv[i] = dp + dn > 0 ? 100 * Math.abs(dp - dn) / (dp + dn) : NaN;
+  }
+  dm.dx = dxv;
+  const s0 = n + 2, seedBar = 2 * n + 1;
+  if (L > seedBar + 1) {
+    let sum = 0; for (let i = s0; i <= seedBar; i++) sum += dxv[i];
+    let ax = sum / n;
+    for (let i = seedBar + 1; i < L; i++) { ax = (ax * (n - 1) + dxv[i]) / n; dm.adx[i] = ax; }
+  }
+  return dm;
 }
-export function mdi(h, l, c, n) {
-  const { mdm } = dirMove(h, l), a = atr(h, l, c, n), s = wilders(mdm, n);
-  return s.map((v, i) => (a[i] > 0 ? 100 * v / a[i] : NaN));
-}
-export function adx(h, l, c, n) {
-  const p = pdi(h, l, c, n), m = mdi(h, l, c, n);
-  const dx = p.map((v, i) => (v + m[i] > 0 ? 100 * Math.abs(v - m[i]) / (v + m[i]) : NaN));
-  return wilders(dx, n);
-}
+export const pdi = (h, l, c, n) => dmiParts(h, l, c, n).pdi;
+export const mdi = (h, l, c, n) => dmiParts(h, l, c, n).mdi;
+export const adx = (h, l, c, n) => dmiParts(h, l, c, n).adx;
 
 export function cci(h, l, c, n) {
   n = per(n); const L = c.length, out = newArr(L);
