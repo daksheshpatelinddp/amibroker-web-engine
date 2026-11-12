@@ -63,4 +63,18 @@ const t0 = r.trades[0]; ok(Math.abs(t0.pctProfit - t0.profit / (t0.shares * t0.e
   ok(rl.trades.length === 3, 'last bar: only 3 x 30% fit in the cash, got ' + rl.trades.length);
   const rc = portfolio([mkL('A', 90)], { ...base, initialEquity: 100000, positionSize: { size: 50, type: 2 }, commissionMode: 1, commissionAmount: 1 });
   ok(Math.abs(rc.trades[0].profit - (-500 - 500)) < 1e-6, 'open trade net of both commissions: ' + rc.trades[0].profit); }
+
+// 10. ActivateStopsImmediately: a stop can fire on the entry bar itself (exit on the next bar with ExitAtStop 2)
+{ const n = 6, t = Array.from({ length: n }, (_, i) => `2020-01-${String(i + 1).padStart(2, '0')}`);
+  const bb = { t, o: [100, 100, 100, 100, 100, 100], h: [100, 110, 100, 100, 100, 100], l: [100, 80, 100, 100, 100, 100], c: [100, 100, 100, 100, 100, 100], v: Array(n).fill(1) };
+  const sg10 = { buy: arr(n, [1]), sell: arr(n, []), stops: [{ type: 2, mode: 1, amount: 10, exitAtStop: 2, reentry: 0 }] };
+  const off = rawTrades(bb, { ...sg10 }, { ...base, stops: sg10.stops }), on = rawTrades(bb, { ...sg10 }, { ...base, stops: sg10.stops, activateStopsImmediately: 1 });
+  ok(off[0].xi !== 2, 'without the option the entry-bar stop does not fire: ' + JSON.stringify(off.map((x) => [x.ei, x.xi, x.reason])));
+  ok(on[0].ei === 1 && on[0].xi === 2 && on[0].reason === 'trail', 'with the option the entry-bar stop fires, exit next bar: ' + JSON.stringify(on.map((x) => [x.ei, x.xi, x.reason]))); }
+// 11. regression: the option arrives as 0/1 numbers from the settings; with 0 (off) a signal exit must still close the position in the portfolio
+for (const v of [0, false, undefined, 1]) {
+  const b = mk(8, () => 10), u = { symbol: 'Z', bars: b, trades: rawTrades(b, { buy: arr(8, [1]), sell: arr(8, [3]) }, base) };
+  const rr = portfolio([u], { ...base, initialEquity: 100000, positionSize: { size: 10, type: 2 }, activateStopsImmediately: v });
+  ok(rr.trades.length === 1 && !rr.trades[0].open && rr.trades[0].exitDate === b.t[3], 'signal exit closes with activateStopsImmediately=' + v + ': ' + JSON.stringify(rr.trades.map((x) => [x.exitDate, x.open])));
+}
 console.log(`${pass} passed, ${fail} failed`);
