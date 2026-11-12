@@ -114,8 +114,8 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
             if (eas === 2) { if (!pos.pending) { pos.pending = why; pos.pendingBar = i; pos.pendingReentry = s.reentry || 0; } }
             else {
               let p = level;
-              // gap beyond the stop: filled at the open. AmiBroker (observed with ActivateStopsImmediately on): a trailing stop, whose level already follows this bar's own high, is filled at its level
-              // even when the bar opened below it, so no open clamp is applied to a trailing stop in that case.
+              // gap beyond the stop: filled at the open. AmiBroker (observed with ActivateStopsImmediately on): a trailing stop is filled at its level even when the bar opened below it
+              // (a real gap through the stop shows up as an exit signal at the open instead), so no open clamp is applied to a trailing stop in that case.
               if (type === 2 && opt.activateStopsImmediately) p = level;
               else if (type !== 1) p = dir > 0 ? Math.min(level, bars.o[i]) : Math.max(level, bars.o[i]);
               else p = dir > 0 ? Math.max(level, bars.o[i]) : Math.min(level, bars.o[i]);
@@ -131,7 +131,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   for (let i = 0; i < n; i++) {
     if (!(bars.c[i] > 0)) continue;
     const dir = pos ? pos.dir : 0;
-    if (pos) { pos.hi = Math.max(pos.hi, bars.h[i]); pos.lo = Math.min(pos.lo, bars.l[i]); }
+    if (pos) { pos.hiPrev = pos.hi; pos.loPrev = pos.lo; pos.hi = Math.max(pos.hi, bars.h[i]); pos.lo = Math.min(pos.lo, bars.l[i]); }
     const held = pos ? i - pos.ei : 0;
     const blocked = pos && (held < holdBars || (holdDays > 0 && dayNum(bars.t[i]) - dayNum(bars.t[pos.ei]) < holdDays));
     // ---- a stop that fired last bar with ExitAtStop = 2 exits now at the normal price
@@ -233,7 +233,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
     prevDate = d;
     // exits that happen on this date. With ActivateStopsImmediately AmiBroker triggers the stops AFTER the regular signals, so a position closed by a
     // stop frees its cash only after this bar's entries were taken (AmiBroker log: "Enter Long ..." lines come before the stop "Exit Long" lines).
-    const isStopExit = (p) => opt.activateStopsImmediately && ['loss', 'profit', 'trail', 'nbar'].includes(p.tr.reason);
+    const isStopExit = (p) => !!opt.activateStopsImmediately && ['loss', 'profit', 'trail', 'nbar'].includes(p.tr.reason);   // boolean, never 0 (the option arrives as 0/1)
     const doExits = (late) => {
       for (let k = open.length - 1; k >= 0; k--) {
         const p = open[k], xd = universe[p.ui].bars.t[p.tr.xi];
