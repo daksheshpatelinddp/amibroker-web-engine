@@ -95,13 +95,18 @@ export function resolveSymbols({ apply = 'all', current = '', all = [], filter =
 }
 
 // ------------------------------------------------------------------ session
+/** AmiBroker keeps every price as a 32-bit float; the same rounding here makes prices, profits and indicator ties come out as in AmiBroker (e.g. a 71402.56 price is really 71402.5625). Volume is left alone. */
+const toFloat32Prices = (b) => {
+  const f = (a) => (a && a.length !== undefined ? Array.from(a, Math.fround) : a);
+  return { ...b, o: f(b.o), h: f(b.h), l: f(b.l), c: f(b.c) };
+};
 /** Shared loader with a cache; foreign symbols asked for by a formula are fetched and the formula is run again. */
 export function makeSession(loadBars, interval = 'D') {
   const cache = new Map(), foreign = {};
   const get = async (sym) => {
     if (cache.has(sym)) return cache.get(sym);
     let b = null; try { b = await loadBars(sym, interval); } catch (e) { b = null; }
-    if (b && b.t && b.t.length) b = isIntraday(interval) ? b : resampleArrays(b, interval); else b = null;   // intraday bars are already built
+    if (b && b.t && b.t.length) { b = toFloat32Prices(b); b = isIntraday(interval) ? b : resampleArrays(b, interval); } else b = null;   // intraday bars are already built
     cache.set(sym, b); return b;
   };
   const runOn = async (sym, bars, code, opts) => {
