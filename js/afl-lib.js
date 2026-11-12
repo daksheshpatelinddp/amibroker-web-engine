@@ -200,7 +200,8 @@ export const atr = (h, l, c, n) => wilders(trueRange(h, l, c), n);
 function dirMove(h, l) {
   const L = h.length, pdm = newArr(L, 0), mdm = newArr(L, 0);
   for (let i = 1; i < L; i++) {
-    const up = h[i] - h[i - 1], dn = l[i - 1] - l[i];
+    // AmiBroker works in 32-bit floats: two moves that are equal on paper (0.85-0.81 and 0.76-0.72) differ in the last float bit, and that decides which one counts
+    const f = Math.fround, up = f(f(h[i]) - f(h[i - 1])), dn = f(f(l[i - 1]) - f(l[i]));
     pdm[i] = up > dn && up > 0 ? up : 0;
     mdm[i] = dn > up && dn > 0 ? dn : 0;
   }
