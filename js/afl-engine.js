@@ -606,7 +606,7 @@ function buildFunctions(E) {
   F.mdi = (a) => L.mdi(E.H, E.Lw, E.C, S(a[0], 14));
   F.cci = (a) => L.cci(E.H, E.Lw, E.C, S(a[0], 20));
   F.stochk = (a) => L.stochK(E.H, E.Lw, E.C, S(a[0], 14), S(a[1], 3));
-  F.stochd = (a) => L.ma(L.stochK(E.H, E.Lw, E.C, S(a[0], 14), S(a[1], 3)), S(a[2], 3));
+  F.stochd = (a) => L.stochD(E.H, E.Lw, E.C, S(a[0], 14), S(a[1], 3), S(a[2], 3));
   F.mfi = (a) => L.mfi(E.H, E.Lw, E.C, E.V, S(a[0], 14));
   F.obv = () => L.obv(E.C, E.V);
   F.sar = (a) => L.psar(E.H, E.Lw, S(a[0], 0.02), S(a[1], 0.2));

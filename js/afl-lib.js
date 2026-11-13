@@ -255,11 +255,15 @@ export function cci(h, l, c, n) {
   return out;
 }
 
-export function stochK(h, l, c, n, k) {
+// AmiBroker stores the raw %K as float32, smooths it in higher precision, and stores each result as float32.
+// StochD is smoothed from the unrounded %K (not from the stored float32 %K) -- verified bar-by-bar against AB (K/D near-ties decide crossovers).
+function stochKExact(h, l, c, n, k) {
   const hh = hhv(h, n), ll = llv(l, n);
-  const nn = per(n), raw = c.map((v, i) => (i >= nn - 1 && hh[i] > ll[i] ? 100 * (v - ll[i]) / (hh[i] - ll[i]) : NaN));
+  const nn = per(n), raw = c.map((v, i) => (i >= nn - 1 && hh[i] > ll[i] ? Math.fround(100 * (v - ll[i]) / (hh[i] - ll[i])) : NaN));
   return per(k) > 1 ? ma(raw, k) : raw;
 }
+export function stochK(h, l, c, n, k) { return stochKExact(h, l, c, n, k).map(Math.fround); }
+export function stochD(h, l, c, n, k, d) { return ma(stochKExact(h, l, c, n, k), d).map(Math.fround); }
 
 export function mfi(h, l, c, v, n) {
   n = per(n); const L = c.length, out = newArr(L);
