@@ -264,11 +264,13 @@ export function stochK(h, l, c, n, k) {
 export function mfi(h, l, c, v, n) {
   n = per(n); const L = c.length, out = newArr(L);
   if (Number.isNaN(n)) return out;
-  const tp = c.map((x, i) => (h[i] + l[i] + x) / 3);
+  // AmiBroker computes typical price in float32 as (H+C+L)*(1/3); near-ties therefore compare equal (matches AB MFI exactly)
+  const F = Math.fround, third = F(1 / 3);
+  const tp = c.map((x, i) => F(F(F(h[i] + x) + l[i]) * third));
   const pos = newArr(L, 0), neg = newArr(L, 0);
   for (let i = 1; i < L; i++) {
     const mf = tp[i] * v[i];
-    const a1 = Math.fround(tp[i]), a0 = Math.fround(tp[i - 1]);
+    const a1 = tp[i], a0 = tp[i - 1];
     if (a1 > a0) pos[i] = mf; else if (a1 < a0) neg[i] = mf;
   }
   const sp = sum(pos, n), sn = sum(neg, n);
