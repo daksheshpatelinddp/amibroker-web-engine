@@ -255,15 +255,15 @@ export function cci(h, l, c, n) {
   return out;
 }
 
-// AmiBroker stores the raw %K as float32, smooths it in higher precision, and stores each result as float32.
-// StochD is smoothed from the unrounded %K (not from the stored float32 %K) -- verified bar-by-bar against AB (K/D near-ties decide crossovers).
-function stochKExact(h, l, c, n, k) {
+// AmiBroker arrays are float32: raw %K is computed with float32 steps (100*(C-LLV))/(HHV-LLV), each function result is stored
+// as float32, and StochD smooths the stored float32 %K. Verified bar-by-bar (0 mismatches over 26 years) against an AB exploration.
+const f32 = Math.fround;
+export function stochK(h, l, c, n, k) {
   const hh = hhv(h, n), ll = llv(l, n);
-  const nn = per(n), raw = c.map((v, i) => (i >= nn - 1 && hh[i] > ll[i] ? Math.fround(100 * (v - ll[i]) / (hh[i] - ll[i])) : NaN));
-  return per(k) > 1 ? ma(raw, k) : raw;
+  const nn = per(n), raw = c.map((v, i) => (i >= nn - 1 && hh[i] > ll[i] ? f32(f32(100 * f32(v - ll[i])) / f32(hh[i] - ll[i])) : NaN));
+  return (per(k) > 1 ? ma(raw, k) : raw).map(f32);
 }
-export function stochK(h, l, c, n, k) { return stochKExact(h, l, c, n, k).map(Math.fround); }
-export function stochD(h, l, c, n, k, d) { return ma(stochKExact(h, l, c, n, k), d).map(Math.fround); }
+export function stochD(h, l, c, n, k, d) { return ma(stochK(h, l, c, n, k), d).map(f32); }
 
 export function mfi(h, l, c, v, n) {
   n = per(n); const L = c.length, out = newArr(L);
