@@ -384,8 +384,8 @@ export function swings(a, pct) {
       else if (v <= a[start] * (1 - pct / 100)) { dir = -1; lo = v; loI = i; hi = v; hiI = i; }
       continue;
     }
-    if (v > hi) { hi = v; hiI = i; }
-    if (v < lo) { lo = v; loI = i; }
+    if (v >= hi) { hi = v; hiI = i; }   // equal extremes: the LATER bar is the pivot (matches AmiBroker)
+    if (v <= lo) { lo = v; loI = i; }
     if (dir >= 0 && v <= hi * (1 - pct / 100)) {          // fell far enough from the high: peak confirmed
       peaks.push({ idx: hiI, val: hi, at: i }); pivots.push({ idx: hiI, val: hi });
       dir = -1; lo = v; loI = i; hi = v; hiI = i;
