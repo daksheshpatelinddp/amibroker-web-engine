@@ -314,7 +314,9 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
 
 /** Fee for leaving a trade early (EarlyExitBars / EarlyExitDays with EarlyExitFee %). */
 function earlyFee(p, tr, t, opt, value) {
-  if (!(opt.earlyExitFee > 0)) return 0;
+  // AmiBroker 6.93 never added the early-exit fee to the reported commission in any of our parity runs (T10, T10b: every exit was exactly the
+  // normal commission, with or without HoldMinBars, 4,000+ exits), so the fee is not applied unless explicitly enabled.
+  if (!opt.applyEarlyExitFee || !(opt.earlyExitFee > 0)) return 0;
   const bars = tr.xi - tr.ei, days = dayNum(t[tr.xi]) - dayNum(t[tr.ei]);
   const early = (opt.earlyExitBars > 0 && bars < opt.earlyExitBars) || (opt.earlyExitDays > 0 && days < opt.earlyExitDays);
   return early ? value * opt.earlyExitFee / 100 : 0;
