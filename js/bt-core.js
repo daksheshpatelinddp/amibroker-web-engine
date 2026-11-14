@@ -79,7 +79,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
 
   const sigNow = (i) => (pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC));
   // AmiBroker: a position whose own exit signal is also true on the bar it leaves is closed as a regular signal exit (processed before the entries), whichever stop fired
-  const close = (i, p, why) => { if (why !== 'signal' && why !== 'reverse' && why !== 'open' && sigNow(i)) why = 'signal'; sigExitBar = i; sigExitDir = pos.dir; trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
+  const close = (i, p, why) => { if (opt.activateStopsImmediately && why !== 'signal' && why !== 'reverse' && why !== 'open' && sigNow(i)) why = 'signal'; sigExitBar = i; sigExitDir = pos.dir; trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
   const open = (dir, i, p) => { const sb = i - (dir > 0 ? dB : dSh); pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: Math.max(0, sb) }; };
   const runStops = (i) => {
     const dir = pos.dir;
@@ -136,6 +136,8 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
     const held = pos ? i - pos.ei : 0;
     const blocked = pos && (held < holdBars || (holdDays > 0 && dayNum(bars.t[i]) - dayNum(bars.t[pos.ei]) < holdDays));
     // ---- a stop that fired last bar with ExitAtStop = 2 exits now at the normal price
+    // ---- ActivateStopsImmediately OFF: the built-in stops are applied BEFORE the regular signals (AmiBroker T07: a max-loss stop fills at its level even when the exit signal is also true on that bar)
+    if (pos && !blocked && !opt.activateStopsImmediately && i > pos.ei) runStops(i);
     // ---- exits by signal, and exits forced by a reverse entry signal (AmiBroker handles the regular signals first and the built-in stops after them: when both apply on one bar the signal price wins)
     if (pos && !blocked) {
       const exitSig = pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC);
@@ -144,7 +146,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
       else if (revSig) close(i, exitPx(pos.dir, i), 'reverse');
     }
     // ---- built-in stops (active from the bar after entry unless ActivateStopsImmediately)
-    if (pos && !blocked && (i > pos.ei || opt.activateStopsImmediately)) runStops(i);
+    if (pos && !blocked && opt.activateStopsImmediately) runStops(i);
     // ---- a stop that fired on an earlier bar with Exit-at = 2 leaves now at the normal price, unless another (intraday) stop already closed the position on this bar (AmiBroker: profit target at 20% in mode 1 won over a pending trailing exit)
     if (pos && !blocked && pos.pending && pos.pendingBar < i) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(pos.dir, i), why); blockUntil = i + re; }
     // ---- entries
