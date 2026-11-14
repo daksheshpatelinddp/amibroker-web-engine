@@ -269,7 +269,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const pv = u.pointValue > 0 ? u.pointValue : 1;
       let margin = 0; if (fut) { const md = u.marginDeposit || 0; margin = md > 0 ? md : md < 0 ? -md / 100 * tr.ep * pv : tr.ep * pv; }
       let value, shares = 0;
-      const sz = at(u.size, tr.sigBar, NaN);
+      const sz = at(u.size, tr.ei, NaN);   /* AmiBroker reads PositionSize on the bar the trade is executed (entry bar); the score is read on the signal bar */
       if (Number.isFinite(sz) && sz !== 0) value = sz > 0 ? sz : -sz / 100 * sizeEq;
       else {
         const ps = opt.positionSize || { size: 100, type: 2 };
