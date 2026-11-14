@@ -213,6 +213,7 @@ const roundShares = (sh, lot) => (lot > 0 ? Math.floor(sh / lot + 1e-9) * lot : 
 export function portfolio(universe, opt = DEFAULT_OPTIONS) {
   const dates = [...new Set(universe.flatMap((u) => u.bars.t))].sort();
   const idxMap = universe.map((u) => new Map(u.bars.t.map((d, i) => [d, i])));
+  const dIdx = new Map(dates.map((d, i) => [d, i]));   // the portfolio calendar (union of every symbol's bar dates): AmiBroker counts bars on it
   const fut = !!opt.futuresMode;
   let cash = opt.initialEquity, prevEq = cash, prevDate = null;
   const open = [], done = [], curve = [];
@@ -242,9 +243,8 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
         const p = open[k], xd = universe[p.ui].bars.t[p.tr.xi];
         if (xd === d && !p.tr.open && isStopExit(p) === late) {
           const val = notional(p, p.tr.xp);
-          let c = commissionFor(opt, val, p.sh);
-          c += earlyFee(p, p.tr, universe[p.ui].bars.t, opt, val);
-          cash += valueOf(p, p.tr.xp) - c;
+          const c = commissionFor(opt, val, p.sh);
+          cash += valueOf(p, p.tr.xp) - c - earlyFee(p.tr, universe[p.ui].bars.t, opt, val, c, dIdx);
           done.push(finish(p, universe, p.tr.xp, p.tr.xi, c)); events.push(`${p.dir > 0 ? 'Sell' : 'Cover'} ${universe[p.ui].symbol} @ ${p.tr.xp.toFixed(2)} x ${p.sh}`);
           open.splice(k, 1);
         }
@@ -296,8 +296,8 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       cash -= (fut ? margin * shares : tr.dir * shares * tr.ep) + c;
       open.push(p); events.push(`${tr.dir > 0 ? 'Buy' : 'Short'} ${u.symbol} @ ${tr.ep.toFixed(2)} x ${shares}`);
       if (tr.xi === tr.ei && !tr.open && !isStopExit(p)) {   /* a stop that fired on the entry bar (ActivateStopsImmediately) is carried out after the entries: the cash stays tied up until then */                                // exited on the same bar (a position merely still open on the last bar is NOT an exit: it keeps its cash)
-        open.pop(); const val = notional(p, tr.xp); let c2 = commissionFor(opt, val, p.sh); c2 += earlyFee(p, tr, u.bars.t, opt, val);
-        cash += valueOf(p, tr.xp) - c2; done.push(finish(p, universe, tr.xp, tr.xi, c2)); events.push(`${tr.dir > 0 ? 'Sell' : 'Cover'} ${u.symbol} @ ${tr.xp.toFixed(2)} x ${shares}`);
+        open.pop(); const val = notional(p, tr.xp); const c2 = commissionFor(opt, val, p.sh);
+        cash += valueOf(p, tr.xp) - c2 - earlyFee(tr, u.bars.t, opt, val, c2, dIdx); done.push(finish(p, universe, tr.xp, tr.xi, c2)); events.push(`${tr.dir > 0 ? 'Sell' : 'Cover'} ${u.symbol} @ ${tr.xp.toFixed(2)} x ${shares}`);
       }
     }
     doExits(true);
@@ -312,14 +312,14 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
   return { trades: done, equityCurve: curve, stats: computeStats(done, curve, opt) };
 }
 
-/** Fee for leaving a trade early (EarlyExitBars / EarlyExitDays with EarlyExitFee %). */
-function earlyFee(p, tr, t, opt, value) {
-  // AmiBroker 6.93 never added the early-exit fee to the reported commission in any of our parity runs (T10, T10b: every exit was exactly the
-  // normal commission, with or without HoldMinBars, 4,000+ exits), so the fee is not applied unless explicitly enabled.
-  if (!opt.applyEarlyExitFee || !(opt.earlyExitFee > 0)) return 0;
-  const bars = tr.xi - tr.ei, days = dayNum(t[tr.xi]) - dayNum(t[tr.ei]);
+/** Early-exit fee (EarlyExitBars / EarlyExitDays with EarlyExitFee %). Verified against AmiBroker 6.93 detailed logs (T10, T10b):
+ *  - bars are counted on the PORTFOLIO calendar (union of all symbols' bar dates), not on the symbol's own bars;
+ *  - the fee is % of (exit value - exit commission) and is taken from cash/equity only -- the trade list's commission and profit do not show it. */
+function earlyFee(tr, t, opt, value, commission, dIdx) {
+  if (!(opt.earlyExitFee > 0)) return 0;
+  const bars = dIdx.get(t[tr.xi]) - dIdx.get(t[tr.ei]), days = dayNum(t[tr.xi]) - dayNum(t[tr.ei]);
   const early = (opt.earlyExitBars > 0 && bars < opt.earlyExitBars) || (opt.earlyExitDays > 0 && days < opt.earlyExitDays);
-  return early ? value * opt.earlyExitFee / 100 : 0;
+  return early ? (value - commission) * opt.earlyExitFee / 100 : 0;
 }
 
 /** % Profit as AmiBroker shows it: net profit (after commission) over the entry position value. Falls back to the price change. */
