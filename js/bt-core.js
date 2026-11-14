@@ -91,7 +91,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
           if (!(s.mode > 0 || type === 3)) continue;
           const k = i - pos.ei, from = s.validFrom || 0, to = s.validTo === undefined ? -1 : s.validTo;
           if (k < from || (to >= 0 && k > to)) continue;
-          const amt = s.amountArr ? (s.volatile ? s.amountArr[i] : s.amountArr[pos.sigBar]) : s.amount;
+          const amt = s.amountArr ? (s.volatile ? s.amountArr[i] : s.amountArr[pos.ei]) : s.amount;
           if (!Number.isFinite(amt)) continue;
           if (type === 3) { if (k >= amt) { close(i, exitPx(dir, i), 'nbar'); blockUntil = i + (s.reentry || 0); } continue; }
           const pct = s.mode === 1, risk = s.mode === 3;
