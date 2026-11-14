@@ -290,7 +290,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
         if (cost(n2) + commissionFor(opt, cost(n2), n2) > bp + 1e-9) { if (failStop) { events.push(`Not entered ${u.symbol}: insufficient funds`); break; } continue; }   // AmiBroker (no shrinking): only a 0.05% trim is tried (CUB 74,734 -> 74,697 entered; CEMPRO needing 0.7% was refused)
         shares = n2; if (shares < Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) continue;
       }
-      if (opt.minPosValue > 0 && shares * tr.ep < opt.minPosValue) continue;
+      if (opt.minPosValue > 0 && shares * tr.ep < opt.minPosValue) { if (failStop) { events.push(`Not entered ${u.symbol}: position value below MinPosValue`); break; } continue; }   /* AmiBroker: like any entry that cannot be filled, it ends the entries of this bar */
       const c = commissionFor(opt, cost(shares), shares);
       const p = { ui: cd.ui, tr, dir: tr.dir, sh: shares, ep: tr.ep, ed: d, entryCommission: c, last: tr.ep, pv, margin, fut };
       cash -= (fut ? margin * shares : tr.dir * shares * tr.ep) + c;
