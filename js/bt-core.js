@@ -138,6 +138,12 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
     // ---- a stop that fired last bar with ExitAtStop = 2 exits now at the normal price
     // ---- ActivateStopsImmediately OFF: the built-in stops are applied BEFORE the regular signals (AmiBroker T07: a max-loss stop fills at its level even when the exit signal is also true on that bar)
     if (pos && !blocked && !opt.activateStopsImmediately && i > pos.ei) runStops(i);
+    // ---- AmiBroker ruin stop: a position is closed when its loss reaches 99.96% of the position value (a short: price +99.96%; a long: price -99.96%); a gap through the level fills at the open
+    if (pos && i > pos.ei && opt.ruinStop !== false) {
+      const F = Math.fround, lv = pos.dir < 0 ? pos.ep * 1.9996 : pos.ep * 0.0004;
+      const hitR = pos.dir < 0 ? F(bars.h[i]) >= lv : F(bars.l[i]) <= lv;
+      if (hitR) { const pr = pos.dir < 0 ? Math.max(lv, bars.o[i]) : Math.min(lv, bars.o[i]); close(i, Math.min(bars.h[i], Math.max(bars.l[i], pr)), 'ruin'); }
+    }
     // ---- exits by signal, and exits forced by a reverse entry signal (AmiBroker handles the regular signals first and the built-in stops after them: when both apply on one bar the signal price wins)
     if (pos && !blocked) {
       const exitSig = pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC);
