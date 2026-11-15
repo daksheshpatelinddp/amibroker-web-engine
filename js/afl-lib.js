@@ -309,22 +309,28 @@ export function rsiA(a, n) {
 }
 
 export function psar(h, l, acc, mx) {
+  /* AmiBroker start-up (fitted exactly on 746 symbols x 16 bars + 60-bar checks):
+     - bars 0 and 1 are never processed; initial trend = up when Low[1] > Low[0];
+       initial SAR/EP = Low[0]/High[0] (up) or High[0]/Low[0] (down)
+     - output stays empty (NaN) until the first reversal
+     - the reversal test uses the stepped SAR BEFORE it is clamped to the two previous bars' extremes
+     - in an up trend a reversal to down can reverse straight back up on the same bar (High above new SAR) */
   const L = h.length, out = newArr(L);
-  if (L < 2) return out;
-  let bull = true, af = acc, ep = h[0], sar = l[0];
-  out[0] = sar;
-  for (let i = 1; i < L; i++) {
+  if (L < 3) return out;
+  let bull = l[1] > l[0], af = acc, ep = bull ? h[0] : l[0], sar = bull ? l[0] : h[0], shown = false;
+  for (let i = 2; i < L; i++) {
     sar = sar + af * (ep - sar);
     if (bull) {
-      sar = Math.min(sar, l[i - 1], i >= 2 ? l[i - 2] : l[i - 1]);
-      if (l[i] < sar) { bull = false; sar = ep; ep = l[i]; af = acc; }
-      else if (h[i] > ep) { ep = h[i]; af = Math.min(af + acc, mx); }
+      const cl = Math.min(sar, l[i - 1], l[i - 2]);
+      if (l[i] < sar) { bull = false; sar = ep; ep = l[i]; af = acc; shown = true; }
+      else { sar = cl; if (h[i] > ep) { ep = h[i]; af = Math.min(af + acc, mx); } }
+      if (!bull && h[i] > sar) { bull = true; sar = ep; ep = h[i]; af = acc; }
     } else {
-      sar = Math.max(sar, h[i - 1], i >= 2 ? h[i - 2] : h[i - 1]);
-      if (h[i] > sar) { bull = true; sar = ep; ep = h[i]; af = acc; }
-      else if (l[i] < ep) { ep = l[i]; af = Math.min(af + acc, mx); }
+      const cl = Math.max(sar, h[i - 1], h[i - 2]);
+      if (h[i] > sar) { bull = true; sar = ep; ep = h[i]; af = acc; shown = true; }
+      else { sar = cl; if (l[i] < ep) { ep = l[i]; af = Math.min(af + acc, mx); } }
     }
-    out[i] = sar;
+    if (shown) out[i] = sar;
   }
   return out;
 }

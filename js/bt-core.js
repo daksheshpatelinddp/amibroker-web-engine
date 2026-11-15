@@ -227,7 +227,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
   universe.forEach((u, ui) => {
     for (const tr of u.trades) {
       const d = u.bars.t[tr.ei]; if (!entriesByDate.has(d)) entriesByDate.set(d, []);
-      entriesByDate.get(d).push({ ui, tr, score: at(u.score, tr.sigBar, 0) });
+      entriesByDate.get(d).push({ ui, tr, score: (() => { const v = at(u.score, tr.sigBar, 0); return Number.isNaN(v) ? 1 : v; /* AmiBroker ranks an empty (warm-up) PositionScore as 1 */ })() });
     }
   });
   const lastPx = (p, d) => { const i = idxMap[p.ui].get(d); if (i !== undefined) p.last = universe[p.ui].bars.c[i]; return p.last; };
