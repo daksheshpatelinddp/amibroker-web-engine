@@ -409,7 +409,7 @@ export function rotational(universe, opt = DEFAULT_OPTIONS) {
       open.push({ ui: r.ui, dir: 1, sh: shares, ep, ed: d, entryCommission: c, last: ep, pv: 1, tr: { dir: 1, ei: r.i, xi: r.i, ep, lo: ep, hi: ep, reason: 'rank' } });
     }
     let posVal = 0;
-    for (const p of open) { const i = priceOf(p.ui, d); if (i !== undefined) { p.last = universe[p.ui].bars.c[i]; p.tr.hi = Math.max(p.tr.hi, universe[p.ui].bars.h[i]); p.tr.lo = Math.min(p.tr.lo, universe[p.ui].bars.l[i]); } posVal += p.sh * p.last; }
+    for (const p of open) { const i = priceOf(p.ui, d); if (i !== undefined) { p.last = universe[p.ui].bars.c[i]; p.tr.hi = Math.max(p.tr.hi, universe[p.ui].bars.h[i]); p.tr.lo = Math.min(p.tr.lo, universe[p.ui].bars.l[i]); } posVal += p.sh * p.last - (opt.equityNetOfExitCost === 0 ? 0 : commissionFor(opt, p.sh * p.last, p.sh)); }   /* AmiBroker values an open position net of the commission its exit would cost (T03b: market value 85,192.78 = 86,053.32 x 0.99) */
     const eqv = cash + posVal; prevEq = eqv;
     curve.push({ t: d, equity: eqv, cash, exposure: eqv > 0 ? 100 * posVal / eqv : 0, open: open.length, events: [] });
   }
