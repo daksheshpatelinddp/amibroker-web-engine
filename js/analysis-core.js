@@ -32,8 +32,9 @@ export function resampleArrays(b, tf) {
       if (i0 >= 0) push(i - 1);
       key = k; i0 = i; out._o = b.o[i]; out._h = b.h[i]; out._l = b.l[i]; out._v = Number.isFinite(b.v[i]) ? b.v[i] : 0;
     } else {
-      if (b.h[i] > out._h) out._h = b.h[i];
-      if (b.l[i] < out._l) out._l = b.l[i];
+      if (b.h[i] > out._h || (Number.isNaN(out._h) && !Number.isNaN(b.h[i]))) out._h = b.h[i];   // empty (padded, not yet listed) bars are skipped
+      if (b.l[i] < out._l || (Number.isNaN(out._l) && !Number.isNaN(b.l[i]))) out._l = b.l[i];
+      if (Number.isNaN(out._o) && !Number.isNaN(b.o[i])) out._o = b.o[i];
       out._v += Number.isFinite(b.v[i]) ? b.v[i] : 0;
     }
   }
@@ -101,12 +102,39 @@ const toFloat32Prices = (b) => {
   return { ...b, o: f(b.o), h: f(b.h), l: f(b.l), c: f(b.c) };
 };
 /** Shared loader with a cache; foreign symbols asked for by a formula are fetched and the formula is run again. */
-export function makeSession(loadBars, interval = 'D') {
+/** AmiBroker "Pad and align all data to reference symbol": every symbol gets exactly the reference symbol's dates. A date the symbol does not have is filled
+ *  with the previous close (open = high = low = close, volume 0); dates before its first bar stay empty (NaN); dates that are not in the reference are dropped. */
+export function padToReference(b, ref) {
+  const n = ref.t.length, out = { ...b }, keys = Object.keys(b).filter((k) => b[k] && b[k].length === b.t.length && k !== 't');
+  const pos = new Map(); b.t.forEach((d, i) => pos.set(d, i));
+  out.t = ref.t.slice();
+  for (const k of keys) out[k] = new Array(n);
+  let last = -1;
+  for (let j = 0; j < n; j++) {
+    const i = pos.get(ref.t[j]);
+    if (i !== undefined) { last = i; for (const k of keys) out[k][j] = b[k][i]; continue; }
+    // not traded on this date. Any bars of the symbol between the previous and this reference date are lost, as in AmiBroker
+    for (const k of keys) {
+      if (last < 0) out[k][j] = (k === 'o' || k === 'h' || k === 'l' || k === 'c') ? NaN : 0;
+      else if (k === 'o' || k === 'h' || k === 'l' || k === 'c') out[k][j] = b.c[last];
+      else out[k][j] = 0;
+    }
+  }
+  return out;
+}
+export function makeSession(loadBars, interval = 'D', padRef = () => '') {
   const cache = new Map(), foreign = {};
+  let refBars; const refSym = padRef ? String(padRef() || '').trim() : '';
+  const getRef = async () => { if (!refSym) return null; if (refBars === undefined) { try { const r = await loadBars(refSym, interval); refBars = r && r.t && r.t.length ? r : null; } catch (e) { refBars = null; } } return refBars; };
   const get = async (sym) => {
     if (cache.has(sym)) return cache.get(sym);
     let b = null; try { b = await loadBars(sym, interval); } catch (e) { b = null; }
-    if (b && b.t && b.t.length) { b = toFloat32Prices(b); b = isIntraday(interval) ? b : resampleArrays(b, interval); } else b = null;   // intraday bars are already built
+    if (b && b.t && b.t.length) {
+      b = toFloat32Prices(b);
+      const ref = isIntraday(interval) ? null : await getRef();   // padding is done on the base bars, before they are compressed to weekly / monthly, as AmiBroker does
+      if (ref) b = padToReference(b, toFloat32Prices(ref));
+      b = isIntraday(interval) ? b : resampleArrays(b, interval);
+    } else b = null;   // intraday bars are already built
     cache.set(sym, b); return b;
   };
   const runOn = async (sym, bars, code, opts) => {

@@ -367,7 +367,7 @@ export function rotational(universe, opt = DEFAULT_OPTIONS) {
   const dates = [...new Set(universe.flatMap((u) => u.bars.t))].sort();
   const idxMap = universe.map((u) => new Map(u.bars.t.map((d, i) => [d, i])));
   const delay = (opt.tradeDelays || [0])[0] || 0;
-  let cash = opt.initialEquity; const open = [], done = [], curve = [];
+  let cash = opt.initialEquity, prevEq = cash; const open = [], done = [], curve = [];
   const maxPos = Math.max(1, opt.maxOpenPositions), worst = opt.worstRankHeld > 0 ? opt.worstRankHeld : maxPos;
   const priceOf = (ui, d) => { const i = idxMap[ui].get(d); return i === undefined ? undefined : i; };
   const tp = { ...DEFAULT_OPTIONS.tradePrices, ...(opt.tradePrices || {}) };
@@ -395,7 +395,8 @@ export function rotational(universe, opt = DEFAULT_OPTIONS) {
       if (open.length >= maxPos) break;
       if (open.some((p) => p.ui === r.ui)) continue;
       const u = universe[r.ui], ep = at(u.buyPrice, r.i, priceAt(u.bars, tp.buy, r.i)) ?? u.bars.c[r.i];
-      let eq = cash; for (const p of open) { const i = priceOf(p.ui, d); eq += p.sh * (i === undefined ? p.ep : universe[p.ui].bars.c[i]); }
+      let eq = cash; for (const p of open) { const i = priceOf(p.ui, d); eq += p.sh * (i === undefined ? p.last : universe[p.ui].bars.c[i]); }
+      if (opt.usePrevBarEquity) eq = prevEq;   /* AmiBroker T03b: positions are sized on the previous bar's closing equity (10% of 100000 = 10000 for every entry of the first bar) */
       const ps = opt.positionSize && opt.positionSize.size ? opt.positionSize : { size: 100 / maxPos, type: 2 };
       const size = opt.positionSize === DEFAULT_OPTIONS.positionSize || (opt.positionSize.size === 100 && opt.positionSize.type === 2) ? { size: 100 / maxPos, type: 2 } : ps;
       const sz = at(u.size, r.i, NaN);
@@ -403,13 +404,13 @@ export function rotational(universe, opt = DEFAULT_OPTIONS) {
       let shares = size.type === 4 && !Number.isFinite(sz) ? size.size : roundShares(value / ep, lotOf(u, opt));
       if (shares < 1) continue;
       let c = commissionFor(opt, shares * ep, shares);
-      if (shares * ep + c > cash) { if (!opt.allowPositionShrinking) continue; shares = Math.floor((cash - c) / ep); if (shares < 1) continue; c = commissionFor(opt, shares * ep, shares); }
+      if (shares * ep + c > cash) { if (!opt.allowPositionShrinking) break;   /* AmiBroker: a candidate that cannot be funded ends the bar's entries (HINDZINC 'not entered because of insufficient funds') */ shares = Math.floor((cash - c) / ep); if (shares < 1) continue; c = commissionFor(opt, shares * ep, shares); }
       cash -= shares * ep + c;
       open.push({ ui: r.ui, dir: 1, sh: shares, ep, ed: d, entryCommission: c, last: ep, pv: 1, tr: { dir: 1, ei: r.i, xi: r.i, ep, lo: ep, hi: ep, reason: 'rank' } });
     }
     let posVal = 0;
     for (const p of open) { const i = priceOf(p.ui, d); if (i !== undefined) { p.last = universe[p.ui].bars.c[i]; p.tr.hi = Math.max(p.tr.hi, universe[p.ui].bars.h[i]); p.tr.lo = Math.min(p.tr.lo, universe[p.ui].bars.l[i]); } posVal += p.sh * p.last; }
-    const eqv = cash + posVal;
+    const eqv = cash + posVal; prevEq = eqv;
     curve.push({ t: d, equity: eqv, cash, exposure: eqv > 0 ? 100 * posVal / eqv : 0, open: open.length, events: [] });
   }
   for (const p of open) done.push(finish({ ...p, tr: { ...p.tr, xi: universe[p.ui].bars.t.length - 1, open: true } }, universe, p.last, universe[p.ui].bars.t.length - 1, 0, true));

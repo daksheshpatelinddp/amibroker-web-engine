@@ -450,7 +450,7 @@ export function openAnalysis({ formulaId = null } = {}) {
       const sy = forced ? { symbols: forced.symbols } : symbols(); if (!sy.symbols.length) { toast('No symbols to analyse. Choose Apply to, or add symbols to the filter.'); return; }
       if (sy.capped) toast(`Using the first ${sy.symbols.length} symbols (Settings > General > largest number of symbols)`);
       save(); cancel.stop = false; pane.innerHTML = ''; R = null; tabsBar.classList.add('hidden'); setBusy(true);
-      const t0 = Date.now(), session = makeSession((s, iv) => host.loadBars(s, iv), tf.value), common = { code: f.code, symbols: sy.symbols, session, range: rangeNow(), onProgress: setProgress, cancel, settings: S };
+      const t0 = Date.now(), session = makeSession((s, iv) => host.loadBars(s, iv), tf.value, () => (S.general.padAlign ? S.general.padRef : '')), common = { code: f.code, symbols: sy.symbols, session, range: rangeNow(), onProgress: setProgress, cancel, settings: S };
       const infoLines = (extra = []) => [`Formula: ${f.name}`, `Action: ${MODES[mode]}`, `Symbols: ${sy.symbols.length}`, `Time frame: ${tf.value}`, `Range: ${(() => { const r = rangeNow(); return r.mode === 'all' ? 'All quotations' : r.mode === 'bars' ? 'Last ' + r.n + ' bars' : r.mode === 'days' ? 'Last ' + r.n + ' days' : 'From ' + r.from + ' to ' + r.to; })()}`, `Run time: ${((Date.now() - t0) / 1000).toFixed(1)} s`, ...extra];
       try {
         if (mode === 'scan') {
@@ -513,7 +513,7 @@ export function openAnalysis({ formulaId = null } = {}) {
     const viewRemote = async (entry, file, spec) => {
       const base = spec || {}, r = file.result || {}, mode = file.mode || entry.mode, f = { name: entry.formulaName || base.formulaName, code: base.code || '' }, sy = { symbols: base.symbols || [] };
       const note = `Result from GitHub (${MODES[mode] || mode}), finished ${new Date(file.finishedAt).toLocaleString()}, took ${fmtDur(file.elapsedMs || 0)}.`;
-      const common = { code: f.code, symbols: sy.symbols, session: makeSession((s, iv) => host.loadBars(s, iv), base.interval || 'D'), range: base.range || rangeNow(), onProgress: setProgress, cancel, settings: base.settings || S };
+      const common = { code: f.code, symbols: sy.symbols, session: makeSession((s, iv) => host.loadBars(s, iv), base.interval || 'D', () => ((base.settings || S).general.padAlign ? (base.settings || S).general.padRef : '')), range: base.range || rangeNow(), onProgress: setProgress, cancel, settings: base.settings || S };
       const infoLines = (extra = []) => [`Formula: ${f.name}`, `Ran on GitHub: ${entry.shards || base.shards || '?'} machine${(entry.shards || base.shards) === 1 ? '' : 's'}`, `Symbols: ${sy.symbols.length}`, ...extra];
       let views;
       if (mode === 'scan') views = scanViews({ rows: r.rows || [], errors: r.errors || [] }, f, common.session, infoLines([note, `Signals found: ${(r.rows || []).length}`]));
