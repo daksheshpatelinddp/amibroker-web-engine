@@ -142,7 +142,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
     if (pos && i > pos.ei && opt.ruinStop !== false) {
       const F = Math.fround, lv = pos.dir < 0 ? pos.ep * 1.9996 : pos.ep * 0.0004;
       const hitR = pos.dir < 0 ? F(bars.h[i]) >= lv : F(bars.l[i]) <= lv;
-      if (hitR) { const pr = pos.dir < 0 ? Math.max(lv, bars.o[i]) : Math.min(lv, bars.o[i]); close(i, Math.min(bars.h[i], Math.max(bars.l[i], pr)), 'ruin'); }
+      if (hitR) { const pr = pos.dir < 0 ? Math.max(lv, bars.o[i]) : Math.min(lv, bars.o[i]); close(i, Math.min(bars.h[i], Math.max(bars.l[i], pr)), 'ruin'); blockUntil = i + 1; }   /* the ruin exit uses the bar: no new entry on it (AmiBroker dropped IDBI's Buy on the very bar its never-filled short was ruined) */
     }
     // ---- exits by signal, and exits forced by a reverse entry signal (AmiBroker handles the regular signals first and the built-in stops after them: when both apply on one bar the signal price wins)
     if (pos && !blocked) {
