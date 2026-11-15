@@ -37,6 +37,7 @@ export function openAnalysisSettings({ onSave } = {}) {
           chk(g, 'allowSameBarExit', 'Allow same bar exit (single bar trade)', 'Use only when you enter at the open'),
           chk(g, 'reenterSameBar', 'Re-enter on the bar a position was closed by its Sell signal', 'Off = AmiBroker: a Buy on the same bar as that Sell is ignored'),
           chk(g, 'priceBounds', 'Check trade prices against the bar\'s High-Low', 'BuyPrice etc. outside the bar are pulled back into it'),
+          head('Data'), chk(g, 'padAlign', 'Pad and align all data to reference symbol', 'AmiBroker: every symbol gets the reference symbol\'s dates; a missing date is filled with the previous close. Use it for rotational trading and ranking.'), txt(g, 'padRef', 'Reference symbol', 'For example ^NIFTY50. Used only when the box above is ticked.'),
           head('Analysis window'), num(g, 'maxSymbols', 'Largest number of symbols per run (0 = no limit)', 'Optional safety limit for "All symbols" (each symbol is loaded one by one)'),
         ];
       },
