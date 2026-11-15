@@ -84,7 +84,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   const runStops = (i) => {
     const dir = pos.dir;
       // AmiBroker: N-bar stop has the lowest priority, unless ExitAtStop = 1 (formula) or "Has priority" (settings) puts it first
-      const order = stops.some((x) => x.type === 3 && (x.priority || x.exitAtStop === 1)) ? [3, 0, 1, 2] : [0, 1, 2, 3];
+      const order = stops.some((x) => x.type === 3 && (x.priority || x.exitAtStop === 1)) || (stops.some((x) => x.type === 3) && stops.some((x) => x.type !== 3 && x.exitAtStop === 1)) ? [3, 0, 1, 2] : [0, 1, 2, 3];   /* T12: an N-bar exit (made at the open) also comes before intrabar (ExitAtStop = 1) stops */
       for (const type of order) {
         for (const s of stops.filter((x) => x.type === type)) {
           if (!pos) break;
