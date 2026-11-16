@@ -377,16 +377,16 @@ export function rotational(universe, opt = DEFAULT_OPTIONS) {
     universe.forEach((u, ui) => {
       const i = priceOf(ui, d); if (i === undefined) return;
       const s = at(u.score, Math.max(0, i - delay), NaN);
-      if (Number.isFinite(s) && s > 0) ranked.push({ ui, s, i });
+      if (Number.isFinite(s) && s !== 0) ranked.push({ ui, s, a: Math.abs(s), dir: s > 0 ? 1 : -1, i });   /* AmiBroker: rank by |score|, sign gives direction */
     });
-    ranked.sort((a, b) => b.s - a.s);
+    ranked.sort((a, b) => b.a - a.a || a.ui - b.ui);
     const rankOf = new Map(ranked.map((r, k) => [r.ui, k + 1]));
     for (let k = open.length - 1; k >= 0; k--) {
       const p = open[k], r = rankOf.get(p.ui), i = priceOf(p.ui, d);
       if (i === undefined) continue;
       if (r === undefined || r > worst) {
         const u = universe[p.ui], xp = at(u.sellPrice, i, priceAt(u.bars, tp.sell, i)) ?? u.bars.c[i], c = commissionFor(opt, p.sh * xp, p.sh);
-        cash += p.sh * xp - c;
+        cash += p.sh * p.ep + p.dir * p.sh * (xp - p.ep) - c;
         done.push(finish({ ...p, tr: { ...p.tr, xi: i } }, universe, xp, i, c));
         open.splice(k, 1);
       }
@@ -395,7 +395,7 @@ export function rotational(universe, opt = DEFAULT_OPTIONS) {
       if (open.length >= maxPos) break;
       if (open.some((p) => p.ui === r.ui)) continue;
       const u = universe[r.ui], ep = at(u.buyPrice, r.i, priceAt(u.bars, tp.buy, r.i)) ?? u.bars.c[r.i];
-      let eq = cash; for (const p of open) { const i = priceOf(p.ui, d); eq += p.sh * (i === undefined ? p.last : universe[p.ui].bars.c[i]); }
+      let eq = cash; for (const p of open) { const i = priceOf(p.ui, d); eq += p.sh * p.ep + p.dir * p.sh * ((i === undefined ? p.last : universe[p.ui].bars.c[i]) - p.ep); }
       if (opt.usePrevBarEquity) eq = prevEq;   /* AmiBroker T03b: positions are sized on the previous bar's closing equity (10% of 100000 = 10000 for every entry of the first bar) */
       const ps = opt.positionSize && opt.positionSize.size ? opt.positionSize : { size: 100 / maxPos, type: 2 };
       const size = opt.positionSize === DEFAULT_OPTIONS.positionSize || (opt.positionSize.size === 100 && opt.positionSize.type === 2) ? { size: 100 / maxPos, type: 2 } : ps;
@@ -406,10 +406,10 @@ export function rotational(universe, opt = DEFAULT_OPTIONS) {
       let c = commissionFor(opt, shares * ep, shares);
       if (shares * ep + c > cash) { if (!opt.allowPositionShrinking) break;   /* AmiBroker: a candidate that cannot be funded ends the bar's entries (HINDZINC 'not entered because of insufficient funds') */ shares = Math.floor((cash - c) / ep); if (shares < 1) continue; c = commissionFor(opt, shares * ep, shares); }
       cash -= shares * ep + c;
-      open.push({ ui: r.ui, dir: 1, sh: shares, ep, ed: d, entryCommission: c, last: ep, pv: 1, tr: { dir: 1, ei: r.i, xi: r.i, ep, lo: ep, hi: ep, reason: 'rank' } });
+      open.push({ ui: r.ui, dir: r.dir, sh: shares, ep, ed: d, entryCommission: c, last: ep, pv: 1, tr: { dir: r.dir, ei: r.i, xi: r.i, ep, lo: ep, hi: ep, reason: 'rank' } });
     }
     let posVal = 0;
-    for (const p of open) { const i = priceOf(p.ui, d); if (i !== undefined) { p.last = universe[p.ui].bars.c[i]; p.tr.hi = Math.max(p.tr.hi, universe[p.ui].bars.h[i]); p.tr.lo = Math.min(p.tr.lo, universe[p.ui].bars.l[i]); } posVal += p.sh * p.last - (opt.equityNetOfExitCost === 0 ? 0 : commissionFor(opt, p.sh * p.last, p.sh)); }   /* AmiBroker values an open position net of the commission its exit would cost (T03b: market value 85,192.78 = 86,053.32 x 0.99) */
+    for (const p of open) { const i = priceOf(p.ui, d); if (i !== undefined) { p.last = universe[p.ui].bars.c[i]; p.tr.hi = Math.max(p.tr.hi, universe[p.ui].bars.h[i]); p.tr.lo = Math.min(p.tr.lo, universe[p.ui].bars.l[i]); } posVal += p.sh * p.ep + p.dir * p.sh * (p.last - p.ep) - (opt.equityNetOfExitCost === 0 ? 0 : commissionFor(opt, p.sh * p.last, p.sh)); }   /* AmiBroker values an open position net of the commission its exit would cost (T03b: market value 85,192.78 = 86,053.32 x 0.99) */
     const eqv = cash + posVal; prevEq = eqv;
     curve.push({ t: d, equity: eqv, cash, exposure: eqv > 0 ? 100 * posVal / eqv : 0, open: open.length, events: [] });
   }
