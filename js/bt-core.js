@@ -7,6 +7,7 @@
 import { computeStats } from './bt-report.js';
 
 const truthy = (x) => x !== 0 && x !== undefined && !Number.isNaN(x);
+const SIG_SCALE_IN = 2, SIG_SCALE_OUT = 3;   /* AmiBroker sigScaleIn / sigScaleOut: such a value is NOT an ordinary entry / exit signal */
 const at = (arr, i, d) => (arr && typeof arr === 'object' ? arr[i] : (arr === undefined ? d : arr));
 const dayNum = (d) => Date.parse(d) / 86400000;
 
@@ -61,7 +62,8 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   const n = bars.t.length, trades = [];
   const [dB, dS, dSh, dC] = opt.tradeDelays || [0, 0, 0, 0];
   const tp = { ...DEFAULT_OPTIONS.tradePrices, ...(opt.tradePrices || {}) };
-  const sg = (arr, i) => (arr && i >= 0 && i < n ? truthy(arr[i]) : false);
+  const sg = (arr, i) => (arr && i >= 0 && i < n ? truthy(arr[i]) && arr[i] !== SIG_SCALE_IN && arr[i] !== SIG_SCALE_OUT : false);
+  const isAdd = (arr, i) => !!(arr && i >= 0 && i < n && arr[i] === SIG_SCALE_IN);
   const px = (arr, field, i) => {
     let p = at(arr, i, undefined);
     if (p === undefined || Number.isNaN(p)) p = priceAt(bars, field, i);
@@ -79,8 +81,8 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
 
   const sigNow = (i) => (pos.dir > 0 ? sg(sig.sell, i - dS) : sg(sig.cover, i - dC));
   // AmiBroker: a position whose own exit signal is also true on the bar it leaves is closed as a regular signal exit (processed before the entries), whichever stop fired
-  const close = (i, p, why) => { if (opt.activateStopsImmediately && why !== 'signal' && why !== 'reverse' && why !== 'open' && sigNow(i)) why = 'signal'; sigExitBar = i; sigExitDir = pos.dir; trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar }); pos = null; };
-  const open = (dir, i, p) => { const sb = i - (dir > 0 ? dB : dSh); pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: Math.max(0, sb) }; };
+  const close = (i, p, why) => { if (opt.activateStopsImmediately && why !== 'signal' && why !== 'reverse' && why !== 'open' && sigNow(i)) why = 'signal'; sigExitBar = i; sigExitDir = pos.dir; trades.push({ dir: pos.dir, ei: pos.ei, xi: i, ep: pos.ep, xp: p, reason: why, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar, adds: pos.adds }); pos = null; };
+  const open = (dir, i, p) => { const sb = i - (dir > 0 ? dB : dSh); pos = { dir, ei: i, ep: p, hi: Math.max(bars.h[i], p), lo: Math.min(bars.l[i], p), sigBar: Math.max(0, sb), adds: [] }; };
   const runStops = (i) => {
     const dir = pos.dir;
       // AmiBroker: N-bar stop has the lowest priority, unless ExitAtStop = 1 (formula) or "Has priority" (settings) puts it first
@@ -155,6 +157,8 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
     if (pos && !blocked && opt.activateStopsImmediately) runStops(i);
     // ---- a stop that fired on an earlier bar with Exit-at = 2 leaves now at the normal price, unless another (intraday) stop already closed the position on this bar (AmiBroker: profit target at 20% in mode 1 won over a pending trailing exit)
     if (pos && !blocked && pos.pending && pos.pendingBar < i) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(pos.dir, i), why); blockUntil = i + re; }
+    // ---- scale-in (Buy = sigScaleIn while long / Short = sigScaleIn while short): the executed add is recorded on the position; the portfolio sizes and funds it
+    if (pos && i > pos.ei && pos.adds && (pos.dir > 0 ? (longOK && isAdd(sig.buy, i - dB)) : (shortOK && isAdd(sig.short, i - dSh)))) pos.adds.push({ i, price: pos.dir > 0 ? buyPx(i) : shortPx(i) });
     // ---- entries
     if (!pos && i >= blockUntil) {
       // AmiBroker: while a position is open, a same-direction entry signal is redundant. So when the position was closed by its exit signal
@@ -169,7 +173,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
       }
     }
   }
-  if (pos) trades.push({ dir: pos.dir, ei: pos.ei, xi: n - 1, ep: pos.ep, xp: bars.c[n - 1], reason: 'open', open: true, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar });
+  if (pos) trades.push({ dir: pos.dir, ei: pos.ei, xi: n - 1, ep: pos.ep, xp: bars.c[n - 1], reason: 'open', open: true, hi: pos.hi, lo: pos.lo, sigBar: pos.sigBar, adds: pos.adds });
   return trades;
 }
 
@@ -230,6 +234,8 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       entriesByDate.get(d).push({ ui, tr, score: (() => { const v = at(u.score, tr.sigBar, 0); return Number.isNaN(v) ? 1 : v; /* AmiBroker ranks an empty (warm-up) PositionScore as 1 */ })() });
     }
   });
+  const addsByDate = new Map();   // scale-ins (Buy = sigScaleIn): executed on the position's bar, sized like an entry, funded from cash, otherwise ignored (AmiBroker 'Ignored Scale-In ... insufficient funds')
+  universe.forEach((u, ui) => { for (const tr of u.trades) for (const a of (tr.adds || [])) { const d = u.bars.t[a.i]; if (!addsByDate.has(d)) addsByDate.set(d, []); addsByDate.get(d).push({ ui, tr, a }); } });
   const lastPx = (p, d) => { const i = idxMap[p.ui].get(d); if (i !== undefined) p.last = universe[p.ui].bars.c[i]; return p.last; };
   const valueOf = (p, price) => (fut ? p.margin * p.sh + p.dir * p.sh * p.pv * (price - p.ep) : p.dir * p.sh * price);
   const notional = (p, price) => (fut ? p.margin * p.sh : p.sh * price);
@@ -257,6 +263,21 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       }
     };
     doExits(false);
+    for (const ad of (addsByDate.get(d) || []).sort((x, y) => x.ui - y.ui)) {   // scale-ins, in watchlist order, before the new entries
+      const p = open.find((q) => q.tr === ad.tr); if (!p) continue;
+      const u = universe[ad.ui], price = ad.a.price;
+      let eq = cash, eqNet = cash; for (const q of open) { const px = lastPx(q, d) ?? q.ep; eq += valueOf(q, px); eqNet += mark(q, px); }
+      const sizeEq = opt.usePrevBarEquity ? prevEq : eqNet;
+      const sz = at(u.size, ad.a.i, NaN), ps = opt.positionSize || { size: 100, type: 2 };
+      const value = Number.isFinite(sz) && sz !== 0 ? (sz > 0 ? sz : -sz / 100 * sizeEq) : (ps.type === 1 ? ps.size : ps.size / 100 * sizeEq);
+      const lot = lotOf(u, opt); let n = ps.type === 4 && !Number.isFinite(sz) ? ps.size : roundShares(value / price, lot);
+      const bp = eq * 100 / (opt.accountMargin || 100) - open.reduce((s, q) => s + (q.dir < 0 ? q.sh * (2 * q.ep - (q.last ?? q.ep)) : q.sh * (q.last ?? q.ep)), 0);
+      let c = commissionFor(opt, n * price, n);
+      if (n >= 1 && n * price + c > bp + 1e-9) { n = roundShares(value / price * 0.9995, lot); c = commissionFor(opt, n * price, n); }
+      if (!(n >= Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) || n * price + c > bp + 1e-9) { events.push(`Ignored scale-in ${u.symbol}: insufficient funds`); continue; }
+      p.ep = (p.sh * p.ep + n * price) / (p.sh + n); p.sh += n; p.entryCommission += c; p.scaleIns = (p.scaleIns || 0) + 1;
+      cash -= p.dir * n * price + c; events.push(`Scale-in ${u.symbol} @ ${price.toFixed(2)} x ${n}`);
+    }
     // entries on this date, best score first
     let cands = (entriesByDate.get(d) || []);
     const byScore = (a, b) => Math.abs(b.score) - Math.abs(a.score);

@@ -363,7 +363,7 @@ class Interp {
       notifyMouseEnter: 32, notifyMouseLeave: 64, guiNew: 1, guiExisting: 2 }).forEach(([k, v]) => c.set(k.toLowerCase(), v));
     Object.entries({ stopTypeLoss: 0, stopTypeProfit: 1, stopTypeTrailing: 2, stopTypeNBar: 3, stopModeDisable: 0, stopModePercent: 1,
       stopModeBars: 1, stopModePoint: 2, stopModeRisk: 3, spsNoChange: 0, spsValue: 1, spsPercentOfEquity: 2, spsPercentOfPosition: 3,
-      spsShares: 4, maskDefault: 0, maskAll: 0xffffff, maskPrice: 1, maskHistogram: 2, maskNone: 0,
+      spsShares: 4, sigScaleIn: 2, sigScaleOut: 3, maskDefault: 0, maskAll: 0xffffff, maskPrice: 1, maskHistogram: 2, maskNone: 0,
       formatChar: -9001, formatDateTime: -9002, categoryMarket: 0, categoryGroup: 1, categorySector: 2, categoryIndustry: 3, categoryWatchlist: 4, categoryFavorite: 5, categoryIndex: 6, categoryAll: 7,
       actionIndicator: 1, actionCommentary: 2, actionScan: 3, actionExplore: 4, actionBacktest: 5, actionOptimize: 6, actionPortfolio: 7,
       backtestRegular: 0, backtestRotational: 1, backtestRegularRaw: 2, backtestRegularRawMulti: 3,
