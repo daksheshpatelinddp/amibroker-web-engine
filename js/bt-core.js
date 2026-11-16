@@ -62,7 +62,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   const n = bars.t.length, trades = [];
   const [dB, dS, dSh, dC] = opt.tradeDelays || [0, 0, 0, 0];
   const tp = { ...DEFAULT_OPTIONS.tradePrices, ...(opt.tradePrices || {}) };
-  const sg = (arr, i) => (arr && i >= 0 && i < n ? truthy(arr[i]) && arr[i] !== SIG_SCALE_IN && arr[i] !== SIG_SCALE_OUT : false);
+  const sg = (arr, i) => (arr && i >= 0 && i < n ? truthy(arr[i]) && arr[i] !== SIG_SCALE_IN : false);   /* T11 (AmiBroker log): a sigScaleOut value in the Sell array is carried out as an ordinary exit of the whole position (ARE&M: 856 shares sold at once) */
   const isAdd = (arr, i) => !!(arr && i >= 0 && i < n && arr[i] === SIG_SCALE_IN);
   const px = (arr, field, i) => {
     let p = at(arr, i, undefined);
