@@ -262,7 +262,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
         }
       }
     };
-    doExits(false);
+    // AmiBroker log order on a bar: scale-ins FIRST (cash not yet freed by this bar's exits), then the exits, then the new entries
     for (const ad of (addsByDate.get(d) || []).sort((x, y) => x.ui - y.ui)) {   // scale-ins, in watchlist order, before the new entries
       const p = open.find((q) => q.tr === ad.tr); if (!p) continue;
       const u = universe[ad.ui], price = ad.a.price;
@@ -278,6 +278,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       p.ep = (p.sh * p.ep + n * price) / (p.sh + n); p.sh += n; p.entryCommission += c; p.scaleIns = (p.scaleIns || 0) + 1;
       cash -= p.dir * n * price + c; events.push(`Scale-in ${u.symbol} @ ${price.toFixed(2)} x ${n}`);
     }
+    doExits(false);
     // entries on this date, best score first
     let cands = (entriesByDate.get(d) || []);
     const byScore = (a, b) => Math.abs(b.score) - Math.abs(a.score);
