@@ -103,7 +103,7 @@ const toFloat32Prices = (b) => {
 };
 /** Shared loader with a cache; foreign symbols asked for by a formula are fetched and the formula is run again. */
 /** AmiBroker "Pad and align all data to reference symbol": every symbol gets exactly the reference symbol's dates. A date the symbol does not have is filled
- *  with the previous close (open = high = low = close, volume 0); dates before its first bar stay empty (NaN); dates that are not in the reference are dropped. */
+ *  with a copy of the previous bar (volume 0); dates before its first bar stay empty (NaN); dates that are not in the reference are dropped. */
 export function padToReference(b, ref) {
   const n = ref.t.length, out = { ...b }, keys = Object.keys(b).filter((k) => b[k] && b[k].length === b.t.length && k !== 't');
   const pos = new Map(); b.t.forEach((d, i) => pos.set(d, i));
@@ -116,7 +116,7 @@ export function padToReference(b, ref) {
     // not traded on this date. Any bars of the symbol between the previous and this reference date are lost, as in AmiBroker
     for (const k of keys) {
       if (last < 0) out[k][j] = (k === 'o' || k === 'h' || k === 'l' || k === 'c') ? NaN : 0;
-      else if (k === 'o' || k === 'h' || k === 'l' || k === 'c') out[k][j] = b.c[last];
+      else if (k === 'o' || k === 'h' || k === 'l' || k === 'c') out[k][j] = b[k][last];   // AmiBroker copies the previous bar (SHRIRAMFIN 2000-11-10: weekly open 3.70 = open of the previous bar, not its close 4.86)
       else out[k][j] = 0;
     }
   }
