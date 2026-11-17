@@ -277,7 +277,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const lot = lotOf(u, opt); let n = ps.type === 4 && !Number.isFinite(sz) ? ps.size : roundShares(value / price, lot);
       const bp = eq * 100 / (opt.accountMargin || 100) - open.reduce((s, q) => s + (q.dir < 0 ? q.sh * (2 * q.ep - (q.last ?? q.ep)) : q.sh * (q.last ?? q.ep)), 0);
       let c = commissionFor(opt, n * price, n);
-      if (n >= 1 && n * price + c > bp + 1e-9) { n = roundShares(value / price * 0.9995, lot); c = commissionFor(opt, n * price, n); }
+      /* AmiBroker: a scale-in is never trimmed to fit (501 of 501 executed scale-ins are exactly floor(5% of prev equity / price)); if it does not fit it is ignored */
       if (!(n >= Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) || n * price + c > bp + 1e-9) { events.push(`Ignored scale-in ${u.symbol}: insufficient funds`); return; }
       p.ep = (p.sh * p.ep + n * price) / (p.sh + n); p.sh += n; p.entryCommission += c; p.scaleIns = (p.scaleIns || 0) + 1;
       cash -= p.dir * n * price + c; events.push(`Scale-in ${u.symbol} @ ${price.toFixed(2)} x ${n}`);
