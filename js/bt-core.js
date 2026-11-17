@@ -235,6 +235,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
     }
   });
   const entered = new Set();   // trades that were actually opened
+  const attempted = new Set();   // trades whose entry was tried and refused (funds): a later scale-in signal does not revive them
   const addsByDate = new Map();   // scale-ins (Buy = sigScaleIn): executed on the position's bar, sized like an entry, funded from cash, otherwise ignored (AmiBroker 'Ignored Scale-In ... insufficient funds')
   universe.forEach((u, ui) => { for (const tr of u.trades) for (const a of (tr.adds || [])) { const d = u.bars.t[a.i]; if (!addsByDate.has(d)) addsByDate.set(d, []); addsByDate.get(d).push({ ui, tr, a }); } });
   const lastPx = (p, d) => { const i = idxMap[p.ui].get(d); if (i !== undefined) p.last = universe[p.ui].bars.c[i]; return p.last; };
@@ -268,7 +269,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const p = open.find((q) => q.tr === ad.tr);
       if (!p) {
         // AmiBroker: a scale-in signal on a symbol with NO open position is carried out as an ordinary ENTRY (T11: COROMANDEL's first entry was refused for lack of cash, its next scale-in signal bought it)
-        if (!entered.has(ad.tr) && ad.a.i > ad.tr.ei) {
+        if (!entered.has(ad.tr) && !attempted.has(ad.tr) && ad.a.i > ad.tr.ei) {
           const u0 = universe[ad.ui]; const rest = (ad.tr.adds || []).filter((x) => x.i > ad.a.i);
           Object.assign(ad.tr, { ei: ad.a.i, ep: ad.a.price, sigBar: ad.a.sigBar, adds: rest, late: true });
           if (!entriesByDate.has(d)) entriesByDate.set(d, []);
@@ -318,18 +319,18 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const lot = lotOf(u, opt);
       if (!shares) shares = roundShares(value / (fut ? margin : tr.ep), lot);
       const minSh = Math.max(lot > 0 ? lot : 1, opt.minShares || 1), failStop = opt.stopEntriesOnFailure;   // AmiBroker: the first entry that cannot be filled ends the entries of this bar
-      if (shares < minSh && failStop) { events.push(`Not entered ${u.symbol}: position value ${Number.isFinite(value) ? value.toFixed(2) : value} buys fewer than ${minSh} share(s) at ${tr.ep.toFixed(2)}`); break; }
+      if (shares < minSh && failStop) { attempted.add(tr); events.push(`Not entered ${u.symbol}: position value ${Number.isFinite(value) ? value.toFixed(2) : value} buys fewer than ${minSh} share(s) at ${tr.ep.toFixed(2)}`); break; }
       if (opt.limitVolPct > 0) { const vol = u.bars.v ? u.bars.v[tr.ei] : 0; if (vol > 0 || !opt.noVolLimitIfZero) shares = Math.min(shares, roundShares(vol * opt.limitVolPct / 100, lot)); }
       if (shares < Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) continue;
       const cost = (n) => (fut ? margin * n : n * tr.ep);
       const bp = eq * 100 / (opt.accountMargin || 100) - open.reduce((s, p) => s + (p.dir < 0 && !fut ? p.sh * (2 * p.ep - (p.last ?? p.ep)) : notional(p, p.last ?? p.ep)), 0);   /* AmiBroker: a short ties up its ENTRY value in cash (cash = equity - market value, with a short's market value sh*(2*entry-price)) */
       if (cost(shares) + commissionFor(opt, cost(shares), shares) > bp + 1e-9) {
-        if (!opt.allowPositionShrinking && !(Number.isFinite(value) && value <= bp + 1e-9 && opt.shrinkForCommission !== 0)   /* AmiBroker: a request whose VALUE fits the cash is trimmed to leave room for commission; a request bigger than the cash is skipped */) { if (failStop) { events.push(`Not entered ${u.symbol}: insufficient funds`); break; } continue; }
+        if (!opt.allowPositionShrinking && !(Number.isFinite(value) && value <= bp + 1e-9 && opt.shrinkForCommission !== 0)   /* AmiBroker: a request whose VALUE fits the cash is trimmed to leave room for commission; a request bigger than the cash is skipped */) { if (failStop) { attempted.add(tr); events.push(`Not entered ${u.symbol}: insufficient funds`); break; } continue; }
         let f = Number.isFinite(value) && !fut ? value / tr.ep : shares, n2 = shares; const maxSteps = opt.allowPositionShrinking ? Infinity : 1; let steps = 0; while (n2 > 0 && steps < maxSteps && cost(n2) + commissionFor(opt, cost(n2), n2) > bp) { steps++; f *= 0.9995; const nx = roundShares(f, lot); n2 = (nx < n2 || maxSteps === 1) ? nx : roundShares(n2 - (lot > 0 ? lot : 1), lot); }   // capped mode (no shrinking): ONE 0.05% trim of the unrounded size, nothing more (BATAINDIA 348.78 -> 348 shares does not fit, so AmiBroker refuses the trade)
-        if (cost(n2) + commissionFor(opt, cost(n2), n2) > bp + 1e-9) { if (failStop) { events.push(`Not entered ${u.symbol}: insufficient funds`); break; } continue; }   // AmiBroker (no shrinking): only a 0.05% trim is tried (CUB 74,734 -> 74,697 entered; CEMPRO needing 0.7% was refused)
+        if (cost(n2) + commissionFor(opt, cost(n2), n2) > bp + 1e-9) { if (failStop) { attempted.add(tr); events.push(`Not entered ${u.symbol}: insufficient funds`); break; } continue; }   // AmiBroker (no shrinking): only a 0.05% trim is tried (CUB 74,734 -> 74,697 entered; CEMPRO needing 0.7% was refused)
         shares = n2; if (shares < Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) continue;
       }
-      if (opt.minPosValue > 0 && shares * tr.ep < opt.minPosValue) { if (failStop) { events.push(`Not entered ${u.symbol}: position value below MinPosValue`); break; } continue; }   /* AmiBroker: like any entry that cannot be filled, it ends the entries of this bar */
+      if (opt.minPosValue > 0 && shares * tr.ep < opt.minPosValue) { if (failStop) { attempted.add(tr); events.push(`Not entered ${u.symbol}: position value below MinPosValue`); break; } continue; }   /* AmiBroker: like any entry that cannot be filled, it ends the entries of this bar */
       const c = commissionFor(opt, cost(shares), shares);
       const p = { ui: cd.ui, tr, dir: tr.dir, sh: shares, ep: tr.ep, ed: d, entryCommission: c, last: tr.ep, pv, margin, fut };
       cash -= (fut ? margin * shares : tr.dir * shares * tr.ep) + c;
