@@ -119,7 +119,18 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
               let p = level;
               // gap beyond the stop: filled at the open. AmiBroker (observed with ActivateStopsImmediately on): a trailing stop is filled at its level even when the bar opened below it
               // (a real gap through the stop shows up as an exit signal at the open instead), so no open clamp is applied to a trailing stop in that case.
-              if (type === 2 && opt.activateStopsImmediately) p = level;
+              if (type === 2 && opt.activateStopsImmediately) {
+                p = level;
+                /* T06 (KAJARIACER 13 Oct 2000): the bar opened below the trailing level AmiBroker already knew at the open (previous bar's high and ATR) -> a real gap, filled at the open; otherwise the level reached during the bar is the fill */
+                if (!risk && pos.hiPrev !== undefined) {
+                  const amtP = s.amountArr ? (s.volatile ? s.amountArr[i - 1] : s.amountArr[pos.ei]) : s.amount;
+                  if (Number.isFinite(amtP)) {
+                    const bP = dir > 0 ? F32(pos.hiPrev) : F32(pos.loPrev);
+                    const lvP = snap(dir > 0 ? bP - (pct ? bP * amtP / 100 : amtP) : bP + (pct ? bP * amtP / 100 : amtP));
+                    if (dir > 0 ? F32(bars.o[i]) <= lvP : F32(bars.o[i]) >= lvP) p = bars.o[i];
+                  }
+                }
+              }
               else if (type !== 1) p = dir > 0 ? Math.min(level, bars.o[i]) : Math.max(level, bars.o[i]);
               else p = dir > 0 ? Math.max(level, bars.o[i]) : Math.min(level, bars.o[i]);
               p = Math.min(bars.h[i], Math.max(bars.l[i], p));
