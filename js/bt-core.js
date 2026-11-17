@@ -255,19 +255,20 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
     const doExits = (late) => {
       for (let k = open.length - 1; k >= 0; k--) {
         const p = open[k], xd = universe[p.ui].bars.t[p.tr.xi];
-        if (xd === d && !p.tr.open && isStopExit(p) === late) {
-          const val = notional(p, p.tr.xp);
-          const c = commissionFor(opt, val, p.sh);
-          cash += valueOf(p, p.tr.xp) - c - earlyFee(p.tr, universe[p.ui].bars.t, opt, val, c, dIdx);
-          done.push(finish(p, universe, p.tr.xp, p.tr.xi, c)); events.push(`${p.dir > 0 ? 'Sell' : 'Cover'} ${universe[p.ui].symbol} @ ${p.tr.xp.toFixed(2)} x ${p.sh}`);
-          open.splice(k, 1);
-        }
+        if (xd === d && !p.tr.open && isStopExit(p) === late) exitPos(p, k);
       }
     };
+    const exitPos = (p, k) => {
+      const val = notional(p, p.tr.xp);
+      const c = commissionFor(opt, val, p.sh);
+      cash += valueOf(p, p.tr.xp) - c - earlyFee(p.tr, universe[p.ui].bars.t, opt, val, c, dIdx);
+      done.push(finish(p, universe, p.tr.xp, p.tr.xi, c)); events.push(`${p.dir > 0 ? 'Sell' : 'Cover'} ${universe[p.ui].symbol} @ ${p.tr.xp.toFixed(2)} x ${p.sh}`);
+      open.splice(k, 1);
+    };
     // AmiBroker log order on a bar: scale-ins FIRST (cash not yet freed by this bar's exits), then the exits, then the new entries
-    for (const ad of (addsByDate.get(d) || []).sort((x, y) => x.ui - y.ui)) {   // scale-ins, in watchlist order, before the new entries
+    const scaleIn = (ad) => {
       const p = open.find((q) => q.tr === ad.tr);
-      if (!p) continue;   // AmiBroker: a scale-in of a raw trade that was never entered (not funded / not selected) is simply ignored; a scale-in signal while the symbol's own signal state is FLAT is an ordinary Buy and is handled in rawTrades
+      if (!p) return;   // AmiBroker: a scale-in of a raw trade that was never entered (not funded / not selected) is simply ignored; a scale-in signal while the symbol's own signal state is FLAT is an ordinary Buy and is handled in rawTrades
       const u = universe[ad.ui], price = ad.a.price;
       let eq = cash, eqNet = cash; for (const q of open) { const px = lastPx(q, d) ?? q.ep; eq += valueOf(q, px); eqNet += mark(q, px); }
       const sizeEq = opt.usePrevBarEquity ? prevEq : eqNet;
@@ -277,9 +278,16 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const bp = eq * 100 / (opt.accountMargin || 100) - open.reduce((s, q) => s + (q.dir < 0 ? q.sh * (2 * q.ep - (q.last ?? q.ep)) : q.sh * (q.last ?? q.ep)), 0);
       let c = commissionFor(opt, n * price, n);
       if (n >= 1 && n * price + c > bp + 1e-9) { n = roundShares(value / price * 0.9995, lot); c = commissionFor(opt, n * price, n); }
-      if (!(n >= Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) || n * price + c > bp + 1e-9) { events.push(`Ignored scale-in ${u.symbol}: insufficient funds`); continue; }
+      if (!(n >= Math.max(lot > 0 ? lot : 1, opt.minShares || 1)) || n * price + c > bp + 1e-9) { events.push(`Ignored scale-in ${u.symbol}: insufficient funds`); return; }
       p.ep = (p.sh * p.ep + n * price) / (p.sh + n); p.sh += n; p.entryCommission += c; p.scaleIns = (p.scaleIns || 0) + 1;
       cash -= p.dir * n * price + c; events.push(`Scale-in ${u.symbol} @ ${price.toFixed(2)} x ${n}`);
+    };
+    // AmiBroker walks the open positions in the order they were opened; each one is either exited (cash freed at once) or scaled in, so a scale-in can use the cash of an exit that came earlier in that order (T11 6/8/2001: BIRLACORPN's exit funded COROMANDEL's scale-in, which left SCHAEFFLER unfunded)
+    const addMap = new Map((addsByDate.get(d) || []).map((ad) => [ad.tr, ad]));
+    for (const p of open.slice()) {
+      const xd = universe[p.ui].bars.t[p.tr.xi];
+      if (xd === d && !p.tr.open && !isStopExit(p)) { exitPos(p, open.indexOf(p)); continue; }
+      const ad = addMap.get(p.tr); if (ad) scaleIn(ad);
     }
     doExits(false);
     // entries on this date, best score first
