@@ -62,7 +62,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
   const n = bars.t.length, trades = [];
   const [dB, dS, dSh, dC] = opt.tradeDelays || [0, 0, 0, 0];
   const tp = { ...DEFAULT_OPTIONS.tradePrices, ...(opt.tradePrices || {}) };
-  const sg = (arr, i) => (arr && i >= 0 && i < n ? truthy(arr[i]) && arr[i] !== SIG_SCALE_IN : false);   /* T11 (AmiBroker log): a sigScaleOut value in the Sell array is carried out as an ordinary exit of the whole position (ARE&M: 856 shares sold at once) */
+  const sg = (arr, i) => (arr && i >= 0 && i < n ? truthy(arr[i]) : false);   /* a sigScaleIn value with NO open position is an ordinary entry (AmiBroker T11: COROMANDEL entered on a scale-in signal); sigScaleOut is an ordinary exit */
   const isAdd = (arr, i) => !!(arr && i >= 0 && i < n && arr[i] === SIG_SCALE_IN);
   const px = (arr, field, i) => {
     let p = at(arr, i, undefined);
@@ -158,7 +158,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
     // ---- a stop that fired on an earlier bar with Exit-at = 2 leaves now at the normal price, unless another (intraday) stop already closed the position on this bar (AmiBroker: profit target at 20% in mode 1 won over a pending trailing exit)
     if (pos && !blocked && pos.pending && pos.pendingBar < i) { const why = pos.pending, re = pos.pendingReentry || 0; close(i, exitPx(pos.dir, i), why); blockUntil = i + re; }
     // ---- scale-in (Buy = sigScaleIn while long / Short = sigScaleIn while short): the executed add is recorded on the position; the portfolio sizes and funds it
-    if (pos && i > pos.ei && pos.adds && (pos.dir > 0 ? (longOK && isAdd(sig.buy, i - dB)) : (shortOK && isAdd(sig.short, i - dSh)))) pos.adds.push({ i, price: pos.dir > 0 ? buyPx(i) : shortPx(i) });
+    if (pos && i > pos.ei && pos.adds && (pos.dir > 0 ? (longOK && isAdd(sig.buy, i - dB)) : (shortOK && isAdd(sig.short, i - dSh)))) pos.adds.push({ i, price: pos.dir > 0 ? buyPx(i) : shortPx(i), sigBar: Math.max(0, i - (pos.dir > 0 ? dB : dSh)) });
     // ---- entries
     if (!pos && i >= blockUntil) {
       // AmiBroker: while a position is open, a same-direction entry signal is redundant. So when the position was closed by its exit signal
@@ -234,6 +234,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       entriesByDate.get(d).push({ ui, tr, score: (() => { const v = at(u.score, tr.sigBar, 0); return Number.isNaN(v) ? 1 : v; /* AmiBroker ranks an empty (warm-up) PositionScore as 1 */ })() });
     }
   });
+  const entered = new Set();   // trades that were actually opened
   const addsByDate = new Map();   // scale-ins (Buy = sigScaleIn): executed on the position's bar, sized like an entry, funded from cash, otherwise ignored (AmiBroker 'Ignored Scale-In ... insufficient funds')
   universe.forEach((u, ui) => { for (const tr of u.trades) for (const a of (tr.adds || [])) { const d = u.bars.t[a.i]; if (!addsByDate.has(d)) addsByDate.set(d, []); addsByDate.get(d).push({ ui, tr, a }); } });
   const lastPx = (p, d) => { const i = idxMap[p.ui].get(d); if (i !== undefined) p.last = universe[p.ui].bars.c[i]; return p.last; };
@@ -264,7 +265,17 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
     };
     // AmiBroker log order on a bar: scale-ins FIRST (cash not yet freed by this bar's exits), then the exits, then the new entries
     for (const ad of (addsByDate.get(d) || []).sort((x, y) => x.ui - y.ui)) {   // scale-ins, in watchlist order, before the new entries
-      const p = open.find((q) => q.tr === ad.tr); if (!p) continue;
+      const p = open.find((q) => q.tr === ad.tr);
+      if (!p) {
+        // AmiBroker: a scale-in signal on a symbol with NO open position is carried out as an ordinary ENTRY (T11: COROMANDEL's first entry was refused for lack of cash, its next scale-in signal bought it)
+        if (!entered.has(ad.tr) && ad.a.i > ad.tr.ei) {
+          const u0 = universe[ad.ui]; const rest = (ad.tr.adds || []).filter((x) => x.i > ad.a.i);
+          Object.assign(ad.tr, { ei: ad.a.i, ep: ad.a.price, sigBar: ad.a.sigBar, adds: rest, late: true });
+          if (!entriesByDate.has(d)) entriesByDate.set(d, []);
+          entriesByDate.get(d).push({ ui: ad.ui, tr: ad.tr, score: (() => { const v = at(u0.score, ad.tr.sigBar, 0); return Number.isNaN(v) ? 1 : v; })() });
+        }
+        continue;
+      }
       const u = universe[ad.ui], price = ad.a.price;
       let eq = cash, eqNet = cash; for (const q of open) { const px = lastPx(q, d) ?? q.ep; eq += valueOf(q, px); eqNet += mark(q, px); }
       const sizeEq = opt.usePrevBarEquity ? prevEq : eqNet;
@@ -322,7 +333,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
       const c = commissionFor(opt, cost(shares), shares);
       const p = { ui: cd.ui, tr, dir: tr.dir, sh: shares, ep: tr.ep, ed: d, entryCommission: c, last: tr.ep, pv, margin, fut };
       cash -= (fut ? margin * shares : tr.dir * shares * tr.ep) + c;
-      open.push(p); events.push(`${tr.dir > 0 ? 'Buy' : 'Short'} ${u.symbol} @ ${tr.ep.toFixed(2)} x ${shares}`);
+      entered.add(tr); open.push(p); events.push(`${tr.dir > 0 ? 'Buy' : 'Short'} ${u.symbol} @ ${tr.ep.toFixed(2)} x ${shares}`);
       if (tr.xi === tr.ei && !tr.open && !isStopExit(p)) {   /* a stop that fired on the entry bar (ActivateStopsImmediately) is carried out after the entries: the cash stays tied up until then */                                // exited on the same bar (a position merely still open on the last bar is NOT an exit: it keeps its cash)
         open.pop(); const val = notional(p, tr.xp); const c2 = commissionFor(opt, val, p.sh);
         cash += valueOf(p, tr.xp) - c2 - earlyFee(tr, u.bars.t, opt, val, c2, dIdx); done.push(finish(p, universe, tr.xp, tr.xi, c2)); events.push(`${tr.dir > 0 ? 'Sell' : 'Cover'} ${u.symbol} @ ${tr.xp.toFixed(2)} x ${shares}`);
