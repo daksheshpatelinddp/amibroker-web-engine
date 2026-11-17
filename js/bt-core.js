@@ -267,16 +267,7 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
     // AmiBroker log order on a bar: scale-ins FIRST (cash not yet freed by this bar's exits), then the exits, then the new entries
     for (const ad of (addsByDate.get(d) || []).sort((x, y) => x.ui - y.ui)) {   // scale-ins, in watchlist order, before the new entries
       const p = open.find((q) => q.tr === ad.tr);
-      if (!p) {
-        // AmiBroker: a scale-in signal on a symbol with NO open position is carried out as an ordinary ENTRY (T11: COROMANDEL's first entry was refused for lack of cash, its next scale-in signal bought it)
-        if (!entered.has(ad.tr) && !attempted.has(ad.tr) && ad.a.i > ad.tr.ei) {
-          const u0 = universe[ad.ui]; const rest = (ad.tr.adds || []).filter((x) => x.i > ad.a.i);
-          Object.assign(ad.tr, { ei: ad.a.i, ep: ad.a.price, sigBar: ad.a.sigBar, adds: rest, late: true });
-          if (!entriesByDate.has(d)) entriesByDate.set(d, []);
-          entriesByDate.get(d).push({ ui: ad.ui, tr: ad.tr, score: (() => { const v = at(u0.score, ad.tr.sigBar, 0); return Number.isNaN(v) ? 1 : v; })() });
-        }
-        continue;
-      }
+      if (!p) continue;   // AmiBroker: a scale-in of a raw trade that was never entered (not funded / not selected) is simply ignored; a scale-in signal while the symbol's own signal state is FLAT is an ordinary Buy and is handled in rawTrades
       const u = universe[ad.ui], price = ad.a.price;
       let eq = cash, eqNet = cash; for (const q of open) { const px = lastPx(q, d) ?? q.ep; eq += valueOf(q, px); eqNet += mark(q, px); }
       const sizeEq = opt.usePrevBarEquity ? prevEq : eqNet;
