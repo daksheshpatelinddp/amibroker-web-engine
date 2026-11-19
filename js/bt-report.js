@@ -130,39 +130,28 @@ export const MC_PCTS = [1, 5, 10, 25, 50, 75, 90, 95, 99];
  * Bootstrap Monte Carlo (AmiBroker "Monte Carlo simulation"): resample the trades (or the bar-by-bar equity changes) with replacement.
  *  mode: 'trades' | 'equity';  posMethod: 'keep' (original profit $) | 'value' (constant $ per trade) | 'pct' (% of current equity, compounding)
  */
-export function monteCarlo({ trades, curve, initialEquity, runs = 1000, mode = 'trades', posMethod = 'keep', posValue = 0, posPct = 10, posFixed = 100, seed = 12345, strawLines = 0, years = 0 }) {
+export function monteCarlo({ trades, curve, initialEquity, runs = 1000, mode = 'trades', posMethod = 'keep', posValue = 0, posPct = 10, seed = 12345, strawLines = 30, years = 0 }) {
   const R = rng(seed); let N, pick;
   if (mode === 'equity') { const r = []; for (let i = 1; i < curve.length; i++) if (curve[i - 1].equity > 0) r.push(curve[i].equity / curve[i - 1].equity); N = r.length; pick = (eq, k, rnd) => eq * r[Math.floor(rnd() * N)]; }
   else {
-    const T = trades; N = T.length;
-    pick = (eq, k, rnd) => {
-      const t = T[Math.floor(rnd() * N)], pct = t.pctProfit / 100;
-      if (posMethod === 'fixed') return eq + (t.shares > 0 ? t.profit / t.shares * posFixed : 0);   // same trade, a fixed number of shares
-      if (posMethod === 'value') return eq + (posValue || initialEquity * 0.1) * pct;                 // constant value per trade
-      if (posMethod === 'pct') return eq * (1 + posPct / 100 * pct);                                   // percent of current equity
-      return eq + t.profit;                                                                            // "Don't change": the trade's own profit
-    };
+    const T = trades.filter((t) => !t.open || true); N = T.length;
+    pick = (eq, k, rnd) => { const t = T[Math.floor(rnd() * N)]; const pct = t.pctProfit / 100; if (posMethod === 'value') return eq + (posValue || initialEquity * 0.1) * pct; if (posMethod === 'pct') return eq * (1 + posPct / 100 * pct); return eq + t.profit; };
   }
   if (!N) return null;
   const finals = [], cars = [], mdd = [], mddPct = [], lows = [], mins = new Float64Array(N + 1).fill(Infinity), maxs = new Float64Array(N + 1).fill(-Infinity), sums = new Float64Array(N + 1), straw = [];
   const yrs = years > 0 ? years : 1;
   for (let run = 0; run < runs; run++) {
-    let eq = initialEquity, peak = eq, dd = 0, ddp = 0, low = eq, ruined = false; const path = new Float64Array(N + 1); path[0] = eq;
+    let eq = initialEquity, peak = eq, dd = 0, ddp = 0, low = eq; const path = new Float64Array(N + 1); path[0] = eq;
     for (let k = 0; k < N; k++) {
-      // AmiBroker: an account that falls to zero or below is wiped out - equity stays 0, drawdown is 100%
-      if (!ruined) { eq = pick(eq, k, R); if (eq <= 0) { eq = 0; ruined = true; } }
-      path[k + 1] = eq; if (eq > peak) peak = eq; const d = peak - eq; if (d > dd) dd = d; const dp = peak > 0 ? d / peak * 100 : 0; if (dp > ddp) ddp = dp; if (eq < low) low = eq;
+      eq = pick(eq, k, R); path[k + 1] = eq; if (eq > peak) peak = eq; const d = peak - eq; if (d > dd) dd = d; const dp = peak > 0 ? d / peak * 100 : 0; if (dp > ddp) ddp = dp; if (eq < low) low = eq;
     }
-    finals.push(eq); lows.push(low); mdd.push(-dd); mddPct.push(-ddp); cars.push(eq > 0 && initialEquity > 0 ? (Math.pow(eq / initialEquity, 1 / yrs) - 1) * 100 : -100);
+    finals.push(eq); lows.push(low); mdd.push(dd); mddPct.push(ddp); cars.push(eq > 0 && initialEquity > 0 ? (Math.pow(eq / initialEquity, 1 / yrs) - 1) * 100 : -100);
     for (let k = 0; k <= N; k++) { const v = path[k]; if (v < mins[k]) mins[k] = v; if (v > maxs[k]) maxs[k] = v; sums[k] += v; }
     if (straw.length < strawLines) straw.push(path);
   }
-  const asc = (arr) => Float64Array.from(arr).sort();
-  const sorted = { finalEquity: asc(finals), car: asc(cars), maxDrawdown: asc(mdd), maxDrawdownPct: asc(mddPct), lowestEquity: asc(lows) };
-  // Percentile p = the value that p% of the runs did not beat (ascending order). Drawdowns are negative, so 1% is the worst case, as in AmiBroker.
-  const pct = (a, p) => a[Math.min(a.length - 1, Math.max(0, Math.floor(p / 100 * (a.length - 1))))];
-  const percentiles = MC_PCTS.map((p) => ({ p, finalEquity: pct(sorted.finalEquity, p), car: pct(sorted.car, p), maxDrawdown: pct(sorted.maxDrawdown, p), maxDrawdownPct: pct(sorted.maxDrawdownPct, p), lowestEquity: pct(sorted.lowestEquity, p) }));
+  const pct = (arr, p) => { const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.max(0, Math.floor(p / 100 * (s.length - 1))))]; };
+  const percentiles = MC_PCTS.map((p) => ({ p, finalEquity: pct(finals, p), car: pct(cars, p), maxDrawdown: pct(mdd, p), maxDrawdownPct: pct(mddPct, p), lowestEquity: pct(lows, p) }));
   const step = Math.max(1, Math.ceil((N + 1) / 300)), ds = (a) => { const o = []; for (let k = 0; k <= N; k += step) o.push(a[k]); if ((N) % step) o.push(a[N]); return o; };
-  return { runs, steps: N, initialEquity, percentiles, curves: { min: ds(mins), max: ds(maxs), avg: ds(Array.from(sums, (x) => x / runs)), straw: straw.map(ds) }, sorted,
-    cdf: { finalEquity: Array.from(sorted.finalEquity), maxDrawdownPct: Array.from(sorted.maxDrawdownPct) } };
+  return { runs, steps: N, percentiles, curves: { min: ds(mins), max: ds(maxs), avg: ds(Array.from(sums, (x) => x / runs)), straw: straw.map(ds) },
+    cdf: { finalEquity: [...finals].sort((a, b) => a - b), maxDrawdownPct: [...mddPct].sort((a, b) => a - b) } };
 }

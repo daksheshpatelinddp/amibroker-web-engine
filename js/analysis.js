@@ -13,7 +13,7 @@ import { loadConfig as loadIntradayConfig, saveConfig as saveIntradayConfig, fra
 import { openCustomFrame } from './intraday-ui.js';
 import { DATABASES, ACTIVE_DB } from './config.js';
 import { saveJob, loadJob, deleteJob } from './job-store.js';
-import { esc, f2, money, svgLine, svgScatter, svgHeat, svgMonteCarlo, monteCarloCharts, monthlyHtml, mcTableHtml, statsHtml, chartsFor, reportHtml } from './report-charts.js';
+import { esc, f2, money, svgLine, svgScatter, svgHeat, svgMonteCarlo, monthlyHtml, mcTableHtml, statsHtml, chartsFor, reportHtml } from './report-charts.js';
 
 const MODES = { scan: 'Scan', explore: 'Explore', backtest: 'Backtest', optimize: 'Optimize', walk: 'Walk-Forward' };
 const LAST_KEY = 'aa_last_v1', PROJ_KEY = 'aa_projects_v1';
@@ -312,7 +312,7 @@ export function openAnalysis({ formulaId = null } = {}) {
     }
     function reportView(r, mc) {
       const d = el('div', 'space-y-2'); d.appendChild(html(statsHtml(r.stats))); d.appendChild(el('div', 'text-xs font-semibold text-slate-200 pt-1', 'Monthly returns %')); d.appendChild(html(monthlyHtml(r.equityCurve, r.stats.initialCapital)));
-      if (mc) { d.appendChild(el('div', 'text-xs font-semibold text-slate-200 pt-1', `Monte Carlo (${mc.runs} runs)`)); d.appendChild(html(mcTableHtml(mc))); for (const c of monteCarloCharts(mc, S.monteCarlo)) { d.appendChild(el('div', 'text-xs font-semibold text-slate-200 pt-1', c.name)); d.appendChild(html(c.svg)); } }
+      if (mc) { d.appendChild(el('div', 'text-xs font-semibold text-slate-200 pt-1', `Monte Carlo (${mc.runs} runs)`)); d.appendChild(html(svgMonteCarlo(mc))); d.appendChild(html(mcTableHtml(mc))); }
       return d;
     }
     // Charts: small previews; tap one to open it big (one at a time, ◀ ▶ for the next, zoom, scroll)
@@ -438,7 +438,7 @@ export function openAnalysis({ formulaId = null } = {}) {
           if (!r.stats) { return ({ Results: el('div', 'text-xs text-slate-400', 'The formula produced no trades. A backtest needs Buy and Sell (and optionally Short / Cover) rules, or PositionScore with SetBacktestMode(backtestRotational).'), Info: infoPane(infoLines(), r.errors) }); }
           else {
             pseudoStore.setEquity(r.equityCurve); chartEngine.lastBacktestFormula = f.code;
-            const mc = S.monteCarlo.enable && r.trades.length > 2 ? monteCarlo({ trades: r.trades, curve: r.equityCurve, initialEquity: r.stats.initialCapital, years: r.stats.years, runs: S.monteCarlo.runs, mode: S.monteCarlo.mode, posMethod: S.monteCarlo.posMethod, posValue: S.monteCarlo.posValue, posPct: S.monteCarlo.posPct, posFixed: S.monteCarlo.posFixed, strawLines: S.monteCarlo.strawLines }) : null;
+            const mc = S.monteCarlo.enable && r.trades.length > 2 ? monteCarlo({ trades: r.trades, curve: r.equityCurve, initialEquity: r.stats.initialCapital, years: r.stats.years, runs: S.monteCarlo.runs, mode: S.monteCarlo.mode, posMethod: S.monteCarlo.posMethod, posValue: S.monteCarlo.posValue, posPct: S.monteCarlo.posPct, strawLines: S.monteCarlo.strawLines }) : null;
             const res = tradeListViews(r, f, nSyms); res.appendChild(exportBtn(r, f, mc, nSyms));
             return ({ Results: res, Report: () => reportView(r, mc), Charts: () => chartsView(r),
               Info: infoPane(infoLines([`Mode: ${btMode}`, `Symbols with data: ${r.info.symbols}`, `Bars read: ${r.info.bars}`, `Trades: ${r.trades.length}`, 'Options used:', JSON.stringify({ ...r.options, commissionTable: undefined, stops: r.options.stops.length }, null, 0)]), r.errors) });

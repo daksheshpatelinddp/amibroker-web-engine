@@ -5,7 +5,7 @@ const tier = () => ({ basis: 'value', min: 0, max: 0, type: 'pct', amount: 0, mi
 
 export const DEFAULT_SETTINGS = {
   general: { initialEquity: 100000, positions: 'both', futuresMode: false, minShares: 1, minPosValue: 0, accountMargin: 100, interestRate: 0,
-    allowPositionShrinking: false, activateStopsImmediately: false, roundLotSize: 0, tickSize: 0, reverseSignalForcesExit: true, allowSameBarExit: true, reenterSameBar: false,
+    allowPositionShrinking: false, activateStopsImmediately: false, roundLotSize: 1, tickSize: 0, reverseSignalForcesExit: true, allowSameBarExit: true, reenterSameBar: false,
     priceBounds: true, padAlign: false, padRef: '', maxSymbols: 0 },
   trades: { buyPrice: 'close', sellPrice: 'close', shortPrice: 'close', coverPrice: 'close', buyDelay: 0, sellDelay: 0, shortDelay: 0, coverDelay: 0 },
   stops: { maxLoss: { on: false, amount: 10, mode: 1, exitAt: 0 }, profit: { on: false, amount: 20, mode: 1, exitAt: 0 }, trail: { on: false, amount: 10, mode: 1, exitAt: 0 }, nbar: { on: false, amount: 10 }, reentryDelay: 0 },
@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS = {
   report: { resultList: 'trades', riskFree: 5, distSpacing: 1, includeTradeList: true },
   walkForward: { isLength: 3, isUnit: 'years', oosLength: 1, oosUnit: 'years', anchored: false, start: '', last: '', target: 'carMdd' },
   optimize: { target: 'carMdd', engine: 'exhaustive', maxEval: 1000, runs: 3, keep: 100000, serverKeep: 5000 },
-  monteCarlo: { enable: true, runs: 1000, mode: 'trades', posMethod: 'keep', posFixed: 100, posValue: 1000, posPct: 5, curves: true, scale: 'linear', strawLines: 0, logFinal: false, logDD: false, negDD: true },
+  monteCarlo: { enable: true, runs: 1000, mode: 'trades', posMethod: 'keep', posValue: 10000, posPct: 10, strawLines: 30 },
 };
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
