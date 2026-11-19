@@ -2,6 +2,7 @@
 //   tokenize -> parse -> run. No DOM. Arrays are Float64Array (NaN = Null), scalars are numbers.
 //   aflEngine.run(code, bars, { symbol, params }) returns plots, shapes, Buy/Sell/Filter/columns, errors...
 import * as L from './afl-lib.js';
+import { checkCall } from './afl-signatures.js';
 import { addTimeFrame, IN as TF_IN, MODES as TF_MODES } from './afl-timeframe.js';
 import { isArr, newArr, toArr } from './afl-lib.js';
 import { addExtras } from './afl-extra.js';
@@ -46,13 +47,13 @@ export function tokenize(src) {
         if (c === '\n') line++;
         s += c; j++;
       }
-      if (!closed) throw new AFLError('Unterminated string', line);
+      if (!closed) throw new AFLError('Error 30. Syntax error (unterminated string)', line);
       toks.push({ t: 'str', v: s, line, pos: i, end: j + 1 }); i = j + 1; continue;
     }
     const two = src.substr(i, 2);
     if (TWO.includes(two)) { toks.push({ t: 'op', v: two, line, pos: i, end: i + 2 }); i += 2; continue; }
     if (ONE.includes(ch)) { toks.push({ t: 'op', v: ch, line, pos: i, end: i + 1 }); i++; continue; }
-    throw new AFLError(`Unexpected character '${ch}'`, line);
+    throw new AFLError(`Error 30. Syntax error (unexpected character '${ch}')`, line);
   }
   toks.push({ t: 'eof', v: '', line });
   return toks;
@@ -69,20 +70,20 @@ class Parser {
   isKw(v) { const t = this.peek(); return t.t === 'id' && t.v.toLowerCase() === v; }
   err(msg, tok = this.peek()) { return new AFLError(msg, tok.line); }
   expectOp(v) {
-    if (!this.isOp(v)) { const t = this.peek(); throw this.err(`Expected '${v}' but found ${t.t === 'eof' ? 'end of formula' : `'${t.v}'`}`); }
+    if (!this.isOp(v)) { const t = this.peek(); throw this.err(`Error 30. Syntax error, expected '${v}' but found ${t.t === 'eof' ? 'end of formula' : `'${t.v}'`}`); }
     return this.next();
   }
   semi() {
     if (this.isOp(';')) { this.next(); return; }
     if (this.isOp('}') || this.peek().t === 'eof') return;
-    const t = this.peek(); throw this.err(`Missing ';' before '${t.v}'`, this.toks[Math.max(0, this.p - 1)]);
+    const t = this.peek(); throw this.err(`Error 32. Syntax error, probably missing semicolon at the end of the previous line (before '${t.v}')`, this.toks[Math.max(0, this.p - 1)]);
   }
 
   program() { const out = []; while (this.peek().t !== 'eof') out.push(this.statement()); return out; }
 
   block() {
     this.expectOp('{'); const body = [];
-    while (!this.isOp('}')) { if (this.peek().t === 'eof') throw this.err("Missing '}'"); body.push(this.statement()); }
+    while (!this.isOp('}')) { if (this.peek().t === 'eof') throw this.err("Error 30. Syntax error, missing '}'"); body.push(this.statement()); }
     this.next(); return { type: 'block', body };
   }
 
@@ -104,7 +105,7 @@ class Parser {
       }
       if (kw === 'do') {
         this.next(); const body = this.statement();
-        if (!this.isKw('while')) throw this.err("Expected 'while' after do-block");
+        if (!this.isKw('while')) throw this.err("Error 30. Syntax error, expected 'while' after do-block");
         this.next(); this.expectOp('('); const cond = this.expr(); this.expectOp(')'); this.semi();
         return { type: 'dowhile', cond, body, line: t.line };
       }
@@ -123,11 +124,11 @@ class Parser {
           let test = null;
           if (this.isKw('case')) { this.next(); test = this.or(); }
           else if (this.isKw('default')) this.next();
-          else throw this.err("Expected 'case' or 'default' inside switch");
+          else throw this.err("Error 30. Syntax error, expected 'case' or 'default' inside switch");
           this.expectOp(':');
           const body = [];
           while (!this.isOp('}') && !this.isKw('case') && !this.isKw('default')) {
-            if (this.peek().t === 'eof') throw this.err("Missing '}'");
+            if (this.peek().t === 'eof') throw this.err("Error 30. Syntax error, missing '}'");
             body.push(this.statement());
           }
           cases.push({ test, body });
@@ -143,10 +144,10 @@ class Parser {
       }
       if (kw === 'function' || kw === 'procedure') {
         this.next(); const nameTok = this.next();
-        if (nameTok.t !== 'id') throw this.err('Function name expected', nameTok);
+        if (nameTok.t !== 'id') throw this.err('Error 30. Syntax error, function name expected', nameTok);
         this.expectOp('('); const params = [];
         while (!this.isOp(')')) {
-          const pt = this.next(); if (pt.t !== 'id') throw this.err('Parameter name expected', pt);
+          const pt = this.next(); if (pt.t !== 'id') throw this.err('Error 30. Syntax error, parameter name expected', pt);
           params.push(pt.v.toLowerCase()); if (this.isOp(',')) this.next();
         }
         this.next();
@@ -163,7 +164,7 @@ class Parser {
     const left = this.ternary();
     const t = this.peek();
     if (t.t === 'op' && ASSIGN.includes(t.v)) {
-      if (left.type !== 'id' && left.type !== 'idx') throw this.err('Left side of assignment must be a variable', t);
+      if (left.type !== 'id' && left.type !== 'idx') throw this.err('Error 30. Syntax error, left side of assignment must be a variable', t);
       this.next();
       return { type: 'assign', op: t.v, target: left, value: this.assign(), line: t.line };
     }
@@ -215,10 +216,10 @@ class Parser {
       } else if (t.t === 'op' && t.v === '(' && e.type === 'id') {
         this.next(); const args = [];
         while (!this.isOp(')')) {
-          if (this.peek().t === 'eof') throw this.err("Missing ')'");
-          args.push(this.assign()); if (this.isOp(',')) this.next(); else if (!this.isOp(')')) throw this.err(`Expected ',' or ')' but found '${this.peek().v}'`);
+          if (this.peek().t === 'eof') throw this.err("Error 30. Syntax error, missing ')'");
+          args.push(this.assign()); if (this.isOp(',')) this.next(); else if (!this.isOp(')')) throw this.err(this.peek().t === 'eof' ? "Error 30. Syntax error, missing ')'" : `Error 46. Missing comma (found '${this.peek().v}')`);
         }
-        this.next(); e = { type: 'call', name: e.name, args, line: t.line };
+        this.next(); e = { type: 'call', name: e.name, raw: e.raw, args, line: t.line };
       } else if (t.t === 'op' && (t.v === '++' || t.v === '--') && (e.type === 'id' || e.type === 'idx')) {
         this.next(); e = { type: 'postinc', target: e, d: t.v === '++' ? 1 : -1, line: t.line };
       } else return e;
@@ -230,7 +231,7 @@ class Parser {
     if (t.t === 'str') return { type: 'str', v: t.v };
     if (t.t === 'id') return { type: 'id', name: t.v.toLowerCase(), raw: t.v, line: t.line };
     if (t.t === 'op' && t.v === '(') { const e = this.expr(); this.expectOp(')'); return e; }
-    throw this.err(t.t === 'eof' ? 'Unexpected end of formula' : `Unexpected '${t.v}'`, t);
+    throw this.err(t.t === 'eof' ? 'Error 30. Syntax error, unexpected end of formula' : `Error 30. Syntax error, unexpected '${t.v}'`, t);
   }
 }
 
@@ -387,7 +388,7 @@ class Interp {
     this.res.columns.forEach((cl) => { if (cl && !cl.text) chk(`Column "${cl.name}"`, cl.data); });
   }
 
-  tick() { if (++this.steps > MAX_STEPS) throw new AFLError('Execution limit exceeded (infinite loop?)', this.line); }
+  tick() { if (++this.steps > MAX_STEPS) throw new AFLError('Error 13. Endless loop detected (execution limit exceeded)', this.line); }
   fail(msg, line) { throw new AFLError(msg, line || this.line); }
 
   // ---- values
@@ -396,14 +397,18 @@ class Interp {
     this.fail(`Arrays of different time frames are mixed (${l1} bars and ${l2} bars). An array made after TimeFrameSet()/TimeFrameCompress() must be brought back with TimeFrameExpand(array, interval) before it is combined with arrays of the chart's time frame.`);
   }
   scalar(v) { return isArr(v) ? v[v.length - 1] : (typeof v === 'number' ? v : NaN); }
-  cond(v) { return isArr(v) ? truthy(v[v.length - 1]) : (typeof v === 'string' ? v.length > 0 : truthy(v)); }
+  cond(v) {
+    if (isArr(v)) this.fail('Error 6. Condition in IF, WHILE, FOR statements has to be Numeric or Boolean type. You can not use array here', this.line);
+    if (typeof v === 'string') this.fail('Error 7. Condition in IF, WHILE, FOR statements has to be Numeric or Boolean type. You can not use STRING here', this.line);
+    return truthy(v);
+  }
 
   binary(op, a, b, line) {
     if (typeof a === 'string' || typeof b === 'string') {
       if (op === '+') return toStr(a) + toStr(b);
       if (op === '==') return a === b ? 1 : 0;
       if (op === '!=') return a !== b ? 1 : 0;
-      this.fail(`Operator '${op}' cannot be used with text`, line);
+      this.fail(`Error 1. Operation not allowed. Operator/operand type mismatch ('${op}' cannot be used with text)`, line);
     }
     const f = NUM[op], aa = isArr(a), ba = isArr(b);
     if (!aa && !ba) return f(a, b);
@@ -421,7 +426,7 @@ class Interp {
     if (this.scope !== this.globals && this.globals.has(name)) return this.globals.get(name);   // functions can read global variables
     if ((name === 'openint' || name === 'openinterest') && this.globals.has('oi')) return this.globals.get('oi');   // OI = ... redefines open interest
     if (this.consts.has(name)) return this.consts.get(name);
-    this.fail(`Variable '${raw}' used without having been initialized`, line);
+    this.fail(`Error 29. Variable used without having been initialized: '${raw}'`, line);
   }
 
   setIndexed(target, value, line) {
@@ -433,7 +438,7 @@ class Interp {
     if (!isArr(arr)) arr = newArr(this.n, typeof arr === 'number' ? arr : NaN);
     if (!this.owned.has(arr)) { arr = Float64Array.from(arr); this.owned.add(arr); } // copy on first write: Close etc. stay intact
     const i = Math.trunc(idx);
-    if (!(i >= 0 && i < this.n)) this.fail(`Array index ${idx} is out of range 0..${this.n - 1}`, line);
+    if (!(i >= 0 && i < this.n)) this.fail(`Error 10. Subscript out of range. You must not access array elements outside 0..(BarCount-1) range (index ${idx})`, line);
     arr[i] = this.scalar(value);
     this.scope.set(name, arr);
   }
@@ -463,7 +468,7 @@ class Interp {
       case 'call': return this.call(e);
       case 'un': {
         const v = this.ev(e.e);
-        if (typeof v === 'string') this.fail('Text cannot be used here', e.line);
+        if (typeof v === 'string') this.fail('Error 2. Incorrect type of argument. Expecting number or array here.', e.line);
         if (e.op === '+') return v;
         if (e.op === '-') return isArr(v) ? v.map((x) => -x) : -v;
         return isArr(v) ? v.map((x) => (truthy(x) ? 0 : 1)) : (truthy(v) ? 0 : 1);
@@ -499,9 +504,10 @@ class Interp {
     this.line = e.line;
     const args = e.args.map((a) => this.ev(a));
     const uf = this.funcs.get(e.name);
-    if (uf) return this.callUser(uf, args, e.line);
+    if (uf) { if (args.length > uf.params.length) this.fail(`Error 16. Too many arguments in ${e.name}() (it takes ${uf.params.length}, found ${args.length})`, e.line); return this.callUser(uf, args, e.line); }
     const f = this.lib[e.name];
-    if (!f) this.fail(`Function '${e.name}' is not supported`, e.line);
+    if (!f) this.fail(`Error 30. Syntax error, identifier '${e.raw || e.name}' is unidentified (not a known function)`, e.line);
+    const bad = checkCall(e.name, args); if (bad) this.fail(bad, e.line);
     return f(args, e);
   }
 

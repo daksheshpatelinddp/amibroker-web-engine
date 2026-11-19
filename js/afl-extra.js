@@ -275,9 +275,11 @@ export function addExtras(F, E, H) {
   F.setcustombacktestproc = () => 0; F.addtocomposite = () => 0; F.addsummaryrows = () => 0; F.setbarsrequired = () => 0;
   F.optimize = (a) => {
     // AmiBroker: Optimize( "name", default, min, max, step ) - all five arguments required, name must be text
-    if (a.length < 5) throw new Error(`Optimize() needs 5 arguments: Optimize( "name", default, min, max, step ) - found ${a.length}`);
-    if (typeof a[0] !== 'string') throw new Error('Optimize(): argument 1 must be the parameter name in quotes, e.g. Optimize( "MaxOpen", 30, 10, 50, 5 )');
-    const name = String(a[0]), def = S(a[1], 0), min = S(a[2], def), max = S(a[3], def), step = S(a[4], 1) || 1;
+    if (a.length < 5) throw new Error(`Error ${a.length > 5 ? 16 : 17}. ${a.length > 5 ? 'Too many' : 'Missing'} arguments in Optimize(): Optimize( "name", default, min, max, step ) needs 5, found ${a.length}`);
+    if (typeof a[0] !== 'string') throw new Error('Error 5. Argument #1 has incorrect type (the function expects different argument type here: Optimize() needs the name in quotes, e.g. Optimize( "MaxOpen", 30, 10, 50, 5 ))');
+    const name = String(a[0]), def = S(a[1], 0), min = S(a[2], def), max = S(a[3], def), step = S(a[4], 1);
+    if (!name.trim()) throw new Error('Error 49. Optimization parameter name must not be empty.');
+    if (!(min <= max) || !(step > 0)) throw new Error('Error 50. Optimization parameter minimum value must be less than or equal to maximum and step parameter needs to be greater than zero.');
     if (!E.res.optParams.some((p) => p.name === name)) E.res.optParams.push({ name, def, min, max, step });
     const v = E.opts.optValues && E.opts.optValues[name];
     return Number.isFinite(v) ? v : def;
