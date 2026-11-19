@@ -111,7 +111,7 @@ const sig = (n, buy = [], sell = [], extra = {}) => ({ buy: Float64Array.from({ 
 {
   const trades = Array.from({ length: 50 }, (_, i) => ({ profit: i % 3 ? 100 : -80, pctProfit: i % 3 ? 5 : -4, shares: 10 }));
   const curve = Array.from({ length: 51 }, (_, i) => ({ equity: 1000 + i * 10 }));
-  const mc = monteCarlo({ trades, curve, initialEquity: 10000, runs: 500, years: 2, seed: 1, strawLines: 30 });
+  const mc = monteCarlo({ trades, curve, initialEquity: 10000, runs: 500, years: 2, seed: 1 });
   const p = (k) => mc.percentiles.find((x) => x.p === k);
   ok(mc.percentiles.length === 9 && p(1).finalEquity <= p(50).finalEquity && p(50).finalEquity <= p(99).finalEquity, 'percentiles increase');
   ok(p(10).maxDrawdownPct <= p(90).maxDrawdownPct && mc.curves.straw.length === 30 || mc.curves.straw.length > 0, 'drawdown percentiles and straw broom');
