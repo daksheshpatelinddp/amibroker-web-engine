@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS = {
   report: { resultList: 'trades', riskFree: 5, distSpacing: 1, includeTradeList: true },
   walkForward: { isLength: 3, isUnit: 'years', oosLength: 1, oosUnit: 'years', anchored: false, start: '', last: '', target: 'carMdd' },
   optimize: { target: 'carMdd', engine: 'exhaustive', maxEval: 1000, runs: 3, keep: 100000, serverKeep: 5000 },
-  monteCarlo: { enable: true, runs: 1000, mode: 'trades', posMethod: 'keep', posValue: 10000, posPct: 10, strawLines: 30 },
+  monteCarlo: { enable: true, runs: 1000, mode: 'trades', posMethod: 'keep', posFixed: 100, posValue: 1000, posPct: 5, curves: true, scale: 'linear', strawLines: 0, logFinal: false, logDD: false, negDD: true },
 };
 
 const clone = (o) => JSON.parse(JSON.stringify(o));

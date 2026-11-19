@@ -125,10 +125,15 @@ export function openAnalysisSettings({ onSave } = {}) {
       },
       'Monte Carlo'() {
         const m = S.monteCarlo; return [
-          chk(m, 'enable', 'Run Monte Carlo after each backtest'), num(m, 'runs', 'Number of runs', 'At least 1000 is advised', 1),
-          sel(m, 'mode', 'Simulation', { trades: 'Resample the trade list', equity: 'Resample portfolio equity changes (overlapping trades)' }),
-          sel(m, 'posMethod', 'Position sizing (trade list)', { keep: 'Keep the original profit', value: 'Constant amount per trade', pct: '% of equity (compounds)' }),
-          row(num(m, 'posValue', 'Amount per trade', ''), num(m, 'posPct', '% of equity', '')), num(m, 'strawLines', 'Equity lines in the chart', '', 1),
+          chk(m, 'enable', 'Enable Monte Carlo simulation'), num(m, 'runs', 'Number of runs:', 'At least 1000 is advised', 1),
+          sel(m, 'mode', 'Simulate using', { trades: 'Simulate using trade list', equity: 'Simulate using portfolio equity changes' }),
+          sel(m, 'posMethod', 'Position sizing (trade list)', { keep: "Don't change", fixed: 'Fixed size (shares/contracts)', value: 'Constant Value', pct: 'Percent of Equity' }),
+          row(num(m, 'posFixed', 'Fixed size: shares/contracts', ''), num(m, 'posValue', 'Constant Value', '')), num(m, 'posPct', 'Percent of Equity', ''),
+          chk(m, 'curves', 'Enable MC Equity curves (Min/Max/Avg)'),
+          sel(m, 'scale', 'MC equity curves', { linear: 'Show Absolute values in linear scale', log: 'Show Absolute values in logarithmic scale', pct: 'Show Percent change' }),
+          num(m, 'strawLines', 'Straw broom chart plots:', '0 = none', 1),
+          chk(m, 'logFinal', 'Use logarithmic scale for Final equity'), chk(m, 'logDD', 'Use logarithmic scale for $ Drawdown'),
+          chk(m, 'negDD', 'Use negative numbers for Drawdown (reverse Drawdown CDF)'),
         ];
       },
     };
