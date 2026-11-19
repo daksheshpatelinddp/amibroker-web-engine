@@ -274,6 +274,9 @@ export function addExtras(F, E, H) {
   F.setbacktestmode = (a) => { E.res.options.backtestmode = S(a[0], 0); return 0; };
   F.setcustombacktestproc = () => 0; F.addtocomposite = () => 0; F.addsummaryrows = () => 0; F.setbarsrequired = () => 0;
   F.optimize = (a) => {
+    // AmiBroker: Optimize( "name", default, min, max, step ) - all five arguments required, name must be text
+    if (a.length < 5) throw new Error(`Optimize() needs 5 arguments: Optimize( "name", default, min, max, step ) - found ${a.length}`);
+    if (typeof a[0] !== 'string') throw new Error('Optimize(): argument 1 must be the parameter name in quotes, e.g. Optimize( "MaxOpen", 30, 10, 50, 5 )');
     const name = String(a[0]), def = S(a[1], 0), min = S(a[2], def), max = S(a[3], def), step = S(a[4], 1) || 1;
     if (!E.res.optParams.some((p) => p.name === name)) E.res.optParams.push({ name, def, min, max, step });
     const v = E.opts.optValues && E.opts.optValues[name];
