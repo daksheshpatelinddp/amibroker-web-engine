@@ -28,7 +28,7 @@ export function openAnalysisSettings({ onSave } = {}) {
         const g = S.general; return [
           row(num(g, 'initialEquity', 'Initial equity', 'Portfolio mode: the whole account. Individual mode: per symbol.'), sel(g, 'positions', 'Positions', { both: 'Long and short', long: 'Long only', short: 'Short only' })),
           row(num(g, 'minShares', 'Minimum shares', '1 for stocks'), num(g, 'minPosValue', 'Minimum position value', '0 = no limit')),
-          row(num(g, 'roundLotSize', 'Round lot size', '0 = whole shares. Use 0.01 for fractions. A formula can set RoundLotSize.'), num(g, 'tickSize', 'Tick size', 'Only rounds built-in stop prices. 0 = none.')),
+          row(num(g, 'roundLotSize', 'Round lot size:', '1 = whole shares (AmiBroker default). 0 = allow fractional shares. A formula can set RoundLotSize.'), num(g, 'tickSize', 'Tick size', 'Only rounds built-in stop prices. 0 = none.')),
           row(num(g, 'accountMargin', 'Account margin %', '100 = no margin, 50 = double buying power'), num(g, 'interestRate', 'Annual interest rate %', 'Earned on cash that is not invested')),
           chk(g, 'futuresMode', 'Futures mode', 'Uses MarginDeposit and PointValue (set them in the formula)'),
           chk(g, 'allowPositionShrinking', 'Allow position size shrinking', 'Shrink a trade to the cash that is left instead of skipping it'),

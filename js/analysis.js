@@ -312,7 +312,12 @@ export function openAnalysis({ formulaId = null } = {}) {
     }
     function reportView(r, mc) {
       const d = el('div', 'space-y-2'); d.appendChild(html(statsHtml(r.stats))); d.appendChild(el('div', 'text-xs font-semibold text-slate-200 pt-1', 'Monthly returns %')); d.appendChild(html(monthlyHtml(r.equityCurve, r.stats.initialCapital)));
-      if (mc) { d.appendChild(el('div', 'text-xs font-semibold text-slate-200 pt-1', `Monte Carlo (${mc.runs} runs)`)); d.appendChild(html(mcTableHtml(mc))); for (const c of monteCarloCharts(mc, S.monteCarlo)) { d.appendChild(el('div', 'text-xs font-semibold text-slate-200 pt-1', c.name)); d.appendChild(html(c.svg)); } }
+      return d;
+    }
+    // Monte Carlo has its own tab (like AmiBroker's report page): percentile table, then the six charts
+    function mcView(mc) {
+      const d = el('div', 'space-y-2'); d.appendChild(el('div', 'text-xs font-semibold text-slate-200', `Monte Carlo (${mc.runs} runs)`)); d.appendChild(html(mcTableHtml(mc)));
+      for (const c of monteCarloCharts(mc, S.monteCarlo)) { d.appendChild(el('div', 'text-xs font-semibold text-slate-200 pt-1', c.name)); d.appendChild(html(c.svg)); }
       return d;
     }
     // Charts: small previews; tap one to open it big (one at a time, ◀ ▶ for the next, zoom, scroll)
@@ -440,7 +445,7 @@ export function openAnalysis({ formulaId = null } = {}) {
             pseudoStore.setEquity(r.equityCurve); chartEngine.lastBacktestFormula = f.code;
             const mc = S.monteCarlo.enable && r.trades.length > 2 ? monteCarlo({ trades: r.trades, curve: r.equityCurve, initialEquity: r.stats.initialCapital, years: r.stats.years, runs: S.monteCarlo.runs, mode: S.monteCarlo.mode, posMethod: S.monteCarlo.posMethod, posValue: S.monteCarlo.posValue, posPct: S.monteCarlo.posPct, posFixed: S.monteCarlo.posFixed, strawLines: S.monteCarlo.strawLines }) : null;
             const res = tradeListViews(r, f, nSyms); res.appendChild(exportBtn(r, f, mc, nSyms));
-            return ({ Results: res, Report: () => reportView(r, mc), Charts: () => chartsView(r),
+            return ({ Results: res, Report: () => reportView(r, mc), Charts: () => chartsView(r), ...(mc ? { 'Monte Carlo': () => mcView(mc) } : {}),
               Info: infoPane(infoLines([`Mode: ${btMode}`, `Symbols with data: ${r.info.symbols}`, `Bars read: ${r.info.bars}`, `Trades: ${r.trades.length}`, 'Options used:', JSON.stringify({ ...r.options, commissionTable: undefined, stops: r.options.stops.length }, null, 0)]), r.errors) });
           }
     };
