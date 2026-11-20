@@ -28,7 +28,7 @@ export function openAnalysisSettings({ onSave } = {}) {
         const g = S.general; return [
           row(num(g, 'initialEquity', 'Initial equity', 'Portfolio mode: the whole account. Individual mode: per symbol.'), sel(g, 'positions', 'Positions', { both: 'Long and short', long: 'Long only', short: 'Short only' })),
           row(num(g, 'minShares', 'Minimum shares', '1 for stocks'), num(g, 'minPosValue', 'Minimum position value', '0 = no limit')),
-          row(num(g, 'roundLotSize', 'Round lot size:', '1 = whole shares (AmiBroker default). 0 = allow fractional shares. A formula can set RoundLotSize.'), num(g, 'tickSize', 'Tick size', 'Only rounds built-in stop prices. 0 = none.')),
+          row(num(g, 'roundLotSize', 'Round lot size', '0 = whole shares. Use 0.01 for fractions. A formula can set RoundLotSize.'), num(g, 'tickSize', 'Tick size', 'Only rounds built-in stop prices. 0 = none.')),
           row(num(g, 'accountMargin', 'Account margin %', '100 = no margin, 50 = double buying power'), num(g, 'interestRate', 'Annual interest rate %', 'Earned on cash that is not invested')),
           chk(g, 'futuresMode', 'Futures mode', 'Uses MarginDeposit and PointValue (set them in the formula)'),
           chk(g, 'allowPositionShrinking', 'Allow position size shrinking', 'Shrink a trade to the cash that is left instead of skipping it'),
@@ -125,10 +125,15 @@ export function openAnalysisSettings({ onSave } = {}) {
       },
       'Monte Carlo'() {
         const m = S.monteCarlo; return [
-          chk(m, 'enable', 'Run Monte Carlo after each backtest'), num(m, 'runs', 'Number of runs', 'At least 1000 is advised', 1),
-          sel(m, 'mode', 'Simulation', { trades: 'Resample the trade list', equity: 'Resample portfolio equity changes (overlapping trades)' }),
-          sel(m, 'posMethod', 'Position sizing (trade list)', { keep: 'Keep the original profit', value: 'Constant amount per trade', pct: '% of equity (compounds)' }),
-          row(num(m, 'posValue', 'Amount per trade', ''), num(m, 'posPct', '% of equity', '')), num(m, 'strawLines', 'Equity lines in the chart', '', 1),
+          chk(m, 'enable', 'Enable Monte Carlo simulation'), num(m, 'runs', 'Number of runs:', 'At least 1000 is advised', 1),
+          sel(m, 'mode', 'Simulate using', { trades: 'Simulate using trade list', equity: 'Simulate using portfolio equity changes' }),
+          sel(m, 'posMethod', 'Position sizing (trade list)', { keep: "Don't change", fixed: 'Fixed size (shares/contracts)', value: 'Constant Value', pct: 'Percent of Equity' }),
+          row(num(m, 'posFixed', 'Fixed size: shares/contracts', ''), num(m, 'posValue', 'Constant Value', '')), num(m, 'posPct', 'Percent of Equity', ''),
+          chk(m, 'curves', 'Enable MC Equity curves (Min/Max/Avg)'),
+          sel(m, 'scale', 'MC equity curves', { linear: 'Show Absolute values in linear scale', log: 'Show Absolute values in logarithmic scale', pct: 'Show Percent change' }),
+          num(m, 'strawLines', 'Straw broom chart plots:', '0 = none', 1),
+          chk(m, 'logFinal', 'Use logarithmic scale for Final equity'), chk(m, 'logDD', 'Use logarithmic scale for $ Drawdown'),
+          chk(m, 'negDD', 'Use negative numbers for Drawdown (reverse Drawdown CDF)'),
         ];
       },
     };

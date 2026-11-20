@@ -90,10 +90,40 @@ export function svgHeat(rows, optParams, metric, { title = '' } = {}) {
   return frame(H, g);
 }
 
-export function svgMonteCarlo(mc, { title = 'Monte Carlo equity' } = {}) {
+export function svgMonteCarlo(mc, { title = 'MC Min/Max Equity', scale = 'linear' } = {}) {
   if (!mc) return '';
-  const straw = mc.curves.straw.map((v) => ({ values: v, color: '#64748b', width: 0.6, opacity: 0.45 }));
-  return svgLine([...straw, { values: mc.curves.max, color: '#22c55e', width: 1.2 }, { values: mc.curves.min, color: '#ef4444', width: 1.2 }, { values: mc.curves.avg, color: '#38bdf8', width: 1.8 }], { title: `${title} (${mc.runs} runs: min / average / max)`, height: 190, xTitle: 'Trade number', yTitle: 'Equity' });
+  const init = mc.initialEquity || 1;
+  const tf = scale === 'pct' ? (v) => (v / init - 1) * 100 : scale === 'log' ? (v) => Math.log10(Math.max(1, v)) : (v) => v;
+  const yFmt = scale === 'pct' ? (v) => short(v) + '%' : scale === 'log' ? (v) => short(Math.pow(10, v)) : short;
+  const m = (a) => a.map(tf);
+  const straw = mc.curves.straw.map((v) => ({ values: m(v), color: '#64748b', width: 0.6, opacity: 0.45 }));
+  return svgLine([...straw, { values: m(mc.curves.max), color: '#22c55e', width: 1.2 }, { values: m(mc.curves.min), color: '#ef4444', width: 1.2 }, { values: m(mc.curves.avg), color: '#38bdf8', width: 1.8 }],
+    { title: `${title} (${mc.runs} runs: min / average / max)`, height: 190, xTitle: 'Trade #', yTitle: scale === 'pct' ? 'Equity change %' : 'Equity', yFmt });
+}
+
+/** The percentile curves of AmiBroker's Monte Carlo page: Final Equity, CAR, Drawdown %, Drawdown $ and Lowest Equity against percentile (1..100). */
+export function svgMonteCarloCdf(mc, key, { title, yTitle, color = '#3b82f6', log = false, negative = true, fmt = short } = {}) {
+  if (!mc || !mc.sorted || !mc.sorted[key]) return '';
+  const a = mc.sorted[key], n = a.length, pts = [];
+  for (let p = 1; p <= 100; p++) pts.push(a[Math.min(n - 1, Math.max(0, Math.round(p / 100 * (n - 1))))]);
+  let v = negative ? pts : pts.map((x) => Math.abs(x)).sort((x, y) => x - y);
+  let yFmt = fmt;
+  if (log) { v = v.map((x) => Math.log10(Math.max(1, Math.abs(x))) * (x < 0 ? -1 : 1)); yFmt = (x) => fmt(Math.pow(10, Math.abs(x)) * (x < 0 ? -1 : 1)); }
+  return svgLine([{ values: v, color, width: 1.6 }], { title, height: 170, xTitle: 'Percentile', yTitle, yFmt });
+}
+
+/** All six Monte Carlo charts, in AmiBroker's order. opts come from the Monte Carlo settings. */
+export function monteCarloCharts(mc, o = {}) {
+  if (!mc) return [];
+  const pctFmt = (v) => short(v) + '%';
+  const out = [];
+  if (o.curves !== false) out.push({ name: 'MC Min/Max Equity', svg: svgMonteCarlo(mc, { title: 'MC Min/Max Equity', scale: o.scale || 'linear' }) });
+  out.push({ name: 'MC Final Equity', svg: svgMonteCarloCdf(mc, 'finalEquity', { title: 'MC Final Equity', yTitle: 'Final Equity Level', log: !!o.logFinal }) });
+  out.push({ name: 'MC CAR', svg: svgMonteCarloCdf(mc, 'car', { title: 'MC CAR', yTitle: 'Annual Profit %', fmt: pctFmt }) });
+  out.push({ name: 'MC Drawdown %', svg: svgMonteCarloCdf(mc, 'maxDrawdownPct', { title: 'MC Drawdown %', yTitle: 'Max. Drawdown %', fmt: pctFmt, negative: o.negDD !== false, color: '#ef4444' }) });
+  out.push({ name: 'MC Drawdown $', svg: svgMonteCarloCdf(mc, 'maxDrawdown', { title: 'MC Drawdown $', yTitle: 'Max. Drawdown $', log: !!o.logDD, negative: o.negDD !== false, color: '#ef4444' }) });
+  out.push({ name: 'MC Lowest Equity', svg: svgMonteCarloCdf(mc, 'lowestEquity', { title: 'MC Lowest Equity', yTitle: 'Lowest Equity Level', color: '#a78bfa' }) });
+  return out;
 }
 
 const heat = (v) => (v === null || v === undefined ? '' : v > 0 ? `background:rgba(34,197,94,${Math.min(0.6, 0.12 + Math.abs(v) / 25)})` : `background:rgba(239,68,68,${Math.min(0.6, 0.12 + Math.abs(v) / 25)})`);
@@ -105,7 +135,7 @@ export function monthlyHtml(curve, initial) {
 
 export function mcTableHtml(mc) {
   if (!mc) return '';
-  return `<table class="rt"><tr><th>Percentile</th><th>Final equity</th><th>CAR %</th><th>Max DD</th><th>Max DD %</th><th>Lowest equity</th></tr>${mc.percentiles.map((p) => `<tr><td>${p.p}%</td><td>${money(p.finalEquity)}</td><td>${f2(p.car)}</td><td>${money(p.maxDrawdown)}</td><td>${f2(p.maxDrawdownPct)}</td><td>${money(p.lowestEquity)}</td></tr>`).join('')}</table>`;
+  return `<table class="rt"><tr><th>Percentile</th><th>Final Equity</th><th>Annual Return</th><th>Max. Drawdown $</th><th>Max. Drawdown %</th><th>Lowest Eq.</th></tr>${mc.percentiles.map((p) => `<tr><td>${p.p}%</td><td>${money(p.finalEquity)}</td><td>${f2(p.car)}%</td><td>${money(p.maxDrawdown)}</td><td>${f2(p.maxDrawdownPct)}%</td><td>${money(p.lowestEquity)}</td></tr>`).join('')}</table>`;
 }
 
 export function statsHtml(stats) {
@@ -135,6 +165,6 @@ export function reportHtml({ title = 'Backtest report', formulaName = '', code =
 pre{background:#020617;border:1px solid #1e293b;padding:8px;overflow:auto;font-size:11px}svg{width:100%;margin:4px 0}.muted{color:#94a3b8}</style></head><body>
 <h1>${esc(title)}</h1><div class="muted">${esc(formulaName)} · generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} ${meta.symbols ? '· ' + meta.symbols + ' symbols' : ''} ${meta.range ? '· ' + esc(meta.range) : ''}</div>
 <h2>Statistics</h2>${statsHtml(s)}<h2>Charts</h2>${ch.equity}${ch.drawdown}${ch.distribution}${ch.mae}${ch.mfe}
-<h2>Monthly returns %</h2>${monthlyHtml(result.equityCurve, s.initialCapital)}${mc ? `<h2>Monte Carlo (${mc.runs} runs)</h2>${svgMonteCarlo(mc)}${mcTableHtml(mc)}` : ''}${trades}
+<h2>Monthly returns %</h2>${monthlyHtml(result.equityCurve, s.initialCapital)}${mc ? `<h2>Monte Carlo (${mc.runs} runs)</h2>${mcTableHtml(mc)}${monteCarloCharts(mc, settings ? settings.monteCarlo : {}).map((c) => `<h3>${esc(c.name)}</h3>${c.svg}`).join('')}` : ''}${trades}
 ${code ? `<h2>Formula</h2><pre>${esc(code)}</pre>` : ''}${settings ? `<h2>Settings</h2><pre>${esc(JSON.stringify(settings, null, 1))}</pre>` : ''}</body></html>`;
 }
