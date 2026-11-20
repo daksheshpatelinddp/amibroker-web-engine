@@ -306,7 +306,7 @@ function buildUniverseEntry(sym, b, res, opt, a, z) {
     buyPrice: sl(v('buyprice')), sellPrice: sl(v('sellprice')), shortPrice: sl(v('shortprice')), coverPrice: sl(v('coverprice')), stops };
   const tickSym = varScalar(res, 'ticksize'), o2 = tickSym !== undefined ? { ...opt, tickSize: tickSym } : opt;
   const u = { symbol: sym, bars, score: sl(v('positionscore')), size: sl(v('positionsize')), buyPrice: sig.buyPrice, sellPrice: sig.sellPrice,
-    pointValue: varScalar(res, 'pointvalue') || 1, marginDeposit: varScalar(res, 'margindeposit') || 0, roundLot: varScalar(res, 'roundlotsize') || 0 };
+    pointValue: varScalar(res, 'pointvalue') || 1, marginDeposit: varScalar(res, 'margindeposit') || 0, roundLot: varScalar(res, 'roundlotsize') };
   u.trades = opt.mode !== 1 ? rawTrades(bars, sig, o2) : [];
   return u;
 }

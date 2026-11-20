@@ -684,7 +684,7 @@ function buildFunctions(E) {
   // --- trade / chart options: recorded for the Backtester (the chart itself ignores them)
   const OPTION_DEFAULTS = { initialequity: 100000, maxopenpositions: 10, commissionmode: 0, commissionamount: 0, allowsamebarexit: 1,
     allowpositionshrinking: 0, activatestopsimmediately: 0, pricebounds: 1, extraspace: 0, usepreviousclose: 0, minshares: 1,
-    roundlotsize: 0, tickssize: 0, marginrequirement: 100, interestrate: 0, accountmargin: 100, reverseentrysignalforce: 0,
+    roundlotsize: 1, tickssize: 0, marginrequirement: 100, interestrate: 0, accountmargin: 100, reverseentrysignalforce: 0,
     holdminbars: 0, maxopenlong: 0, maxopenshort: 0, futuresmode: 0, worstrankheld: 0, allowexposure: 0 };
   F.setoption = (a) => { E.res.options[String(a[0]).toLowerCase()] = a[1]; return 0; };
   F.getoption = (a) => {

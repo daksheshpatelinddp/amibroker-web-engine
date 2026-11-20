@@ -26,10 +26,12 @@ function merge(base, over) {
 }
 export function loadSettings(storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
   let s = null; try { s = storage && JSON.parse(storage.getItem(KEY) || 'null'); } catch (e) {}
-  return merge(clone(DEFAULT_SETTINGS), s || {});
+  // Round lot size used to mean 0 = whole shares. It now follows AmiBroker (1 = whole shares, 0 = fractional), so an old saved 0 becomes 1.
+  if (s && s.general && !s.lotV2) { if (s.general.roundLotSize === 0) s.general.roundLotSize = 1; s.lotV2 = true; }
+  const out = merge(clone(DEFAULT_SETTINGS), s || {}); out.lotV2 = true; return out;
 }
 export function saveSettings(s, storage = (typeof localStorage !== 'undefined' ? localStorage : null)) { try { storage && storage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
-export const defaultSettings = () => clone(DEFAULT_SETTINGS);
+export const defaultSettings = () => ({ ...clone(DEFAULT_SETTINGS), lotV2: true });
 
 const SIZE_TYPE = { value: 1, pct: 2, shares: 4 };
 /** Settings -> option object for bt-core (the base that the formula's SetOption() calls are applied over). */

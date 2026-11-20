@@ -12,7 +12,7 @@ const at = (arr, i, d) => (arr && typeof arr === 'object' ? arr[i] : (arr === un
 const dayNum = (d) => Date.parse(d) / 86400000;
 
 export const DEFAULT_OPTIONS = {
-  initialEquity: 100000, positions: 'both', futuresMode: 0, minShares: 1, minPosValue: 0, accountMargin: 100, roundLotSize: 0, tickSize: 0,
+  initialEquity: 100000, positions: 'both', futuresMode: 0, minShares: 1, minPosValue: 0, accountMargin: 100, roundLotSize: 1, tickSize: 0,
   commissionMode: 0, commissionAmount: 0, commissionTable: null, interestRate: 0,
   allowPositionShrinking: 0, activateStopsImmediately: 0, reverseEntrySignalForce: 1, allowSameBarExit: 1, reenterSameBar: 0, stopEntriesOnFailure: 1, equityNetOfExitCost: 1, priceBounds: 1,
   tradePrices: { buy: 'close', sell: 'close', short: 'close', cover: 'close' }, tradeDelays: [0, 0, 0, 0], stops: [],
@@ -119,18 +119,7 @@ export function rawTrades(bars, sig, opt = DEFAULT_OPTIONS) {
               let p = level;
               // gap beyond the stop: filled at the open. AmiBroker (observed with ActivateStopsImmediately on): a trailing stop is filled at its level even when the bar opened below it
               // (a real gap through the stop shows up as an exit signal at the open instead), so no open clamp is applied to a trailing stop in that case.
-              if (type === 2 && opt.activateStopsImmediately) {
-                p = level;
-                /* T06 (KAJARIACER 13 Oct 2000): the bar opened below the trailing level AmiBroker already knew at the open (previous bar's high and ATR) -> a real gap, filled at the open; otherwise the level reached during the bar is the fill */
-                if (!risk && pos.hiPrev !== undefined) {
-                  const amtP = s.amountArr ? (s.volatile ? s.amountArr[i - 1] : s.amountArr[pos.ei]) : s.amount;
-                  if (Number.isFinite(amtP)) {
-                    const bP = dir > 0 ? F32(pos.hiPrev) : F32(pos.loPrev);
-                    const lvP = snap(dir > 0 ? bP - (pct ? bP * amtP / 100 : amtP) : bP + (pct ? bP * amtP / 100 : amtP));
-                    if (dir > 0 ? F32(bars.o[i]) <= lvP : F32(bars.o[i]) >= lvP) p = bars.o[i];
-                  }
-                }
-              }
+              if (type === 2 && opt.activateStopsImmediately) p = level;
               else if (type !== 1) p = dir > 0 ? Math.min(level, bars.o[i]) : Math.max(level, bars.o[i]);
               else p = dir > 0 ? Math.max(level, bars.o[i]) : Math.min(level, bars.o[i]);
               p = Math.min(bars.h[i], Math.max(bars.l[i], p));
@@ -224,8 +213,9 @@ export function commissionFor(opt, value, shares) {
   return 0;
 }
 
-const lotOf = (u, opt) => (u.roundLot > 0 ? u.roundLot : opt.roundLotSize > 0 ? opt.roundLotSize : 0);
-const roundShares = (sh, lot) => (lot > 0 ? Math.floor(sh / lot + 1e-9) * lot : Math.floor(sh + 1e-9));
+// AmiBroker RoundLotSize: 1 = whole shares (default), 5 = multiples of 5, 0 = fractional shares allowed. The formula's own value wins over the setting.
+const lotOf = (u, opt) => (Number.isFinite(u.roundLot) ? u.roundLot : Number.isFinite(opt.roundLotSize) ? opt.roundLotSize : 1);
+const roundShares = (sh, lot) => (lot > 0 ? Math.floor(sh / lot + 1e-9) * lot : lot === 0 ? sh : Math.floor(sh + 1e-9));
 
 /**
  * Pass 2. universe: [{ symbol, bars, trades, score(arr|undefined), size(arr|undefined), pointValue, marginDeposit, roundLot }]
