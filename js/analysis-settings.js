@@ -34,6 +34,9 @@ export function loadSettings(storage = (typeof localStorage !== 'undefined' ? lo
     const old = (x) => { if (!x || x.type === undefined) return x; const r = rowC(); if (x.type === 'share') r.perShare = x.amount || 0; else if (x.type === 'pct') r.pct = x.amount || 0; else r.perTrade = x.amount || 0; r.minAmt = x.minComm || 0; r.maxAmt = x.maxComm || 0; return { ...x, ...r, type: undefined }; };
     const t = s.commission.table; t.default = old(t.default); t.tiers = (t.tiers || []).map(old);
   }
+  if (s && s.stops && s.stops.reentryDelay > 0) {   // the single re-entry delay of older versions now lives on each stop
+    for (const k of ['maxLoss', 'profit', 'trail', 'nbar']) if (s.stops[k] && s.stops[k].reentry === undefined) s.stops[k].reentry = s.stops.reentryDelay;
+  }
   if (s && s.general && !s.lotV2) { if (s.general.roundLotSize === 0) s.general.roundLotSize = 1; s.lotV2 = true; }
   const out = merge(clone(DEFAULT_SETTINGS), s || {}); out.lotV2 = true; return out;
 }
