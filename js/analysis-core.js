@@ -8,11 +8,16 @@ import { computeStats } from './bt-report.js';
 import { settingsToOptions, defaultSettings } from './analysis-settings.js';
 import { colorToHex } from './afl-engine.js';
 
+// Optimization targets: AmiBroker's list (same names, same order) first, then the ones only this app has. [label, direction (1 = higher is better, -1 = lower is better)]
 export const METRICS = {
-  carMdd: ['CAR / MaxDD', 1], cagr: ['CAGR %', 1], netProfit: ['Net profit', 1], netProfitPct: ['Net profit %', 1], rarMdd: ['RAR / MaxDD', 1],
-  sharpeTrades: ['Sharpe ratio of trades', 1], sharpe: ['Sharpe ratio (daily)', 1], sortino: ['Sortino ratio', 1], profitFactor: ['Profit factor', 1],
-  riskAdjReturn: ['Risk-adjusted return %', 1], winPct: ['Win %', 1], maxDrawdownPct: ['Max drawdown % (lower is better)', -1], recoveryFactor: ['Recovery factor', 1],
-  ulcerPerformance: ['Ulcer performance index', 1], kRatio: ['K-ratio', 1], riskRewardRatio: ['Risk-reward ratio', 1], avgProfitPct: ['Avg profit/loss %', 1], trades: ['Number of trades', 1],
+  losers: ['# of losers', -1], winners: ['# of winners', 1], trades: ['# trades', 1], lossPct: ['% of losers', -1], winPct: ['% of winners', 1],
+  avgProfitPct: ['Average % Profit/Loss', 1], avgBars: ['Average Bar Held', 1], avgProfit: ['Average Profit/Loss', 1], cagr: ['CAR', 1], carMdd: ['CAR/MDD', 1],
+  exposure: ['Exposure %', 1], kRatio: ['K-Ratio', 1], avgLossPct: ['L. Avg. % Loss', 1], avgBarsLoss: ['L. Avg. Bar Held', -1], avgLoss: ['L. Avg. loss', 1], grossLoss: ['L.tot. Loss', 1],
+  maxDrawdownPct: ['Max. Sys % Drawdown', -1], maxDrawdown: ['Max. sys Drawdown', -1], maxTradeDrawdownPct: ['Max. Trade % Drawdown', -1], maxTradeDrawdown: ['Max. Trade Drawdown', -1],
+  netProfitPct: ['Net % profit', 1], netProfit: ['Net Profit', 1], payoffRatio: ['Payoff Ratio', 1], profitFactor: ['Profit Factor', 1], riskAdjReturn: ['RAR', 1], rarMdd: ['RAR/MDD', 1],
+  recoveryFactor: ['Recovery Factor', 1], riskRewardRatio: ['RRR', 1], sharpeTrades: ['Sharpe Ratio', 1], stdError: ['Standard Error', -1], ulcerIndex: ['Ulcer Index', -1],
+  ulcerPerformance: ['Ulcer Perf. Index', 1], avgWinPct: ['W. Avg % Profit', 1], avgBarsWin: ['W. Avg. Bar Held', 1], avgWin: ['W. Avg. Profit', 1], grossProfit: ['W. Tot. Profit', 1],
+  sharpe: ['Sharpe ratio (daily returns)', 1], sortino: ['Sortino ratio', 1],
 };
 
 // ------------------------------------------------------------------ time frames
@@ -464,14 +469,15 @@ const addSpan = (d, n, unit) => { const t = new Date(d + 'T00:00:00Z'); if (unit
 const prevDay = (d) => addSpan(d, -1, 'days');
 
 /** The in-sample / out-of-sample periods of a walk-forward test (AmiBroker "easy mode": OOS follows IS, step = OOS length). */
-export function walkSegments({ start, last, isLength, isUnit, oosLength, oosUnit, anchored }) {
+export function walkSegments({ start, last, isLength, isUnit, oosLength, oosUnit, anchored, stepLength, stepUnit }) {
+  const sLen = stepLength > 0 ? stepLength : oosLength, sUnit = stepLength > 0 ? stepUnit || oosUnit : oosUnit;   // Advanced mode: its own step; Easy mode: the step is the out-of-sample length
   const segs = []; let isStart = start, isEnd = prevDay(addSpan(start, isLength, isUnit));
   for (let guard = 0; guard < 500; guard++) {
     const oosStart = addSpan(isEnd, 1, 'days'); if (oosStart > last) break;
     let oosEnd = prevDay(addSpan(oosStart, oosLength, oosUnit)); if (oosEnd > last) oosEnd = last;
     segs.push({ isFrom: isStart, isTo: isEnd, oosFrom: oosStart, oosTo: oosEnd });
     if (oosEnd >= last) break;
-    isEnd = oosEnd; if (!anchored) isStart = addSpan(isStart, oosLength, oosUnit);
+    isEnd = prevDay(addSpan(addSpan(isEnd, 1, 'days'), sLen, sUnit)); if (!anchored) isStart = addSpan(isStart, sLen, sUnit);
   }
   return segs;
 }
@@ -486,7 +492,7 @@ export async function walkForward({ code, symbols, session, params, overrides = 
   let minD = '9999', maxD = '0000';
   for (const s of symbols) { const b = await session.get(s); if (b) { if (b.t[0] < minD) minD = b.t[0]; if (b.t[b.t.length - 1] > maxD) maxD = b.t[b.t.length - 1]; } }
   if (minD === '9999') return { steps: [], errors: ['No data'] };
-  const segs = walkSegments({ start: wf.start || minD, last: wf.last || maxD, isLength: wf.isLength, isUnit: wf.isUnit, oosLength: wf.oosLength, oosUnit: wf.oosUnit, anchored: wf.anchored });
+  const segs = walkSegments({ start: wf.start || minD, last: wf.last || maxD, isLength: wf.isLength, isUnit: wf.isUnit, oosLength: wf.oosLength, oosUnit: wf.oosUnit, anchored: wf.anchored, stepLength: wf.mode === 'advanced' ? wf.stepLength : 0, stepUnit: wf.stepUnit });
   if (!segs.length) return { steps: [], errors: ['The in-sample period is longer than the data. Shorten it or check the dates.'] };
   const probe = await runAll({ code, symbols: symbols.slice(0, 1), session, params });
   const optParams = probe[0] ? probe[0].res.optParams : [];

@@ -12,7 +12,7 @@ const at = (arr, i, d) => (arr && typeof arr === 'object' ? arr[i] : (arr === un
 const dayNum = (d) => Date.parse(d) / 86400000;
 
 export const DEFAULT_OPTIONS = {
-  initialEquity: 100000, positions: 'both', futuresMode: 0, minShares: 1, minPosValue: 0, accountMargin: 100, roundLotSize: 1, tickSize: 0,
+  initialEquity: 100000, positions: 'both', futuresMode: 0, minShares: 1, minPosValue: 0, maxPosValue: 0, accountMargin: 100, roundLotSize: 1, tickSize: 0,
   commissionMode: 0, commissionAmount: 0, commissionTable: null, interestRate: 0,
   allowPositionShrinking: 0, activateStopsImmediately: 0, reverseEntrySignalForce: 1, allowSameBarExit: 1, reenterSameBar: 0, stopEntriesOnFailure: 1, equityNetOfExitCost: 1, priceBounds: 1,
   tradePrices: { buy: 'close', sell: 'close', short: 'close', cover: 'close' }, tradeDelays: [0, 0, 0, 0], stops: [],
@@ -204,6 +204,13 @@ export function commissionFor(opt, value, shares) {
     const tiers = [...(t.tiers || [])].filter((x) => x && ((x.min || 0) > 0 || (x.max || 0) > 0));
     const basis = (x) => (x.basis === 'shares' ? Math.abs(shares) : v);
     const tier = tiers.find((x) => basis(x) >= (x.min || 0) && ((x.max || 0) === 0 || basis(x) <= x.max)) || t.default;
+    if (tier && tier.type === undefined) {   // AmiBroker's table row: per share + per trade + % of value together, then min / max (amount or % of value)
+      const cm = (tier.perShare || 0) * Math.abs(shares) + (tier.perTrade || 0) + (tier.pct || 0) * v / 100;
+      let c = cm;
+      if (tier.minAmt > 0) c = Math.max(c, tier.minAmt); if (tier.minPct > 0) c = Math.max(c, tier.minPct * v / 100);
+      if (tier.maxAmt > 0) c = Math.min(c, tier.maxAmt); if (tier.maxPct > 0) c = Math.min(c, tier.maxPct * v / 100);
+      return c;
+    }
     if (tier) {
       let c = tier.type === 'share' ? Math.abs(shares) * (tier.amount || 0) : tier.type === 'pct' ? v * (tier.amount || 0) / 100 : (tier.amount || 0);
       if (tier.minComm > 0) c = Math.max(c, tier.minComm); if (tier.maxComm > 0) c = Math.min(c, tier.maxComm);
@@ -317,7 +324,9 @@ export function portfolio(universe, opt = DEFAULT_OPTIONS) {
         if (ps.type === 4) shares = ps.size;
       }
       const lot = lotOf(u, opt);
+      if (opt.maxPosValue > 0 && Number.isFinite(value) && value > opt.maxPosValue) value = opt.maxPosValue;   // AmiBroker "Max. pos. value" (0 = no maximum)
       if (!shares) shares = roundShares(value / (fut ? margin : tr.ep), lot);
+      else if (opt.maxPosValue > 0 && !fut && shares * tr.ep > opt.maxPosValue) shares = roundShares(opt.maxPosValue / tr.ep, lot);
       const minSh = Math.max(lot > 0 ? lot : 1, opt.minShares || 1), failStop = opt.stopEntriesOnFailure;   // AmiBroker: the first entry that cannot be filled ends the entries of this bar
       if (shares < minSh && failStop) { attempted.add(tr); events.push(`Not entered ${u.symbol}: position value ${Number.isFinite(value) ? value.toFixed(2) : value} buys fewer than ${minSh} share(s) at ${tr.ep.toFixed(2)}`); break; }
       if (opt.limitVolPct > 0) { const vol = u.bars.v ? u.bars.v[tr.ei] : 0; if (vol > 0 || !opt.noVolLimitIfZero) shares = Math.min(shares, roundShares(vol * opt.limitVolPct / 100, lot)); }

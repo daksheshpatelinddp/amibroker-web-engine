@@ -356,7 +356,7 @@ export function openAnalysis({ formulaId = null } = {}) {
       const bt = el('button', BTN + ' w-full', 'Open equity on a chart (symbol ~~~EQUITY)'); bt.type = 'button'; bt.onclick = () => { pseudoStore.setEquity(r.equityCurve); host.openSymbol('~~~EQUITY'); minimize(); }; d.appendChild(bt);
       return d;
     }
-    const exportBtn = (r, f, mc, nSyms) => { const b = el('button', BTN + ' w-full', 'Export report (HTML)…'); b.type = 'button'; b.onclick = () => download(`${f.name.replace(/[^\w\- ]+/g, '')}-report.html`, reportHtml({ title: 'Backtest report', formulaName: f.name, code: f.code, result: r, mc, settings: S, includeTrades: S.report.includeTradeList, meta: { symbols: nSyms, range: `${rangeNow().mode}` } }), 'text/html'); return b; };
+    const exportBtn = (r, f, mc, nSyms) => { const b = el('button', BTN + ' w-full', 'Export report (HTML)…'); b.type = 'button'; b.onclick = () => download(`${f.name.replace(/[^\w\- ]+/g, '')}-report.html`, reportHtml({ title: 'Backtest report', formulaName: f.name, code: S.report.includeFormula === false ? '' : f.code, result: r, mc, settings: S, includeTrades: S.report.includeTradeList, meta: { symbols: nSyms, range: `${rangeNow().mode}` } }), 'text/html'); return b; };
 
     function optViews(r, o) {
       const { f, sy, common, resumeNote } = o, infoLines = o.infoLines, views = {};
@@ -446,7 +446,7 @@ export function openAnalysis({ formulaId = null } = {}) {
             const mc = S.monteCarlo.enable && r.trades.length > 2 ? monteCarlo({ trades: r.trades, curve: r.equityCurve, initialEquity: r.stats.initialCapital, years: r.stats.years, runs: S.monteCarlo.runs, mode: S.monteCarlo.mode, posMethod: S.monteCarlo.posMethod, posValue: S.monteCarlo.posValue, posPct: S.monteCarlo.posPct, posFixed: S.monteCarlo.posFixed, strawLines: S.monteCarlo.strawLines }) : null;
             const res = tradeListViews(r, f, nSyms); res.appendChild(exportBtn(r, f, mc, nSyms));
             return ({ Results: res, Report: () => reportView(r, mc), Charts: () => chartsView(r), ...(mc ? { 'Monte Carlo': () => mcView(mc) } : {}),
-              Info: infoPane(infoLines([`Mode: ${btMode}`, `Symbols with data: ${r.info.symbols}`, `Bars read: ${r.info.bars}`, `Trades: ${r.trades.length}`, 'Options used:', JSON.stringify({ ...r.options, commissionTable: undefined, stops: r.options.stops.length }, null, 0)]), r.errors) });
+              Info: infoPane(infoLines([`Mode: ${btMode}`, `Symbols with data: ${r.info.symbols}`, `Bars read: ${r.info.bars}`, `Trades: ${r.trades.length}`, 'Options used (the formula\'s own SetOption / SetPositionSize / SetTradeDelays / ApplyStop win over the Settings dialog):', ...Object.entries({ ...r.options, commissionTable: undefined, stops: r.options.stops.length }).filter(([, v]) => v !== undefined).map(([k, v]) => `  ${k} = ${typeof v === 'object' ? JSON.stringify(v) : v}`)]), r.errors) });
           }
     };
 

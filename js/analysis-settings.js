@@ -1,19 +1,22 @@
 // Analysis Settings (AmiBroker: Analysis > Settings): General, Trades, Stops, Commissions, Portfolio, Report, Walk-Forward, Monte Carlo.
 // Pure data (no DOM). The dialog is in analysis-settings-ui.js. A formula's own SetOption() / ApplyStop() / SetTradeDelays() wins over these.
 const KEY = 'aa_settings_v1';
-const tier = () => ({ basis: 'value', min: 0, max: 0, type: 'pct', amount: 0, minComm: 0, maxComm: 0 });
+// A commission table row as in AmiBroker: per share + per trade + % of trade value are added together, then the minimum / maximum apply.
+const rowC = () => ({ perShare: 0, perTrade: 0, pct: 0, minAmt: 0, minPct: 0, maxAmt: 0, maxPct: 0 });
+const tier = () => ({ basis: 'value', min: 0, max: 0, ...rowC() });
 
 export const DEFAULT_SETTINGS = {
-  general: { initialEquity: 100000, positions: 'both', futuresMode: false, minShares: 1, minPosValue: 0, accountMargin: 100, interestRate: 0,
+  general: { initialEquity: 100000, positions: 'both', futuresMode: false, minShares: 1, minPosValue: 0, maxPosValue: 0, accountMargin: 100, interestRate: 0, marginRate: 0, interestSymbol: '',
     allowPositionShrinking: false, activateStopsImmediately: false, roundLotSize: 1, tickSize: 0, reverseSignalForcesExit: true, allowSameBarExit: true, reenterSameBar: false,
     priceBounds: true, padAlign: false, padRef: '', maxSymbols: 0 },
+  scenario: 0,   // 0 = Custom; 1..4 = AmiBroker's Trades / Stops scenarios (they set the trade prices, delays and where the stops exit)
   trades: { buyPrice: 'close', sellPrice: 'close', shortPrice: 'close', coverPrice: 'close', buyDelay: 0, sellDelay: 0, shortDelay: 0, coverDelay: 0 },
-  stops: { maxLoss: { on: false, amount: 10, mode: 1, exitAt: 0 }, profit: { on: false, amount: 20, mode: 1, exitAt: 0 }, trail: { on: false, amount: 10, mode: 1, exitAt: 0 }, nbar: { on: false, amount: 10 }, reentryDelay: 0 },
-  commission: { mode: 0, amount: 0, table: { default: { type: 'pct', amount: 0, minComm: 0, maxComm: 0 }, tiers: [tier(), tier(), tier(), tier(), tier()] } },
+  stops: { maxLoss: { on: false, amount: 10, mode: 1, exitAt: 0, reentry: 0 }, profit: { on: false, amount: 20, mode: 1, exitAt: 0, reentry: 0 }, trail: { on: false, amount: 10, mode: 1, exitAt: 0, reentry: 0 }, nbar: { on: false, amount: 10, reentry: 0 }, reentryDelay: 0 },
+  commission: { mode: 0, amount: 0, table: { default: rowC(), tiers: [tier(), tier(), tier(), tier(), tier()] } },
   portfolio: { maxOpenPositions: 10, positionSizeType: 'pct', positionSize: 100, maxOpenLong: 0, maxOpenShort: 0, separateLongShortRank: false, worstRankHeld: 0,
     limitVolPct: 0, noVolLimitIfZero: true, usePrevBarEquity: true, stopEntriesOnFailure: true, equityNetOfExitCost: true, holdMinBars: 0, holdMinDays: 0, earlyExitBars: 0, earlyExitDays: 0, earlyExitFee: 0 },
-  report: { resultList: 'trades', riskFree: 5, distSpacing: 1, includeTradeList: true },
-  walkForward: { isLength: 3, isUnit: 'years', oosLength: 1, oosUnit: 'years', anchored: false, start: '', last: '', target: 'carMdd' },
+  report: { resultList: 'trades', riskFree: 5, distSpacing: 1, includeTradeList: true, includeFormula: true },
+  walkForward: { mode: 'easy', isLength: 3, isUnit: 'years', oosLength: 1, oosUnit: 'years', stepLength: 1, stepUnit: 'years', anchored: false, start: '', last: '', target: 'carMdd' },
   optimize: { target: 'carMdd', engine: 'exhaustive', maxEval: 1000, runs: 3, keep: 100000, serverKeep: 5000 },
   monteCarlo: { enable: true, runs: 1000, mode: 'trades', posMethod: 'keep', posFixed: 100, posValue: 1000, posPct: 5, curves: true, scale: 'linear', strawLines: 0, logFinal: false, logDD: false, negDD: true },
 };
@@ -27,6 +30,10 @@ function merge(base, over) {
 export function loadSettings(storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
   let s = null; try { s = storage && JSON.parse(storage.getItem(KEY) || 'null'); } catch (e) {}
   // Round lot size used to mean 0 = whole shares. It now follows AmiBroker (1 = whole shares, 0 = fractional), so an old saved 0 becomes 1.
+  if (s && s.commission && s.commission.table) {   // a table saved by an older version (one commission type per row) -> the AmiBroker row
+    const old = (x) => { if (!x || x.type === undefined) return x; const r = rowC(); if (x.type === 'share') r.perShare = x.amount || 0; else if (x.type === 'pct') r.pct = x.amount || 0; else r.perTrade = x.amount || 0; r.minAmt = x.minComm || 0; r.maxAmt = x.maxComm || 0; return { ...x, ...r, type: undefined }; };
+    const t = s.commission.table; t.default = old(t.default); t.tiers = (t.tiers || []).map(old);
+  }
   if (s && s.general && !s.lotV2) { if (s.general.roundLotSize === 0) s.general.roundLotSize = 1; s.lotV2 = true; }
   const out = merge(clone(DEFAULT_SETTINGS), s || {}); out.lotV2 = true; return out;
 }
@@ -38,11 +45,11 @@ const SIZE_TYPE = { value: 1, pct: 2, shares: 4 };
 export function settingsToOptions(S = DEFAULT_SETTINGS) {
   const g = S.general, t = S.trades, st = S.stops, p = S.portfolio, c = S.commission, b = (x) => (x ? 1 : 0);
   const stops = [];   // each price stop has its own 'Exit at' (0/1/2) like AmiBroker's Stops tab; the N-bar stop has none and always exits on the next bar at the trade price (2)
-  const add = (type, o, extra = {}) => { if (o && o.on && o.amount > 0) stops.push({ type, mode: o.mode === undefined ? 1 : o.mode, amount: Number(o.amount), exitAtStop: o.exitAt === undefined ? 0 : Number(o.exitAt), reentry: st.reentryDelay || 0, ...extra }); };
+  const add = (type, o, extra = {}) => { if (o && o.on && o.amount > 0) stops.push({ type, mode: o.mode === undefined ? 1 : o.mode, amount: Number(o.amount), exitAtStop: o.exitAt === undefined ? 0 : Number(o.exitAt), reentry: o.reentry !== undefined ? o.reentry : (st.reentryDelay || 0), ...extra }); };
   add(0, st.maxLoss); add(1, st.profit); add(2, st.trail);
-  if (st.nbar && st.nbar.on && st.nbar.amount > 0) stops.push({ type: 3, mode: 1, amount: Number(st.nbar.amount), exitAtStop: 2, priority: !!st.nbar.priority, reentry: st.reentryDelay || 0 });
+  if (st.nbar && st.nbar.on && st.nbar.amount > 0) stops.push({ type: 3, mode: 1, amount: Number(st.nbar.amount), exitAtStop: 2, priority: !!st.nbar.priority, reentry: st.nbar.reentry !== undefined ? st.nbar.reentry : (st.reentryDelay || 0) });
   const o = {
-    initialEquity: g.initialEquity, positions: g.positions, futuresMode: b(g.futuresMode), minShares: g.minShares, minPosValue: g.minPosValue, accountMargin: g.accountMargin || 100,
+    initialEquity: g.initialEquity, positions: g.positions, futuresMode: b(g.futuresMode), minShares: g.minShares, minPosValue: g.minPosValue, maxPosValue: g.maxPosValue, accountMargin: g.accountMargin || 100,
     interestRate: g.interestRate, allowPositionShrinking: b(g.allowPositionShrinking), activateStopsImmediately: b(g.activateStopsImmediately), roundLotSize: g.roundLotSize, tickSize: g.tickSize,
     reverseEntrySignalForce: b(g.reverseSignalForcesExit), allowSameBarExit: b(g.allowSameBarExit), reenterSameBar: b(g.reenterSameBar), stopEntriesOnFailure: b(p.stopEntriesOnFailure), equityNetOfExitCost: b(p.equityNetOfExitCost), priceBounds: b(g.priceBounds),
     tradePrices: { buy: t.buyPrice, sell: t.sellPrice, short: t.shortPrice, cover: t.coverPrice }, tradeDelays: [t.buyDelay, t.sellDelay, t.shortDelay, t.coverDelay].map(Number),
