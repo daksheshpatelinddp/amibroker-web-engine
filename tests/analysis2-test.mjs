@@ -107,6 +107,25 @@ const sig = (n, buy = [], sell = [], extra = {}) => ({ buy: Float64Array.from({ 
   const mr = monthlyReturns(curve, 1000); ok(mr.length === 2 && mr[0].months[0] !== null && mr[0].year === 2020, 'monthly returns table');
   const h = histogram([1, 1.5, 2.2, -3, -3.2], 1); ok(h.bins.reduce((x, y) => x + y.count, 0) === 5, 'histogram');
 }
+// ---- AmiBroker settings: commission table row, max position value, scenarios' options, targets, walk-forward step, old saved settings
+{
+  const row = (o) => ({ perShare: 0, perTrade: 0, pct: 0, minAmt: 0, minPct: 0, maxAmt: 0, maxPct: 0, ...o });
+  const opt = { commissionMode: 0, commissionTable: { default: row({ perShare: 0.5, perTrade: 10, pct: 1 }), tiers: [] } };
+  ok(near(commissionFor(opt, 10000, 100), 0.5 * 100 + 10 + 100), 'table row adds per share + per trade + % of value');
+  const o2 = { commissionMode: 0, commissionTable: { default: row({ pct: 0.01, minAmt: 20, maxPct: 5 }), tiers: [] } };
+  ok(near(commissionFor(o2, 10000, 100), 20), 'min amount applies') && ok(near(commissionFor(o2, 100, 1), 5), 'max % of value caps the minimum amount');
+  const o3 = { commissionMode: 0, commissionTable: { default: row({ pct: 1 }), tiers: [{ basis: 'value', min: 0, max: 5000, ...row({ perTrade: 7 }) }] } };
+  ok(near(commissionFor(o3, 1000, 10), 7) && near(commissionFor(o3, 10000, 10), 100), 'first matching tier, else the default row');
+  const legacy = { commissionMode: 0, commissionTable: { default: { type: 'pct', amount: 0.5, minComm: 0, maxComm: 0 }, tiers: [] } };
+  ok(near(commissionFor(legacy, 10000, 10), 50), 'a table saved by the old version still works');
+  const so = settingsToOptions(defaultSettings()); ok(so.maxPosValue === 0 && so.roundLotSize === 1, 'defaults: max pos. value 0 (none), round lot 1');
+  const m = (await import('../js/analysis-core.js')).METRICS; ok(Object.keys(m).length === 38 && m.losers[0] === '# of losers' && m.grossProfit[0] === 'W. Tot. Profit' && m.carMdd[0] === 'CAR/MDD', 'AmiBroker optimization targets');
+  const w = { start: '2000-01-01', last: '2026-07-11', isLength: 4, isUnit: 'years', oosLength: 1, oosUnit: 'years' };
+  const e = walkSegments(w), a = walkSegments({ ...w, stepLength: 2, stepUnit: 'years' });
+  ok(e.length === 23 && e[1].isFrom === '2001-01-01' && e[1].oosFrom === '2005-01-01', 'easy mode: IS/OOS move one year at a time') && ok(a[1].isFrom === '2002-01-01' && a[1].oosFrom === '2006-01-01', 'advanced mode: its own step');
+  const st = { getItem: () => JSON.stringify({ general: { roundLotSize: 0 }, commission: { mode: 0, table: { default: { type: 'share', amount: 0.2, minComm: 1, maxComm: 0 }, tiers: [] } } }) };
+  const ls = loadSettings(st); ok(ls.general.roundLotSize === 1 && ls.commission.table.default.perShare === 0.2 && ls.commission.table.default.minAmt === 1, 'old saved settings migrate (round lot 0 -> 1, commission row)');
+}
 // ---- Monte Carlo
 {
   const trades = Array.from({ length: 50 }, (_, i) => ({ profit: i % 3 ? 100 : -80, pctProfit: i % 3 ? 5 : -4, shares: 10 }));
