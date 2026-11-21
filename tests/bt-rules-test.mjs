@@ -77,4 +77,8 @@ for (const v of [0, false, undefined, 1]) {
   const rr = portfolio([u], { ...base, initialEquity: 100000, positionSize: { size: 10, type: 2 }, activateStopsImmediately: v });
   ok(rr.trades.length === 1 && !rr.trades[0].open && rr.trades[0].exitDate === b.t[3], 'signal exit closes with activateStopsImmediately=' + v + ': ' + JSON.stringify(rr.trades.map((x) => [x.exitDate, x.open])));
 }
+// 5. AmiBroker "Max. pos. value": a position is never bigger than this value (0 = no maximum)
+{ const V = [mkU('M', 10, 50)], pm = { ...base, initialEquity: 100000, positionSize: { size: 100, type: 2 } };
+  const full = portfolio(V, pm).trades[0], cap = portfolio(V, { ...pm, maxPosValue: 5000 }).trades[0];
+  ok(full.shares === 10000 && cap.shares === 500, 'max position value caps the size: ' + full.shares + ' -> ' + cap.shares); }
 console.log(`${pass} passed, ${fail} failed`);
